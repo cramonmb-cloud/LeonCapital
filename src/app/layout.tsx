@@ -3,6 +3,7 @@ import './globals.css';
 import { Toaster } from "@/components/ui/toaster";
 import { AuthProvider } from '@/hooks/use-auth';
 import { getAppConfig } from '@/lib/firestore-data';
+import { SpeedInsights } from '@vercel/speed-insights/next';
 
 export const viewport: Viewport = {
   width: 'device-width',
@@ -59,6 +60,7 @@ export default function RootLayout({
             {children}
         </AuthProvider>
         <Toaster />
+        <SpeedInsights />
       </body>
     </html>
   );
