@@ -62,6 +62,7 @@ const initialData: RealtimeData = {
 export interface UseRealtimeDataOptions {
     enabledCollections?: Array<keyof RealtimeData>;
     queries?: Partial<Record<keyof RealtimeData, Query<DocumentData, DocumentData>>>;
+    deps?: any[];
 }
 
 export function useRealtimeData(
@@ -78,6 +79,7 @@ export function useRealtimeData(
   // We serialize the enabledCollections and query keys to use in the useEffect dependency array
   const enabledCollectionsSerialized = options?.enabledCollections?.join(',') || '';
   const queryKeysSerialized = options?.queries ? Object.keys(options.queries).join(',') : '';
+  const depsSerialized = JSON.stringify(options?.deps || []);
 
   useEffect(() => {
     const baseCollections = {
@@ -139,7 +141,7 @@ export function useRealtimeData(
     return () => {
       unsubscribers.forEach(unsubscribe => unsubscribe());
     };
-  }, [enabledCollectionsSerialized, queryKeysSerialized]);
+  }, [enabledCollectionsSerialized, queryKeysSerialized, depsSerialized]);
 
   return { data, loading, error };
 }
