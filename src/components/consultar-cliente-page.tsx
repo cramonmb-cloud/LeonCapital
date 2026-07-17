@@ -621,41 +621,55 @@ export function ConsultarClientePage({ clients: allClients, loans: allLoans, loa
                         <ScrollArea className="flex-1 min-h-0">
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-0 md:divide-x divide-zinc-100">
                                 <div className="p-4 md:p-5 space-y-6 bg-zinc-50/30">
-                                    <div className="flex items-center gap-2">
-                                        <Wallet className="h-4 w-4 text-blue-500" />
-                                        <h3 className="text-base font-black uppercase tracking-tight text-zinc-800">Estado de Cuenta</h3>
-                                    </div>
-
-                                    <div className="grid grid-cols-3 gap-2 md:gap-3">
-                                        <div className="bg-white border rounded-xl p-2 md:p-3 text-center shadow-sm">
-                                            <p className="text-[8px] font-black text-zinc-400 uppercase tracking-widest mb-1">Semana</p>
-                                            <p className="text-lg md:text-xl font-black text-zinc-900 leading-none">
-                                                {activeLoanDetails?.currentLoanWeek} <span className="text-zinc-300 text-sm">/ {activeLoanDetails?.termInWeeks}</span>
+                                    <div className="space-y-3">
+                                        <div className="flex items-center gap-2">
+                                            <Monitor className="h-4 w-4 text-zinc-500" />
+                                            <span className="text-[9px] font-black uppercase text-zinc-500 tracking-widest">Garantías Registradas</span>
+                                        </div>
+                                        <div className="border border-zinc-200 rounded-xl p-3 bg-white min-h-[60px] flex items-center justify-start w-full">
+                                            <p className="text-[11px] font-black uppercase text-zinc-600 leading-snug tracking-wide text-left whitespace-pre-line italic w-full">
+                                                {selectedClient.guarantee || 'SIN GARANTÍAS'}
                                             </p>
                                         </div>
-                                        <div className="bg-blue-50 border border-blue-100 rounded-xl p-2 md:p-3 text-center shadow-sm">
-                                            <p className="text-[8px] font-black text-blue-500 uppercase tracking-widest mb-1">Abono</p>
-                                            <p className="text-lg md:text-xl font-black text-blue-600 leading-none">{activeLoanDetails ? formatCurrency(activeLoanDetails.weeklyPayment) : '$0.00'}</p>
-                                        </div>
-                                        <div className="bg-red-50 border border-red-100 rounded-xl p-2 md:p-3 text-center shadow-sm">
-                                            <p className="text-[8px] font-black text-red-500 uppercase tracking-widest mb-1">Fallos</p>
-                                            <p className="text-lg md:text-xl font-black text-red-600 leading-none">{activeLoanDetails?.missedWeeks || 0}</p>
-                                        </div>
                                     </div>
 
-                                    <div className="bg-zinc-100/80 rounded-2xl p-4 md:p-6 space-y-4 border border-zinc-200/50">
-                                        <div className="flex justify-between items-center px-2">
-                                            <span className="text-[9px] font-black text-zinc-500 uppercase tracking-wider">Saldo de Fallos</span>
-                                            <span className="text-base font-black text-zinc-800">{activeLoanDetails ? formatCurrency(activeLoanDetails.baseArrears) : '$0.00'}</span>
+                                    <div className="space-y-4">
+                                        <div className="flex items-center gap-2">
+                                            <Wallet className="h-4 w-4 text-blue-500" />
+                                            <h3 className="text-base font-black uppercase tracking-tight text-zinc-800">Estado de Cuenta</h3>
                                         </div>
-                                        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-end pt-4 border-t border-zinc-200 px-2 gap-2">
-                                            <div className="space-y-0.5">
-                                                <span className="text-[10px] font-black text-red-700 uppercase tracking-widest block">Total a Liquidar</span>
-                                                <span className="text-[8px] font-bold text-red-600 uppercase opacity-70">Incluye cuotas vigentes + penalización</span>
+
+                                        <div className="grid grid-cols-3 gap-2 md:gap-3">
+                                            <div className="bg-white border rounded-xl p-2 md:p-3 text-center shadow-sm">
+                                                <p className="text-[8px] font-black text-zinc-400 uppercase tracking-widest mb-1">Semana</p>
+                                                <p className="text-lg md:text-xl font-black text-zinc-900 leading-none">
+                                                    {activeLoanDetails?.currentLoanWeek} <span className="text-zinc-300 text-sm">/ {activeLoanDetails?.termInWeeks}</span>
+                                                </p>
                                             </div>
-                                            <span className="text-3xl md:text-4xl font-black text-red-700 tracking-tighter leading-none">
-                                                {activeLoanDetails ? formatCurrency(activeLoanDetails.totalBalance) : '$0.00'}
-                                            </span>
+                                            <div className="bg-blue-50 border border-blue-100 rounded-xl p-2 md:p-3 text-center shadow-sm">
+                                                <p className="text-[8px] font-black text-blue-500 uppercase tracking-widest mb-1">Abono</p>
+                                                <p className="text-lg md:text-xl font-black text-blue-600 leading-none">{activeLoanDetails ? formatCurrency(activeLoanDetails.weeklyPayment) : '$0.00'}</p>
+                                            </div>
+                                            <div className="bg-red-50 border border-red-100 rounded-xl p-2 md:p-3 text-center shadow-sm">
+                                                <p className="text-[8px] font-black text-red-500 uppercase tracking-widest mb-1">Fallos</p>
+                                                <p className="text-lg md:text-xl font-black text-red-600 leading-none">{activeLoanDetails?.missedWeeks || 0}</p>
+                                            </div>
+                                        </div>
+
+                                        <div className="bg-zinc-100/80 rounded-xl p-3 space-y-2 border border-zinc-200/50">
+                                            <div className="flex justify-between items-center px-1">
+                                                <span className="text-[9px] font-black text-zinc-500 uppercase tracking-wider">Saldo de Fallos</span>
+                                                <span className="text-sm font-black text-zinc-800">{activeLoanDetails ? formatCurrency(activeLoanDetails.baseArrears) : '$0.00'}</span>
+                                            </div>
+                                            <div className="flex justify-between items-center pt-2 border-t border-zinc-200/60 px-1 gap-2">
+                                                <div className="space-y-0">
+                                                    <span className="text-[9px] font-black text-red-700 uppercase tracking-widest block">Total a Liquidar</span>
+                                                    <span className="text-[7px] font-bold text-red-600 uppercase opacity-70 block">Vigentes + Penalización</span>
+                                                </div>
+                                                <span className="text-xl md:text-2xl font-black text-red-700 tracking-tight leading-none">
+                                                    {activeLoanDetails ? formatCurrency(activeLoanDetails.totalBalance) : '$0.00'}
+                                                </span>
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
@@ -663,29 +677,17 @@ export function ConsultarClientePage({ clients: allClients, loans: allLoans, loa
                                 <div className="p-4 md:p-5 space-y-6 md:space-y-8">
                                     <div className="space-y-4">
                                         <div className="flex items-center gap-2">
-                                            <Shield className="h-4 w-4 text-blue-500" />
+                                            <Shield className="h-4 w-4 text-zinc-500" />
                                             <h3 className="text-base font-black uppercase tracking-tight text-zinc-800">Aval y Garantía</h3>
                                         </div>
-                                        <div className="bg-blue-600 rounded-xl p-4 text-white shadow-lg shadow-blue-900/10 space-y-2 relative overflow-hidden group">
+                                        <div className="border border-zinc-200 rounded-xl p-4 space-y-2 relative overflow-hidden group bg-white shadow-sm">
                                             <div className="absolute top-0 right-0 p-2 opacity-5 group-hover:rotate-12 transition-transform">
-                                                <UserCheck className="h-16 w-16" />
+                                                <UserCheck className="h-16 w-16 text-zinc-800" />
                                             </div>
-                                            <p className="text-[8px] font-bold uppercase text-blue-200 tracking-widest">Responsable Solidario</p>
-                                            <h4 className="text-lg font-black uppercase leading-tight">{selectedClient.endorsement.split('(')[0].trim()}</h4>
-                                            <p className="text-[10px] font-medium leading-tight opacity-90 line-clamp-3">
+                                            <p className="text-[8px] font-black uppercase text-zinc-400 tracking-widest">Responsable Solidario</p>
+                                            <h4 className="text-base font-black uppercase leading-tight text-zinc-800">{selectedClient.endorsement.split('(')[0].trim()}</h4>
+                                            <p className="text-[10px] font-medium leading-tight text-zinc-500 line-clamp-3">
                                                 {selectedClient.endorsement.match(/\((.*)\)/)?.[1] || 'SIN DIRECCIÓN REGISTRADA'}
-                                            </p>
-                                        </div>
-                                    </div>
-
-                                    <div className="space-y-3 pb-4">
-                                        <div className="flex items-center gap-2">
-                                            <Monitor className="h-4 w-4 text-zinc-500" />
-                                            <span className="text-[9px] font-black uppercase text-zinc-500 tracking-widest">Garantías Registradas</span>
-                                        </div>
-                                        <div className="border-2 border-dashed border-zinc-200 rounded-xl p-4 bg-zinc-50/50 min-h-[80px] flex items-center justify-center">
-                                            <p className="text-[11px] font-black uppercase text-zinc-600 leading-snug tracking-wide text-center italic">
-                                                {selectedClient.guarantee || 'SIN GARANTÍAS'}
                                             </p>
                                         </div>
                                     </div>

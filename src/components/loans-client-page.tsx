@@ -688,7 +688,7 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
         const topMargin = 60;
         const margin = 30;
 
-        const maxWeeksToShow = 16;
+        const maxWeeksToShow = 15;
 
         const { promotoraName, localidadName, plazaName } = getHierarchy(selectedPromotora);
         
@@ -762,7 +762,7 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
             ],
             [
                 { content: 'CLIENTE', styles: { valign: 'middle', halign: 'center', fontSize: 8 } },
-                { content: 'PRESTAMO', styles: { valign: 'middle', halign: 'center', fontSize: 8 } },
+                { content: 'P\nR\nE\nS\nT\n.', styles: { valign: 'middle', halign: 'center', fontSize: 7, fontStyle: 'bold' } },
                 { content: 'A\nB\nO\nN\nA', styles: { valign: 'middle', halign: 'center', fontSize: 7, fontStyle: 'bold' } }, 
                 ...weekDatesHeader.map(dateStr => ({ 
                     content: dateStr, 
@@ -776,7 +776,8 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
             const client = getClient(loan.clientId);
             let clientText = '';
             if (client) {
-                clientText = `${client.name.toUpperCase()}\n${client.street || ''}, ${client.neighborhood || ''}\n${client.phone || ''}`;
+                const guaranteeStr = client.guarantee ? `\nGARANTÍA: ${client.guarantee.toUpperCase()}` : '';
+                clientText = `${client.name.toUpperCase()}\n${client.street || ''}, ${client.neighborhood || ''}\n${client.phone || ''}${guaranteeStr}`;
             }
 
             let avalText = '';
@@ -850,9 +851,34 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
                 }
                 return total;
             }, 0);
-            footerRow1.push({ content: weeklyTotal > 0 ? formatCurrencySimple(weeklyTotal) : '', styles: { fontStyle: 'bold' as const, halign: 'right' } });
-            footerRow2.push({ content: weeklyFailuresPDF[i] > 0 ? formatCurrencySimplePDF(weeklyFailuresPDF[i]) : '', styles: { fontStyle: 'bold' as const, halign: 'right', fillColor: '#e0e0e0' } });
-            footerRow3.push({ content: weeklyCollectedPDF[i] > 0 ? formatCurrencySimplePDF(weeklyCollectedPDF[i]) : '', styles: { fontStyle: 'bold' as const, halign: 'right' } });
+            footerRow1.push({ 
+                content: weeklyTotal > 0 ? formatCurrencySimple(weeklyTotal) : '', 
+                styles: { 
+                    fontStyle: 'bold' as const, 
+                    halign: 'center', 
+                    fontSize: 5.8, 
+                    cellPadding: { top: 4, right: 1, bottom: 4, left: 1 } 
+                } 
+            });
+            footerRow2.push({ 
+                content: weeklyFailuresPDF[i] > 0 ? formatCurrencySimplePDF(weeklyFailuresPDF[i]) : '', 
+                styles: { 
+                    fontStyle: 'bold' as const, 
+                    halign: 'center', 
+                    fillColor: '#e0e0e0', 
+                    fontSize: 5.8, 
+                    cellPadding: { top: 4, right: 1, bottom: 4, left: 1 } 
+                } 
+            });
+            footerRow3.push({ 
+                content: weeklyCollectedPDF[i] > 0 ? formatCurrencySimplePDF(weeklyCollectedPDF[i]) : '', 
+                styles: { 
+                    fontStyle: 'bold' as const, 
+                    halign: 'center', 
+                    fontSize: 5.8, 
+                    cellPadding: { top: 4, right: 1, bottom: 4, left: 1 } 
+                } 
+            });
         });
         footerRow1.push({ content: '', styles: { fontStyle: 'bold' as const, halign: 'right' } });
         footerRow2.push({ content: '', colSpan: 1 });
@@ -860,10 +886,10 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
         
         const footerRows = [footerRow1, footerRow2, footerRow3];
         
-        const clientColWidth = 100;
-        const prestamoColWidth = 40;
-        const abonaColWidth = 35;
-        const avalColWidth = 100;
+        const clientColWidth = 142;
+        const prestamoColWidth = 32;
+        const abonaColWidth = 28;
+        const avalColWidth = 143;
         const availableWidth = pageWidth - margin * 2 - clientColWidth - prestamoColWidth - abonaColWidth - avalColWidth;
         const weekColumnWidth = availableWidth / maxWeeksToShow;
 
@@ -900,7 +926,7 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
                 0: { cellWidth: clientColWidth, fontSize: 6.5 },
                 1: { cellWidth: prestamoColWidth, halign: 'right', fontSize: 6.5 },
                 2: { cellWidth: abonaColWidth, fontSize: 8, halign: 'center' },
-                ...Object.fromEntries(Array.from({ length: maxWeeksToShow }).map((_, i) => [i + 3, { cellWidth: weekColumnWidth, halign: 'center' }])),
+                ...Object.fromEntries(Array.from({ length: maxWeeksToShow }).map((_, i) => [i + 3, { cellWidth: weekColumnWidth, halign: 'center', fontSize: 5.5, noWrap: true, cellPadding: { top: 4, right: 1, bottom: 4, left: 1 } }])),
                 [maxWeeksToShow + 3]: { cellWidth: avalColWidth, fontSize: 6.5 },
             },
             didParseCell: (data) => {
