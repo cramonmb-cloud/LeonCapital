@@ -39,6 +39,16 @@ next-env.d.ts
 
 .genkit/*
 .env*
+!.env.example
+*.env
+.env.local
+.env.*.local
+
+# respaldos y llaves
+RESPALDOS/
+backups/
+*service-account*.json
+credentials*.json
 
 # firebase
 firebase-debug.log

@@ -4,15 +4,8 @@ import { getFirestore } from "firebase/firestore";
 import { getAuth } from "firebase/auth";
 import { getAnalytics, isSupported } from "firebase/analytics";
 
-// Your web app's Firebase configuration
-const firebaseConfig = {
-  "projectId": "studio-9991475182-f90a3",
-  "appId": "1:1091200686380:web:9b7682732c03c14f5cb489",
-  "apiKey": "AIzaSyARK7JeEUkniloydMot525Efd6g0UJsrHo",
-  "authDomain": "studio-9991475182-f90a3.firebaseapp.com",
-  "measurementId": "G-5PYCLBLM4S",
-  "messagingSenderId": "1091200686380"
-};
+import { firebaseConfig } from "@/firebase/config";
+
 
 // Initialize Firebase
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
