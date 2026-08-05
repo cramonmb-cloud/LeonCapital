@@ -14,7 +14,8 @@ import { cn, getSaturdayOfWeek, getMexicoNow } from '@/lib/utils';
 import type { Client, LoanPlan, Loan, Plaza, Localidad, Promotora, PromotoraSettlement } from '@/lib/types';
 import { saveSettlementAction, deleteSettlementAction, deleteGroupSettlementsAction } from '@/app/dashboard/debes/actions';
 import { useAuth } from '@/hooks/use-auth';
-import { Coins, Download, Save, Loader2, Building, MapPin, Calendar, AlertCircle, Lock, Unlock, RotateCcw } from 'lucide-react';
+import { Coins, Download, Save, Loader2, Building, MapPin, Calendar, AlertCircle, Lock, Unlock, RotateCcw, Printer } from 'lucide-react';
+import { BorradorDebeModal } from '@/components/borrador-debe-modal';
 import jsPDF from 'jspdf';
 import 'jspdf-autotable';
 import type { UserOptions } from 'jspdf-autotable';
@@ -60,6 +61,7 @@ export function DebesClientPage({
   // Selected filters
   const [selectedPlaza, setSelectedPlaza] = useState<string>('');
   const [selectedLocalidad, setSelectedLocalidad] = useState<string>('');
+  const [isBorradorModalOpen, setIsBorradorModalOpen] = useState<boolean>(false);
 
   // Get Saturdays list where there was activity, sorted descending (newest first)
   const allAvailableWeeks = useMemo(() => {
@@ -801,16 +803,28 @@ export function DebesClientPage({
               </CardDescription>
             </div>
           </div>
-          {selectedPlaza && selectedLocalidad && selectedWeek && rows.length > 0 && (
-            <Button
-              type="button"
-              onClick={handleExportConsolidatedPDF}
-              className="rounded-xl h-9 px-4 text-xs font-bold bg-slate-800 hover:bg-slate-700 text-white flex items-center gap-2 transition-all shadow-sm w-full sm:w-auto"
-            >
-              <Download className="h-4 w-4" />
-              Exportar PDF Consolidado
-            </Button>
-          )}
+          <div className="flex flex-col sm:flex-row items-center gap-2 w-full sm:w-auto">
+            {selectedPlaza && (
+              <Button
+                type="button"
+                onClick={() => setIsBorradorModalOpen(true)}
+                className="rounded-xl h-9 px-4 text-xs font-bold bg-slate-900 hover:bg-slate-800 text-white flex items-center gap-2 transition-all shadow-sm w-full sm:w-auto"
+              >
+                <Printer className="h-4 w-4" />
+                Borrador Debe
+              </Button>
+            )}
+            {selectedPlaza && selectedLocalidad && selectedWeek && rows.length > 0 && (
+              <Button
+                type="button"
+                onClick={handleExportConsolidatedPDF}
+                className="rounded-xl h-9 px-4 text-xs font-bold bg-slate-700 hover:bg-slate-600 text-white flex items-center gap-2 transition-all shadow-sm w-full sm:w-auto"
+              >
+                <Download className="h-4 w-4" />
+                Exportar PDF Consolidado
+              </Button>
+            )}
+          </div>
         </CardHeader>
         <CardContent className="py-3 px-5">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
@@ -1144,6 +1158,19 @@ export function DebesClientPage({
           </CardContent>
         </Card>
       )}
+
+      <BorradorDebeModal
+        open={isBorradorModalOpen}
+        onOpenChange={setIsBorradorModalOpen}
+        selectedPlazaId={selectedPlaza}
+        selectedWeekStr={selectedWeek}
+        plazas={plazas}
+        localidades={localidades}
+        promotoras={promotoras}
+        loans={loans}
+        loanPlans={loanPlans}
+        allAvailableWeeks={allAvailableWeeks}
+      />
     </div>
   );
 }
