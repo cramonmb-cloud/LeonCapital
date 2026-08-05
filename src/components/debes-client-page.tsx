@@ -372,18 +372,8 @@ export function DebesClientPage({
             .reduce((sum, l) => sum + l.amount, 0);
         };
 
-        const getNewAbono = (weekDate: Date) => {
-          return pLoans
-            .filter(l => getSaturdayOfWeek(parseLocalDate(l.startDate)).getTime() === weekDate.getTime())
-            .reduce((sum, l) => {
-              const plan = loanPlans.find(p => p.id === l.loanPlanId);
-              if (!plan) return sum;
-              return sum + (l.amount / 1000) * plan.weeklyPaymentRate;
-            }, 0);
-        };
-
         const ventaVal = getVenta(week);
-        const abonoSemanalVal = getNewAbono(week);
+        const abonoSemanalVal = realDebeEntregar;
 
         let debeEntregar = 0;
         if (index === 0) {
@@ -392,11 +382,17 @@ export function DebesClientPage({
           } else if (saved?.debeEntregar !== undefined) {
             debeEntregar = saved.debeEntregar;
           } else {
-            debeEntregar = realDebeEntregar;
+            debeEntregar = abonoSemanalVal;
           }
         } else {
-          const prevRow = computedChronoRows[index - 1];
-          debeEntregar = prevRow.total - prevRow.comicion + prevRow.abonoSemanal + prevRow.adelEnt - prevRow.adelSal;
+          if (local.debeEntregar !== undefined) {
+            debeEntregar = local.debeEntregar;
+          } else if (saved?.debeEntregar !== undefined) {
+            debeEntregar = saved.debeEntregar;
+          } else {
+            const prevRow = computedChronoRows[index - 1];
+            debeEntregar = prevRow.deuda + abonoSemanalVal + prevRow.adelEnt - prevRow.adelSal;
+          }
         }
 
         const savedComicionPercent = saved?.comicionPercent !== undefined ? saved.comicionPercent : 8;
