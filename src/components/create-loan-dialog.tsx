@@ -295,32 +295,68 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
   };
 
   useEffect(() => {
-    if (initialSelection) {
-      setSelectedPlaza(initialSelection.plazaId);
-      setSelectedLocalidad(initialSelection.localidadId);
-      form.setValue('promotoraId', initialSelection.promotoraId);
-    }
-     if (open) {
-      if(initialSelection) {
+    if (open) {
+      if (initialSelection) {
         setSelectedPlaza(initialSelection.plazaId);
         setSelectedLocalidad(initialSelection.localidadId);
-        form.reset({
-          ...form.getValues(),
-          promotoraId: initialSelection.promotoraId,
-        });
       }
+      setStep(1);
+      setMatchingClients([]);
+      setMatchingGuarantors([]);
+      setShowAuthCodeModal(false);
+      setAuthCodeInput('');
+      setAuthCodeError(false);
+      setSelectedClient(null);
+      setActiveLoanDetails(null);
+      form.reset({
+        promotoraId: initialSelection?.promotoraId || '',
+        loanPlanId: '',
+        amount: 0,
+        clientName: '',
+        phone: '',
+        street: '',
+        neighborhood: '',
+        postalCode: '',
+        city: '',
+        guarantee: '1.- \n2.- \n3.- \n4.- ',
+        endorsement: '',
+        endorsementStreet: '',
+        endorsementNeighborhood: '',
+        endorsementPostalCode: '',
+        endorsementCity: '',
+        endorsementPhone: '',
+        endorsementGuarantee: '1.- \n2.- \n3.- \n4.- ',
+      });
     } else {
-        form.reset();
-        setStep(1);
-        setMatchingClients([]);
-        setMatchingGuarantors([]);
-        setShowAuthCodeModal(false);
-        setAuthCodeInput('');
-        setAuthCodeError(false);
-        setSelectedClient(null);
-        setActiveLoanDetails(null);
-        setSelectedPlaza('');
-        setSelectedLocalidad('');
+      form.reset({
+        promotoraId: '',
+        loanPlanId: '',
+        amount: 0,
+        clientName: '',
+        phone: '',
+        street: '',
+        neighborhood: '',
+        postalCode: '',
+        city: '',
+        guarantee: '1.- \n2.- \n3.- \n4.- ',
+        endorsement: '',
+        endorsementStreet: '',
+        endorsementNeighborhood: '',
+        endorsementPostalCode: '',
+        endorsementCity: '',
+        endorsementPhone: '',
+        endorsementGuarantee: '1.- \n2.- \n3.- \n4.- ',
+      });
+      setStep(1);
+      setMatchingClients([]);
+      setMatchingGuarantors([]);
+      setShowAuthCodeModal(false);
+      setAuthCodeInput('');
+      setAuthCodeError(false);
+      setSelectedClient(null);
+      setActiveLoanDetails(null);
+      setSelectedPlaza('');
+      setSelectedLocalidad('');
     }
   }, [initialSelection, open, form]);
 

@@ -127,7 +127,7 @@ export async function createLoanAction(input: CreateLoanInput) {
             promotoraId: input.promotoraId,
             loanPlanId: input.loanPlanId,
             amount: input.amount,
-            startDate: saturday,
+            startDate: saturday.toISOString(),
             status: 'Active' as const,
             payments: [],
         };
