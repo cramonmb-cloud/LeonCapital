@@ -797,7 +797,7 @@ export function DebesClientPage({
               <Coins className="h-6 w-6" />
             </div>
             <div>
-              <CardTitle className="text-2xl font-black text-slate-800">DEBES DE PROMOTORAS</CardTitle>
+              <CardTitle className="text-2xl font-black text-slate-800">DEBES</CardTitle>
               <CardDescription className="text-xs font-semibold text-muted-foreground uppercase mt-0.5">
                 Rediseño Consolidado de Liquidaciones
               </CardDescription>
