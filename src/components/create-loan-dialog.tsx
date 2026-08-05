@@ -358,7 +358,7 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
       setSelectedPlaza('');
       setSelectedLocalidad('');
     }
-  }, [initialSelection, open, form]);
+  }, [open]);
 
 
   const getHierarchy = (promotoraId?: string) => {
@@ -929,7 +929,11 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
           Crear Préstamo
         </Button>
       </DialogTrigger>
-      <DialogContent className="sm:max-w-[850px] max-h-[95vh] overflow-y-auto p-5">
+      <DialogContent 
+        className="sm:max-w-[850px] max-h-[95vh] overflow-y-auto p-5"
+        onPointerDownOutside={(e) => e.preventDefault()}
+        onInteractOutside={(e) => e.preventDefault()}
+      >
         <Form {...form}>
           <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-3">
             <DialogHeader className="space-y-0.5 pb-2 border-b">
