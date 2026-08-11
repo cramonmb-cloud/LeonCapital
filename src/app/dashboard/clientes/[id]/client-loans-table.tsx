@@ -161,19 +161,25 @@ export function ClientLoansTable({ clientLoans, loanPlans, allLoans, users, plaz
       const termInWeeks = baseTerm + (hasPenalty ? 1 : 0);
       const isLiquidated = loanForDetails.status === 'Paid Off' || loanForDetails.status === 'Pagado desde CV';
       
-      const normalPayments = loanForDetails.payments.filter(p => p.weekNumber > 0);
-      const lastNormalWeek = normalPayments.length > 0 
-        ? Math.max(...normalPayments.map(p => p.weekNumber)) 
+      const validPayments = (loanForDetails.payments || []).filter(p => !p.isReverted && p.amount > 0 && p.weekNumber > 0);
+      const maxPaidWeek = validPayments.length > 0 
+        ? Math.max(...validPayments.map(p => p.weekNumber)) 
         : 0;
+      const maxDisplayWeek = Math.max(termInWeeks, maxPaidWeek);
 
       const rows = [];
 
-      for(let i = 1; i <= termInWeeks; i++) {
+      for(let i = 1; i <= maxDisplayWeek; i++) {
+          const payment = loanForDetails.payments?.find(p => p.weekNumber === i);
+          const isRegistered = !!payment && !payment.isReverted;
+          
+          // Si supera el plazo calculado (termInWeeks) y NO tiene pago registrado con monto > 0, no mostrar
+          if (i > termInWeeks && (!isRegistered || payment.amount <= 0)) {
+              continue;
+          }
+
           const dueDate = new Date(startDate);
           dueDate.setUTCDate(dueDate.getUTCDate() + (i * 7));
-          
-          const payment = loanForDetails.payments.find(p => p.weekNumber === i);
-          const isRegistered = !!payment && !payment.isReverted;
           
           let received: number | null = isRegistered ? payment.amount : null;
           let note = '';

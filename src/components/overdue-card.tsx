@@ -180,13 +180,24 @@ export function OverdueCard({
         const startDate = new Date(loan.startDate);
         const today = new Date();
         
+        const validPayments = (loan.payments || []).filter(p => !p.isReverted && p.amount > 0);
+        const maxPaidWeek = validPayments.length > 0
+            ? Math.max(...validPayments.map(p => p.weekNumber))
+            : 0;
+        const maxDisplayWeek = Math.max(termInWeeks, maxPaidWeek);
+
         const rows = [];
-        for(let i = 1; i <= termInWeeks; i++) {
-            const dueDate = new Date(startDate);
-            dueDate.setUTCDate(dueDate.getUTCDate() + (i * 7));
-            
+        for(let i = 1; i <= maxDisplayWeek; i++) {
             const payment = (loan.payments || []).find(p => p.weekNumber === i);
             const isRegistered = !!payment && !payment.isReverted;
+            
+            // Si supera el plazo calculado (termInWeeks) y NO tiene pago registrado con monto > 0, no mostrar
+            if (i > termInWeeks && (!isRegistered || payment.amount <= 0)) {
+                continue;
+            }
+
+            const dueDate = new Date(startDate);
+            dueDate.setUTCDate(dueDate.getUTCDate() + (i * 7));
             const isPast = today > dueDate;
             
             let statusType: 'PAID' | 'MISSED' | 'PENDING' = 'PENDING';
@@ -725,16 +736,16 @@ export function OverdueCard({
                                                     className={cn(
                                                         "border-r border-zinc-100 text-right py-1.5 font-black text-[11px] relative group", 
                                                         row.importeRecibido > 0 ? (row.importeRecibido >= row.importeAbono ? "bg-green-50/80 text-green-700" : "bg-amber-50/60 text-amber-700") : "bg-rose-50/60 text-rose-700",
-                                                        isCristobal && !row.isPenalty && "cursor-pointer hover:bg-green-100 transition-colors"
+                                                        isCristobal && "cursor-pointer hover:bg-green-100 transition-colors"
                                                     )}
-                                                    onClick={() => isCristobal && !row.isPenalty && handleAdjustClick(row.num, row.importeRecibido)}
+                                                    onClick={() => isCristobal && handleAdjustClick(row.num, row.importeRecibido)}
                                                 >
                                                     <div className="flex items-center justify-end gap-1.5">
                                                         {formatCurrency(row.importeRecibido)}
                                                         {row.isPenalty && (
                                                             <Badge className="bg-amber-600 text-white text-[7px] font-black h-3.5 px-1 uppercase shrink-0">EXTRA</Badge>
                                                         )}
-                                                        {isCristobal && !row.isPenalty && (
+                                                        {isCristobal && (
                                                             <PencilLine className="h-3 w-3 opacity-0 group-hover:opacity-100 text-blue-600 shrink-0 transition-opacity" />
                                                         )}
                                                     </div>
@@ -777,7 +788,8 @@ export function OverdueCard({
                 loanPlans={allLoanPlans}
                 weekNumber={metrics.currentProgressWeek}
                 weekDate={metrics.loanWeekDate}
-                initialAmount={metrics.totalDue > metrics.weeklyPayment ? metrics.weeklyPayment : metrics.totalDue}
+                initialAmount={metrics.totalDue}
+                expectedAmount={metrics.totalDue}
                 onPaymentRegistered={() => {
                     if (typeof window !== 'undefined') window.location.reload();
                 }}

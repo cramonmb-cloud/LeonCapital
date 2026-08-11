@@ -48,6 +48,7 @@ interface RegisterPaymentDialogProps {
   weekNumber: number;
   weekDate: Date;
   initialAmount: number;
+  expectedAmount?: number;
   onPaymentRegistered: () => void;
 }
 
@@ -60,6 +61,7 @@ export function RegisterPaymentDialog({
   weekNumber,
   weekDate,
   initialAmount,
+  expectedAmount,
   onPaymentRegistered,
 }: RegisterPaymentDialogProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -162,6 +164,8 @@ export function RegisterPaymentDialog({
     }
   };
 
+  const displayExpectedAmount = expectedAmount !== undefined ? expectedAmount : weeklyPaymentAmount;
+
   return (
     <Dialog open={isOpen} onOpenChange={(open) => {
         onOpenChange(open);
@@ -190,7 +194,7 @@ export function RegisterPaymentDialog({
               <div className="flex justify-between items-center">
                 <span className="text-muted-foreground font-semibold uppercase text-[9px] tracking-wider">Esperado</span>
                 <span className="font-extrabold text-slate-700">
-                  {new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(weeklyPaymentAmount || 0)}
+                  {new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(displayExpectedAmount || 0)}
                 </span>
               </div>
             </div>
@@ -219,10 +223,10 @@ export function RegisterPaymentDialog({
             />
 
             {/* Diferencia / Falla */}
-            {!isDeleteOp && weeklyPaymentAmount > amountPaid && (
+            {!isDeleteOp && displayExpectedAmount > amountPaid && (
               <div className="flex justify-between items-center text-xs font-semibold text-red-600 dark:text-red-400 bg-red-50/50 dark:bg-red-950/10 px-3.5 py-2.5 rounded-xl border border-red-100 dark:border-red-900/30">
                 <span className="uppercase text-[9px] tracking-wider font-bold">Falla</span>
-                <span className="font-extrabold text-sm">Fallo con {new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(weeklyPaymentAmount - amountPaid)}</span>
+                <span className="font-extrabold text-sm">Fallo con {new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(displayExpectedAmount - amountPaid)}</span>
               </div>
             )}
 

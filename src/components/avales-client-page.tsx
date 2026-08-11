@@ -1280,39 +1280,51 @@ export function AvalesClientPage({
                             </TableRow>
                           </TableHeader>
                           <TableBody>
-                            {Array.from({ length: totalTerm }).map((_, i) => {
-                              const weekNum = i + 1;
-                              const payment = (currentSelectedLoan.payments || []).find(p => p.weekNumber === weekNum);
-                              const isPenalty = weekNum > baseTerm;
-                              const isRecovered = payment?.isRecovered || false;
-                              
-                              const dueDate = new Date(currentSelectedLoan.startDate);
-                              dueDate.setDate(dueDate.getDate() + (weekNum * 7));
-                              const isPastDate = now > dueDate;
-                              
-                              let statusText = 'Pendiente';
-                              let statusType: 'PAID' | 'MISSED' | 'PENDING' = 'PENDING';
-                              
-                              if (payment) {
-                                  if (payment.amount >= weeklyPayment) {
-                                    statusText = isRecovered ? 'RECUPERADO' : new Date(payment.date).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit' });
-                                    statusType = 'PAID';
-                                  } else if (payment.amount > 0) {
-                                    statusText = isRecovered ? 'RECU. PARCIAL' : 'PARCIAL';
-                                    statusType = 'MISSED';
-                                  } else {
-                                    statusText = 'FALLO';
-                                    statusType = 'MISSED';
-                                  }
-                              } else if (isPastDate || weekNum < currentWeekSafe - 1) {
-                                statusText = 'FALLO';
-                                statusType = 'MISSED';
-                              } else {
-                                statusText = 'PENDIENTE';
-                                statusType = 'PENDING';
-                              }
+                            {(() => {
+                              const validPayments = (currentSelectedLoan.payments || []).filter(p => !p.isReverted && p.amount > 0);
+                              const maxPaidWeek = validPayments.length > 0 ? Math.max(...validPayments.map(p => p.weekNumber)) : 0;
+                              const maxDisplayWeek = Math.max(totalTerm, maxPaidWeek);
 
-                              const isCurrentWeek = weekNum === currentWeekSafe;
+                              return Array.from({ length: maxDisplayWeek }).map((_, i) => {
+                                const weekNum = i + 1;
+                                const payment = (currentSelectedLoan.payments || []).find(p => p.weekNumber === weekNum);
+                                const isRegistered = !!payment && !payment.isReverted;
+
+                                // Si supera el plazo calculado (totalTerm) y NO tiene pago registrado con monto > 0, no mostrar
+                                if (weekNum > totalTerm && (!isRegistered || payment.amount <= 0)) {
+                                  return null;
+                                }
+
+                                const isPenalty = weekNum > baseTerm;
+                                const isRecovered = payment?.isRecovered || false;
+                                
+                                const dueDate = new Date(currentSelectedLoan.startDate);
+                                dueDate.setDate(dueDate.getDate() + (weekNum * 7));
+                                const isPastDate = now > dueDate;
+                                
+                                let statusText = 'Pendiente';
+                                let statusType: 'PAID' | 'MISSED' | 'PENDING' = 'PENDING';
+                                
+                                if (isRegistered) {
+                                    if (payment.amount >= weeklyPayment) {
+                                      statusText = isRecovered ? 'RECUPERADO' : new Date(payment.date).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit' });
+                                      statusType = 'PAID';
+                                    } else if (payment.amount > 0) {
+                                      statusText = isRecovered ? 'RECU. PARCIAL' : 'PARCIAL';
+                                      statusType = 'MISSED';
+                                    } else {
+                                      statusText = 'FALLO';
+                                      statusType = 'MISSED';
+                                    }
+                                } else if (isPastDate || weekNum < currentWeekSafe - 1) {
+                                  statusText = 'FALLO';
+                                  statusType = 'MISSED';
+                                } else {
+                                  statusText = 'PENDIENTE';
+                                  statusType = 'PENDING';
+                                }
+
+                                const isCurrentWeek = weekNum === currentWeekSafe;
 
                               return (
                                 <TableRow 
@@ -1353,7 +1365,8 @@ export function AvalesClientPage({
                                   </TableCell>
                                 </TableRow>
                               );
-                            })}
+                              });
+                            })()}
                           </TableBody>
                         </Table>
                       </div>

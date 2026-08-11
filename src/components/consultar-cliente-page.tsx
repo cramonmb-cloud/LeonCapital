@@ -270,13 +270,24 @@ export function ConsultarClientePage({ clients: allClients, loans: allLoans, loa
     const startDate = new Date(loan.startDate);
     const today = new Date();
     
+    const validPayments = (loan.payments || []).filter(p => !p.isReverted && p.amount > 0);
+    const maxPaidWeek = validPayments.length > 0
+        ? Math.max(...validPayments.map(p => p.weekNumber))
+        : 0;
+    const maxDisplayWeek = Math.max(termInWeeks, maxPaidWeek);
+
     const rows = [];
-    for(let i = 1; i <= termInWeeks; i++) {
-        const dueDate = new Date(startDate);
-        dueDate.setUTCDate(dueDate.getUTCDate() + (i * 7));
-        
+    for(let i = 1; i <= maxDisplayWeek; i++) {
         const payment = (loan.payments || []).find(p => p.weekNumber === i);
         const isRegistered = !!payment && !payment.isReverted;
+        
+        // Si supera el plazo calculado (termInWeeks) y NO tiene pago registrado con monto > 0, no mostrar
+        if (i > termInWeeks && (!isRegistered || payment.amount <= 0)) {
+            continue;
+        }
+
+        const dueDate = new Date(startDate);
+        dueDate.setUTCDate(dueDate.getUTCDate() + (i * 7));
         const isPast = today > dueDate;
         
         let statusType: 'PAID' | 'MISSED' | 'PENDING' = 'PENDING';
