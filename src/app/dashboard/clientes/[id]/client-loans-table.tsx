@@ -23,19 +23,8 @@ import {
     DialogTitle,
 } from '@/components/ui/dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { cn } from '@/lib/utils';
+import { cn, getSaturdayOfWeek } from '@/lib/utils';
 import { ManualPaymentAdjustmentDialog } from '@/components/manual-payment-adjustment-dialog';
-
-
-// Helper to get the Saturday of the week for a given date
-const getSaturdayOfWeek = (d: Date) => {
-  const date = new Date(d);
-  date.setUTCHours(0, 0, 0, 0); // Normalize time
-  const day = date.getUTCDay(); // Sunday = 0, Saturday = 6
-  const diff = day === 0 ? -1 : 6 - day;
-  date.setUTCDate(date.getUTCDate() + diff);
-  return date;
-};
 
 
 interface ClientLoansTableProps {

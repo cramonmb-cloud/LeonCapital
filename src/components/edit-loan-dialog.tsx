@@ -47,7 +47,7 @@ import { useToast } from '@/hooks/use-toast';
 import { updateLoanAction, deleteLoanAction } from '@/app/dashboard/actions';
 import { Separator } from './ui/separator';
 import { useAuth } from '@/hooks/use-auth';
-import { cn } from '@/lib/utils';
+import { cn, getSaturdayOfWeek } from '@/lib/utils';
 
 const formSchema = z.object({
   loanPlanId: z.string().min(1, 'Debes seleccionar un plan.'),
@@ -99,16 +99,7 @@ export function EditLoanDialog({
 
   useEffect(() => {
     if (loan && isOpen) {
-      const getSaturdayOfWeek = (d: Date) => {
-        const date = new Date(d);
-        date.setUTCHours(0, 0, 0, 0);
-        const day = date.getUTCDay();
-        const diff = day === 0 ? -1 : 6 - day;
-        date.setUTCDate(date.getUTCDate() + diff);
-        return date;
-      };
-
-      const saturdayOfLoan = getSaturdayOfWeek(new Date(loan.startDate)).toISOString();
+      const saturdayOfLoan = getSaturdayOfWeek(loan.startDate).toISOString();
       const currentPromotora = promotoras.find(p => p.id === loan.promotoraId);
       const currentLocalidad = localidades.find(l => l.id === currentPromotora?.localidadId);
       const currentPlaza = plazas.find(p => p.id === currentLocalidad?.plazaId);

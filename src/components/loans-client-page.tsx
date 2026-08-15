@@ -69,7 +69,7 @@ import { Tooltip, TooltipProvider, TooltipContent, TooltipTrigger } from '@/comp
 import type { Client, Loan, LoanPlan, Payment, Plaza, Localidad, Promotora, AppUser } from '@/lib/types';
 import { RegisterPaymentDialog } from './register-payment-dialog';
 import { useRouter } from 'next/navigation';
-import { cn } from '@/lib/utils';
+import { cn, getSaturdayOfWeek, getMexicoNow, getCurrentLoanWeekNumber, parseLocalDate } from '@/lib/utils';
 import jsPDF from 'jspdf';
 import 'jspdf-autotable';
 import type { UserOptions } from 'jspdf-autotable';
@@ -88,17 +88,6 @@ import { Input } from './ui/input';
 interface jsPDFWithAutoTable extends jsPDF {
   autoTable: (options: UserOptions) => jsPDF;
 }
-
-
-// Helper to get the Saturday of the week for a given date
-const getSaturdayOfWeek = (d: Date) => {
-  const date = new Date(d);
-  date.setUTCHours(0, 0, 0, 0); // Normalize time
-  const day = date.getUTCDay(); // Sunday = 0, Saturday = 6
-  const diff = day === 0 ? -1 : 6 - day;
-  date.setUTCDate(date.getUTCDate() + diff);
-  return date;
-};
 
 interface LoansClientPageProps {
     initialClients: Client[];
@@ -199,10 +188,7 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
     const plan = loanPlans.find(p => p.id === loan.loanPlanId);
     if (!plan) return false;
 
-    const today = new Date();
-    const loanStartDate = new Date(loan.startDate);
-    const timeDiff = today.getTime() - loanStartDate.getTime();
-    const currentLoanWeek = Math.max(1, Math.floor(timeDiff / (1000 * 3600 * 24 * 7)) + 1);
+    const currentLoanWeek = getCurrentLoanWeekNumber(loan.startDate);
 
     const weeklyPayment = (loan.amount / 1000) * plan.weeklyPaymentRate;
     let missedWeeksCount = 0;
@@ -220,21 +206,21 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
       new Set(
         loans
           .filter(l => l.promotoraId === selectedPromotora && isLoanActive(l))
-          .map(loan => getSaturdayOfWeek(new Date(loan.startDate)).toISOString())
+          .map(loan => getSaturdayOfWeek(loan.startDate).toISOString())
       )
     ).sort((a, b) => new Date(b).getTime() - new Date(a).getTime())
   , [loans, selectedPromotora, loanPlans]);
   
   const allLoanWeeksInSystem = useMemo(() =>
     Array.from(
-      new Set(loans.filter(isLoanActive).map(loan => getSaturdayOfWeek(new Date(loan.startDate)).toISOString()))
+      new Set(loans.filter(isLoanActive).map(loan => getSaturdayOfWeek(loan.startDate).toISOString()))
     ).sort((a, b) => new Date(b).getTime() - new Date(a).getTime())
   , [loans, loanPlans]);
 
 
   const filteredLoans = useMemo(() => {
     const filtered = loans.filter(loan => {
-      const isCorrectWeek = selectedWeek ? getSaturdayOfWeek(new Date(loan.startDate)).toISOString() === selectedWeek : false;
+      const isCorrectWeek = selectedWeek ? getSaturdayOfWeek(loan.startDate).toISOString() === selectedWeek : false;
       const isCorrectPromotora = selectedPromotora ? loan.promotoraId === selectedPromotora : false;
       return isCorrectWeek && isCorrectPromotora && isLoanActive(loan);
     });
@@ -306,10 +292,8 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
     };
 
   const formatDate = (dateString: string) => {
-      const date = new Date(dateString);
-      const userTimezoneOffset = date.getTimezoneOffset() * 60000;
-      const correctedDate = new Date(date.getTime() + userTimezoneOffset);
-      return correctedDate.toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: '2-digit' })
+      const date = parseLocalDate(dateString);
+      return date.toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: '2-digit' });
   };
 
   const translateStatus = (status: Loan['status']) => {
@@ -359,10 +343,8 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
             };
         }
         
-        const todayDate = new Date();
-        const firstLoanStartDate = new Date(filteredLoans[0].startDate);
-        const timeDiff = todayDate.getTime() - firstLoanStartDate.getTime();
-        const currentGroupWeek = Math.floor(timeDiff / (1000 * 3600 * 24 * 7));
+        const mexicoNow = getMexicoNow();
+        const currentGroupWeek = getCurrentLoanWeekNumber(filteredLoans[0].startDate, mexicoNow);
         
         const newLoansWithPenalty: Record<string, boolean> = {};
 
@@ -370,9 +352,9 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
           const loanPlan = loanPlans.find(p => p.id === loan.loanPlanId);
           if (!loanPlan) return { status: 'pending' as const, date: new Date(), amountPaid: 0, isAssumedPaid: false };
           
-          const loanStartDate = new Date(loan.startDate);
-          const weekDate = new Date(loanStartDate.getTime());
-          weekDate.setUTCDate(weekDate.getUTCDate() + (weekNumber * 7));
+          const loanStartDate = parseLocalDate(loan.startDate);
+          const weekDate = new Date(loanStartDate);
+          weekDate.setDate(weekDate.getDate() + (weekNumber * 7));
 
           const paymentForWeek = loan.payments.find(p => p.weekNumber === weekNumber);
           if (paymentForWeek && paymentForWeek.isReverted) {
@@ -403,8 +385,7 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
         };
 
         filteredLoans.forEach(loan => {
-            const loanTimeDiff = todayDate.getTime() - new Date(loan.startDate).getTime();
-            const currentLoanWeek = Math.floor(loanTimeDiff / (1000 * 3600 * 24 * 7)) + 1;
+            const currentLoanWeek = getCurrentLoanWeekNumber(loan.startDate, mexicoNow);
             let missedWeeksCount = 0;
             for (let i = 1; i < currentLoanWeek - 1; i++) {
                 const paymentForWeek = loan.payments.find(p => p.weekNumber === i);
@@ -431,8 +412,7 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
             return Array.from({ length }).map((_, i) => {
                 const weekNumber = i + 1;
                 return filteredLoans.reduce((total, loan) => {
-                    const loanTimeDiff = todayDate.getTime() - new Date(loan.startDate).getTime();
-                    const currentLoanWeek = Math.floor(loanTimeDiff / (1000 * 3600 * 24 * 7)) + 1;
+                    const currentLoanWeek = getCurrentLoanWeekNumber(loan.startDate, mexicoNow);
                     
                     const weekStatus = getWeekPaymentStatusInternal(loan, weekNumber, currentLoanWeek, newLoansWithPenalty[loan.id] || false);
                     const weeklyPayment = getWeeklyPaymentAmount(loan);
@@ -461,8 +441,7 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
             const loanPlan = loanPlans.find(p => p.id === loan.loanPlanId);
             if (!loanPlan) return false;
             
-            const loanTimeDiff = todayDate.getTime() - new Date(loan.startDate).getTime();
-            const rawCurrentLoanWeek = Math.floor(loanTimeDiff / (1000 * 3600 * 24 * 7)) + 1;
+            const rawCurrentLoanWeek = getCurrentLoanWeekNumber(loan.startDate, mexicoNow);
             
             let missedCount = 0;
             const wp = getWeeklyPaymentAmount(loan);
@@ -494,9 +473,9 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
         const loanPlan = loanPlans.find(p => p.id === loan.loanPlanId);
         if (!loanPlan) return { status: 'pending' as const, date: new Date(), amountPaid: 0, isAssumedPaid: false };
         
-        const loanStartDate = new Date(loan.startDate);
-        const weekDate = new Date(loanStartDate.getTime());
-        weekDate.setUTCDate(weekDate.getUTCDate() + (weekNumber * 7));
+        const loanStartDate = parseLocalDate(loan.startDate);
+        const weekDate = new Date(loanStartDate);
+        weekDate.setDate(weekDate.getDate() + (weekNumber * 7));
 
         const weeklyPaymentAmount = getWeeklyPaymentAmount(loan);
         const hasPenalty = loansWithPenalty[loan.id] || false;
@@ -523,7 +502,7 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
             return { status: 'paid' as const, date: weekDate, amountPaid: weeklyPaymentAmount, isAssumedPaid: false, isRecovered: false };
         }
 
-        const isFuture = new Date() < weekDate;
+        const isFuture = getMexicoNow() < weekDate;
         if (isFuture) {
           return { status: 'pending' as const, date: weekDate, amountPaid: 0, isAssumedPaid: false };
         }
@@ -814,10 +793,7 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
         const weeklyCollectedPDF = Array.from({ length: maxWeeksToShow }).map((_, i) => {
             const weekNumber = i + 1;
             return filteredLoans.reduce((total, loan) => {
-                 const pdfToday = new Date();
-                const loanStartDate = new Date(loan.startDate);
-                const timeDiff = pdfToday.getTime() - loanStartDate.getTime();
-                const currentLoanWeek = Math.floor(timeDiff / (1000 * 3600 * 24 * 7)) + 1;
+                const currentLoanWeek = getCurrentLoanWeekNumber(loan.startDate, getMexicoNow());
                 const weekStatus = getWeekPaymentStatus(loan, weekNumber, currentLoanWeek);
                 const weeklyPayment = getWeeklyPaymentAmount(loan);
         
@@ -941,8 +917,7 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
                 const loan = filteredLoans[data.row.index];
                 if (!loan || data.row.section !== 'body') return;
 
-                const timeDiff = new Date().getTime() - new Date(loan.startDate).getTime();
-                const currentWeekForLoan = Math.floor(timeDiff / (1000 * 3600 * 24 * 7)) + 1;
+                const currentWeekForLoan = getCurrentLoanWeekNumber(loan.startDate, getMexicoNow());
                 
                 if (data.column.index >= 3 && data.column.index < (3 + maxWeeksToShow)) {
                     const loanPlan = loanPlans.find(p => p.id === loan.loanPlanId);
@@ -1331,9 +1306,7 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
                         
                         if (!originalLoanPlan) return null;
 
-                        const today = new Date();
-                        const timeDiff = today.getTime() - new Date(loan.startDate).getTime();
-                        const currentLoanWeek = Math.floor(timeDiff / (1000 * 3600 * 24 * 7)) + 1;
+                        const currentLoanWeek = getCurrentLoanWeekNumber(loan.startDate);
 
                         const hasPenalty = loansWithPenalty[loan.id] || false;
                         const termInWeeks = originalLoanPlan.termInWeeks + (hasPenalty ? 1 : 0);

@@ -31,6 +31,7 @@ import Link from 'next/link';
 import { AlertTriangle, ArrowRight } from 'lucide-react';
 import { ScrollArea } from './ui/scroll-area';
 import { useAuth } from '@/hooks/use-auth';
+import { getCurrentLoanWeekNumber } from '@/lib/utils';
 
 interface ClientesConFallosProps {
   loans: Loan[];
@@ -62,10 +63,7 @@ export function ClientesConFallos({ loans, clients, loanPlans }: ClientesConFall
                 if (!loanPlan) return acc;
 
                 const weeklyPayment = (loan.amount / 1000) * loanPlan.weeklyPaymentRate;
-                const today = new Date();
-                const loanStartDate = new Date(loan.startDate);
-                const timeDiff = today.getTime() - loanStartDate.getTime();
-                const currentLoanWeek = Math.max(1, Math.floor(timeDiff / (1000 * 3600 * 24 * 7)) + 1);
+                const currentLoanWeek = getCurrentLoanWeekNumber(loan.startDate);
 
                 let totalFailures = 0;
                 let totalFailureAmount = 0;

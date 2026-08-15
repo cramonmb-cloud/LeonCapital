@@ -23,7 +23,7 @@ import {
     DialogDescription,
 } from '@/components/ui/dialog';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { cn } from '@/lib/utils';
+import { cn, getSaturdayOfWeek } from '@/lib/utils';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import {
     Table,
@@ -45,15 +45,6 @@ interface OverdueCardProps {
     appConfig?: AppConfig | null;
     viewMode?: 'card' | 'table-row';
 }
-
-const getSaturdayOfWeek = (d: Date) => {
-  const date = new Date(d);
-  date.setUTCHours(0, 0, 0, 0);
-  const day = date.getUTCDay();
-  const diff = day === 0 ? -1 : 6 - day;
-  date.setUTCDate(date.getUTCDate() + diff);
-  return date;
-};
 
 const cleanPhone = (phone: string) => phone.replace(/\D/g, '');
 

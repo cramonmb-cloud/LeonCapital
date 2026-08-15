@@ -6,20 +6,39 @@ export function cn(...inputs: ClassValue[]) {
 }
 
 /**
+ * Parsea una fecha en formato string o Date garantizando que no se desfase por zona horaria.
+ */
+export function parseLocalDate(dateInput: any): Date {
+  if (!dateInput) return getMexicoNow();
+  if (dateInput instanceof Date) return dateInput;
+  if (typeof dateInput === 'string') {
+    const match = dateInput.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (match) {
+      const year = parseInt(match[1], 10);
+      const month = parseInt(match[2], 10) - 1;
+      const day = parseInt(match[3], 10);
+      return new Date(year, month, day);
+    }
+  }
+  return new Date(dateInput);
+}
+
+/**
  * Calcula el sábado correspondiente a la semana operativa de una fecha dada,
  * forzando el cálculo al horario de la Ciudad de México.
  * La semana cambia a las 00:00 del sábado (hora CDMX).
  */
-export function getSaturdayOfWeek(dateInput: Date = new Date()): Date {
+export function getSaturdayOfWeek(dateInput: Date | string = new Date()): Date {
+  const parsed = typeof dateInput === 'string' ? parseLocalDate(dateInput) : (dateInput || new Date());
   // 1. Obtener la fecha en formato YYYY-MM-DD en la zona horaria de México
-  const mexicoString = dateInput.toLocaleDateString('en-CA', { timeZone: 'America/Mexico_City' });
+  const mexicoString = parsed.toLocaleDateString('en-CA', { timeZone: 'America/Mexico_City' });
   const [year, month, day] = mexicoString.split('-').map(Number);
   
   // 2. Crear una fecha base a medianoche
   const d = new Date(year, month - 1, day);
   d.setHours(0, 0, 0, 0);
   
-  // 3. Lógica: Sábado es el día 0 de la nueva semana
+  // 3. Lógica: Sábado es el día 0 de la nueva semana operativa
   // Sun(0) -> -1, Mon(1) -> -2, ..., Fri(5) -> -6, Sat(6) -> -0
   const dayOfWeek = d.getDay(); 
   const diff = (dayOfWeek + 1) % 7;
@@ -32,8 +51,21 @@ export function getSaturdayOfWeek(dateInput: Date = new Date()): Date {
 }
 
 /**
+ * Calcula el número de semana operativa de un préstamo (1-indexado)
+ * relativo a una fecha de referencia (por defecto hora CDMX actual).
+ * Cambia exactamente a las 00:00:00 del sábado (hora CDMX).
+ */
+export function getCurrentLoanWeekNumber(startDateInput: Date | string, referenceDate: Date = getMexicoNow()): number {
+  const startSat = getSaturdayOfWeek(startDateInput);
+  const currentSat = getSaturdayOfWeek(referenceDate);
+  const diffMs = currentSat.getTime() - startSat.getTime();
+  const diffWeeks = Math.round(diffMs / (1000 * 3600 * 24 * 7));
+  return Math.max(1, diffWeeks + 1);
+}
+
+/**
  * Obtiene la fecha actual normalizada al horario de la Ciudad de México
- * para cálculos consistentes en el servidor.
+ * para cálculos consistentes en el servidor y cliente.
  */
 export function getMexicoNow(): Date {
   const options: Intl.DateTimeFormatOptions = {

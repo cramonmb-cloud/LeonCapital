@@ -33,6 +33,7 @@ import { CloudDownload, Loader2, KeyRound, CalendarDays, CheckCircle2, ShieldChe
 import { useToast } from '@/hooks/use-toast';
 import { syncWithSupervisorAppAction } from '@/app/dashboard/ajustes/actions';
 import { Alert, AlertDescription, AlertTitle } from './ui/alert';
+import { getSaturdayOfWeek, getMexicoNow } from '@/lib/utils';
 import { Badge } from './ui/badge';
 import { Separator } from './ui/separator';
 import type { Plaza, Localidad, Promotora, LoanPlan } from '@/lib/types';
@@ -61,22 +62,12 @@ export function SupervisorAppSync({ plazas, localidades, promotoras, loanPlans }
     const [isSyncing, setIsSyncing] = useState(false);
     const { toast } = useToast();
 
-    // Helper to get the Saturday of the week for a given date
-    const getSaturdayOfWeek = (d: Date) => {
-        const date = new Date(d);
-        date.setUTCHours(0, 0, 0, 0);
-        const day = date.getUTCDay();
-        const diff = day === 0 ? -1 : 6 - day;
-        date.setUTCDate(date.getUTCDate() + diff);
-        return date;
-    };
-
     const upcomingSaturdays = useMemo(() => {
         const dates = [];
-        const base = getSaturdayOfWeek(new Date());
+        const base = getSaturdayOfWeek(getMexicoNow());
         for (let i = -2; i < 4; i++) {
             const d = new Date(base);
-            d.setUTCDate(base.getUTCDate() + (i * 7));
+            d.setDate(base.getDate() + (i * 7));
             dates.push(d.toISOString());
         }
         return dates;

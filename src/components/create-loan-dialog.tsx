@@ -54,6 +54,7 @@ import { IdScanner } from './id-scanner';
 import type { IdDataOutput } from '@/ai/flows/extract-id-data-flow';
 import { useAuth } from '@/hooks/use-auth';
 import { useRealtimeData } from '@/hooks/use-realtime-data';
+import { getCurrentLoanWeekNumber } from '@/lib/utils';
 
 const stepOneSchema = z.object({
   promotoraId: z.string().min(1, 'Debes seleccionar una promotora.'),
@@ -381,10 +382,7 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
         const loanPlan = loanPlans.find(p => p.id === activeLoan.loanPlanId);
         if (loanPlan) {
             const weeklyPayment = (activeLoan.amount / 1000) * loanPlan.weeklyPaymentRate;
-            const today = new Date();
-            const loanStartDate = new Date(activeLoan.startDate);
-            const timeDiff = today.getTime() - loanStartDate.getTime();
-            const rawCurrentLoanWeek = Math.max(1, Math.floor(timeDiff / (1000 * 3600 * 24 * 7)) + 1);
+            const rawCurrentLoanWeek = getCurrentLoanWeekNumber(activeLoan.startDate);
 
             const baseTerm = loanPlan.termInWeeks;
             let missedWeeksCount = 0;
