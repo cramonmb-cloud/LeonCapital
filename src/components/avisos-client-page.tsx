@@ -14,6 +14,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/hooks/use-toast';
+import Loading from '@/app/dashboard/loading';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -163,14 +164,7 @@ export function AvisosClientPage({ imgbbApiKey }: AvisosClientPageProps) {
   };
 
   if (loading) {
-    return (
-      <div className="flex h-[50vh] items-center justify-center">
-        <div className="text-center space-y-2">
-          <span className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent inline-block" />
-          <p className="text-xs text-muted-foreground font-bold uppercase tracking-wider">Cargando módulo de avisos...</p>
-        </div>
-      </div>
-    );
+    return <Loading message="Estamos cargando los avisos" subtitle="Preparando notificaciones y avisos" showSkeletonPreview={false} />;
   }
 
   // Access check

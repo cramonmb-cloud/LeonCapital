@@ -6,6 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button';
 import { Printer, RefreshCw, Maximize2, Minimize2, AlertCircle, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import Loading from '@/app/dashboard/loading';
 
 interface ImprentaClientPageProps {
   initialIframeUrl?: string;
@@ -136,14 +137,8 @@ export function ImprentaClientPage({ initialIframeUrl }: ImprentaClientPageProps
       >
         {/* Loading Spinner Overlaid */}
         {isLoading && (
-          <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-background/80 backdrop-blur-sm animate-in fade-in duration-300">
-            <div className="text-center space-y-3">
-              <Loader2 className="h-10 w-10 animate-spin text-primary mx-auto drop-shadow-[0_0_8px_rgba(59,130,246,0.3)]" />
-              <div>
-                <p className="text-sm font-black text-foreground uppercase tracking-widest">Cargando Imprenta</p>
-                <p className="text-[10px] text-muted-foreground font-bold uppercase tracking-wider">Conectando con la aplicación financiera...</p>
-              </div>
-            </div>
+          <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-background/80 backdrop-blur-md animate-in fade-in duration-300">
+            <Loading message="Estamos cargando la imprenta" subtitle="Conectando con la aplicación financiera" showSkeletonPreview={false} />
           </div>
         )}
 

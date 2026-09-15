@@ -177,22 +177,29 @@ export default function DashboardLayout({
   }, [appUser?.id, pathname]);
 
   if (loading || !user || !appUser) {
-    return <div className="flex h-screen w-full items-center justify-center bg-background"><Loading /></div>;
+    return (
+      <div className="flex h-screen w-full items-center justify-center bg-background">
+        <Loading logoUrl={logoUrl} logoFormat={logoFormat} appName={appName} />
+      </div>
+    );
   }
   
   const isDashboardPage = pathname === '/dashboard';
   const hasDashboardAccess = appUser.role === 'admin' || (appUser.permissions && appUser.permissions.dashboard);
   if (isDashboardPage && !hasDashboardAccess) {
-      return <div className="flex h-screen w-full items-center justify-center"><Loading /></div>;
+      return (
+        <div className="flex h-screen w-full items-center justify-center">
+          <Loading logoUrl={logoUrl} logoFormat={logoFormat} appName={appName} />
+        </div>
+      );
   }
   
   return (
     <div className="flex min-h-screen w-full flex-col bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-primary/5 via-background to-background">
       <header 
-        className="sticky top-0 z-50 flex flex-col border-b bg-background/60 backdrop-blur-xl transition-all duration-500"
+        className="sticky top-0 z-50 flex flex-col liquid-glass-header transition-all duration-500"
         style={{
-          borderBottomColor: `${activeTab === 'operacion' ? operacionColor : administracionColor}20`,
-          boxShadow: `0 4px 20px -4px rgba(0, 0, 0, 0.08), 0 10px 15px -5px rgba(0, 0, 0, 0.03), 0 4px 30px -10px ${activeTab === 'operacion' ? operacionColor : administracionColor}15`,
+          borderBottomColor: `${activeTab === 'operacion' ? operacionColor : administracionColor}28`,
         }}
       >
           {/* Fila Superior */}
@@ -200,13 +207,13 @@ export default function DashboardLayout({
               <div className="flex items-center gap-2">
                  <Sheet open={mobileMenuOpen} onOpenChange={setMobileMenuOpen}>
                       <SheetTrigger asChild>
-                        <Button variant="ghost" size="icon" className="shrink-0 md:hidden hover:bg-muted/50 rounded-full h-9 w-9">
+                        <Button variant="ghost" size="icon" className="shrink-0 md:hidden hover:bg-white/40 dark:hover:bg-white/10 rounded-full h-9 w-9 transition-colors">
                           <Menu className="h-5 w-5" />
                           <span className="sr-only">Toggle navigation menu</span>
                         </Button>
                       </SheetTrigger>
-                      <SheetContent side="left" className="flex flex-col w-[280px] p-0 border-r border-border/40 shadow-2xl">
-                        <SheetHeader className="p-6 border-b border-border/10 text-left bg-muted/20">
+                      <SheetContent side="left" className="flex flex-col w-[290px] p-0 border-r border-white/30 dark:border-white/10 bg-white/75 dark:bg-zinc-950/80 backdrop-blur-2xl shadow-2xl">
+                        <SheetHeader className="p-5 border-b border-white/30 dark:border-white/10 text-left bg-white/20 dark:bg-white/5 backdrop-blur-md">
                           <Logo logoUrl={logoUrl} logoFormat={logoFormat} appName={appName} className="mb-0" size="md" customHeight={logoHeightHeader} customWidth={logoWidthHeader} />
                           <SheetTitle className="sr-only">{appName}</SheetTitle>
                           <SheetDescription className="sr-only">Menú de navegación principal</SheetDescription>
@@ -242,25 +249,29 @@ export default function DashboardLayout({
                   </Link>
               </div>
 
-              {/* Centro: Selector de Pestañas (Solo Escritorio) */}
+              {/* Centro: Selector de Pestañas (Solo Escritorio) - Apple Liquid Glass */}
               <div className="hidden md:flex absolute left-1/2 -translate-x-1/2 top-1/2 -translate-y-1/2">
-                  <div className="inline-flex items-center bg-muted/65 p-0.5 rounded-full border border-border/40 shadow-inner h-8 relative w-[220px]">
-                      {/* Sliding Pill Background */}
+                  <div className="inline-flex items-center liquid-glass-track p-1 rounded-full h-9 relative w-[240px]">
+                      {/* Sliding Pill Background with Apple Liquid Glass reflections */}
                       <div 
-                        className="absolute top-0.5 bottom-0.5 rounded-full transition-all duration-300 ease-in-out shadow-sm"
+                        className="absolute top-1 bottom-1 rounded-full transition-all duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] liquid-glass-pill overflow-hidden"
                         style={{
-                          left: activeTab === 'operacion' ? '2px' : 'calc(50% + 1px)',
-                          width: 'calc(50% - 3px)',
+                          left: activeTab === 'operacion' ? '4px' : 'calc(50% + 2px)',
+                          width: 'calc(50% - 6px)',
                           backgroundColor: activeTab === 'operacion' ? operacionColor : administracionColor,
+                          boxShadow: `0 4px 14px -1px ${activeTab === 'operacion' ? operacionColor : administracionColor}60, inset 0 1px 1.5px 0 rgba(255, 255, 255, 0.75), inset 0 -1px 1px 0 rgba(0, 0, 0, 0.2)`
                         }}
-                      />
+                      >
+                          {/* Liquid specular light sheen */}
+                          <div className="absolute inset-0 bg-gradient-to-b from-white/40 via-white/10 to-transparent pointer-events-none rounded-full" />
+                      </div>
                       <button
                         onClick={() => setActiveTab('operacion')}
                         className={cn(
-                          "w-1/2 py-1 rounded-full text-xs font-bold transition-all duration-300 active:scale-95 relative z-10 text-center",
+                          "w-1/2 py-1.5 rounded-full text-xs font-black tracking-wide transition-all duration-300 active:scale-95 relative z-10 text-center",
                           activeTab === 'operacion'
-                            ? "text-white font-black"
-                            : "text-muted-foreground hover:text-foreground"
+                            ? "text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.4)]"
+                            : "text-muted-foreground/80 hover:text-foreground"
                         )}
                       >
                         Operación
@@ -268,10 +279,10 @@ export default function DashboardLayout({
                       <button
                         onClick={() => setActiveTab('administracion')}
                         className={cn(
-                          "w-1/2 py-1 rounded-full text-xs font-bold transition-all duration-300 active:scale-95 relative z-10 text-center",
+                          "w-1/2 py-1.5 rounded-full text-xs font-black tracking-wide transition-all duration-300 active:scale-95 relative z-10 text-center",
                           activeTab === 'administracion'
-                            ? "text-white font-black"
-                            : "text-muted-foreground hover:text-foreground"
+                            ? "text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.4)]"
+                            : "text-muted-foreground/80 hover:text-foreground"
                         )}
                       >
                         Administración

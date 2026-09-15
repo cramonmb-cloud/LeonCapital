@@ -168,6 +168,7 @@ export type AppConfig = {
   imprentaIframeUrl?: string;
   maxGuarantorClients?: number;
   guarantorAuthCode?: string;
+  guarantorAuthCodeUpdatedAt?: string;
 };
 
 export type Aviso = {

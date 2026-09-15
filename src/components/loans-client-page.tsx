@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useMemo } from 'react';
-import { MoreHorizontal, CheckCircle2, XCircle, Circle, AlertCircle, FileDown, Loader2, CalendarCog, BadgeDollarSign, Filter, ChevronDown, ChevronUp, RotateCcw, Search } from 'lucide-react';
+import { MoreHorizontal, CheckCircle2, XCircle, Circle, AlertCircle, FileDown, Loader2, CalendarCog, BadgeDollarSign, Filter, ChevronDown, ChevronUp, RotateCcw, Search, Coins } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   Card,
@@ -133,6 +133,8 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
   const [selectedLoanIds, setSelectedLoanIds] = useState<Set<string>>(new Set());
   const { appUser } = useAuth();
   const [isAccumulating, setIsAccumulating] = useState(false);
+  const [isAccumulatingAll, setIsAccumulatingAll] = useState(false);
+  const [accumulateAllDialogOpen, setAccumulateAllDialogOpen] = useState(false);
   const [isReverting, setIsReverting] = useState(false);
   const [isChangingDate, setIsChangingDate] = useState(false);
   const [isPayingOff, setIsPayingOff] = useState(false);
@@ -180,6 +182,12 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
       (p.plazaName || '').toLowerCase().includes(query)
     ).slice(0, 8);
   }, [searchTerm, allPromotorasWithDetails]);
+
+  const getWeeklyPaymentAmount = (loan: Loan) => {
+    const plan = loanPlans.find(p => p.id === loan.loanPlanId);
+    if (!plan) return 0;
+    return (loan.amount / 1000) * plan.weeklyPaymentRate;
+  };
   
   // Logic to determine if a loan is ACTIVE (Not expired and not paid)
   const isLoanActive = (loan: Loan) => {
@@ -192,7 +200,7 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
 
     const weeklyPayment = (loan.amount / 1000) * plan.weeklyPaymentRate;
     let missedWeeksCount = 0;
-    for (let i = 1; i < currentLoanWeek - 1; i++) {
+    for (let i = 1; i < currentLoanWeek; i++) {
         const p = loan.payments.find(pay => pay.weekNumber === i);
         if (p && p.amount < weeklyPayment) missedWeeksCount++;
     }
@@ -234,7 +242,41 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
     });
   }, [loans, selectedWeek, selectedPromotora, loanPlans, clients]);
 
-  
+  const selectedPromotoraObj = useMemo(() => {
+    return promotoras.find(p => p.id === selectedPromotora);
+  }, [promotoras, selectedPromotora]);
+
+  const allPromotoraActiveLoans = useMemo(() => {
+    if (!selectedPromotora) return [];
+    return loans.filter(l => l.promotoraId === selectedPromotora && isLoanActive(l));
+  }, [loans, selectedPromotora, loanPlans]);
+
+  const hasAssumedPaymentsInPromotora = useMemo(() => {
+    if (allPromotoraActiveLoans.length === 0) return false;
+    const mexicoNow = getMexicoNow();
+    return allPromotoraActiveLoans.some(loan => {
+      if (loan.status === 'Paid Off' || loan.status === 'Pagado desde CV') return false;
+      const loanPlan = loanPlans.find(p => p.id === loan.loanPlanId);
+      if (!loanPlan) return false;
+
+      const currentLoanWeek = getCurrentLoanWeekNumber(loan.startDate, mexicoNow);
+      let missedCount = 0;
+      const wp = getWeeklyPaymentAmount(loan);
+      for (let i = 1; i < currentLoanWeek; i++) {
+        const p = loan.payments.find(pay => pay.weekNumber === i);
+        if (p && p.amount < wp) missedCount++;
+      }
+      const term = loanPlan.termInWeeks + (missedCount >= 2 ? 1 : 0);
+      const currentWeek = Math.min(currentLoanWeek, term);
+
+      for (let w = 1; w <= currentWeek; w++) {
+        const exists = (loan.payments || []).some(p => p.weekNumber === w);
+        if (!exists) return true;
+      }
+      return false;
+    });
+  }, [allPromotoraActiveLoans, loanPlans]);
+
   useEffect(() => {
     setSelectedLoanIds(new Set());
   }, [selectedWeek, selectedPromotora]);
@@ -261,12 +303,6 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
       localidadName: localidad?.name || 'N/A',
       plazaName: plaza?.name || 'N/A',
     };
-  };
-  
-  const getWeeklyPaymentAmount = (loan: Loan) => {
-    const plan = loanPlans.find(p => p.id === loan.loanPlanId);
-    if (!plan) return 0;
-    return (loan.amount / 1000) * plan.weeklyPaymentRate;
   };
   
   const formatCurrency = (amount: number) => {
@@ -387,7 +423,7 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
         filteredLoans.forEach(loan => {
             const currentLoanWeek = getCurrentLoanWeekNumber(loan.startDate, mexicoNow);
             let missedWeeksCount = 0;
-            for (let i = 1; i < currentLoanWeek - 1; i++) {
+            for (let i = 1; i < currentLoanWeek; i++) {
                 const paymentForWeek = loan.payments.find(p => p.weekNumber === i);
                 if (!paymentForWeek) continue;
 
@@ -441,16 +477,16 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
             const loanPlan = loanPlans.find(p => p.id === loan.loanPlanId);
             if (!loanPlan) return false;
             
-            const rawCurrentLoanWeek = getCurrentLoanWeekNumber(loan.startDate, mexicoNow);
+            const currentLoanWeek = getCurrentLoanWeekNumber(loan.startDate, mexicoNow);
             
             let missedCount = 0;
             const wp = getWeeklyPaymentAmount(loan);
-            for (let i = 1; i < rawCurrentLoanWeek - 1; i++) {
+            for (let i = 1; i < currentLoanWeek; i++) {
                 const p = loan.payments.find(pay => pay.weekNumber === i);
                 if (p && p.amount < wp) missedCount++;
             }
             const term = loanPlan.termInWeeks + (missedCount >= 2 ? 1 : 0);
-            const currentWeek = Math.min(rawCurrentLoanWeek - 1, term);
+            const currentWeek = Math.min(currentLoanWeek, term);
 
             for (let w = 1; w <= currentWeek; w++) {
                 const exists = (loan.payments || []).some(p => p.weekNumber === w);
@@ -560,6 +596,33 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
             });
         } finally {
             setIsAccumulating(false);
+        }
+    };
+
+    const handleAccumulateAllWeeksPayments = async () => {
+        if (!selectedPromotora || allPromotoraActiveLoans.length === 0) return;
+        
+        setIsAccumulatingAll(true);
+        try {
+            const loanIds = allPromotoraActiveLoans.map(l => l.id);
+            const result = await accumulateAssumedPaymentsAction(loanIds, appUser?.id);
+            if (result && result.success) {
+                toast({
+                    title: 'Proceso Completado',
+                    description: `Se formalizaron los pagos de todas las semanas de la promotora. ${result.message}`,
+                });
+                setAccumulateAllDialogOpen(false);
+            } else {
+                throw new Error(result?.message || 'Ocurrió un error inesperado al acumular pagos de todas las semanas.');
+            }
+        } catch (error: any) {
+            toast({
+                variant: 'destructive',
+                title: 'Error al Acumular',
+                description: error.message,
+            });
+        } finally {
+            setIsAccumulatingAll(false);
         }
     };
 
@@ -1175,13 +1238,28 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
             </div>
         </div>
         
-        <div className="flex items-center gap-2 w-full md:w-auto justify-end">
+        <div className="flex items-center gap-2 w-full md:w-auto justify-end flex-wrap">
             {appUser?.username === 'Cristobal' && (
                 <Button variant="default" onClick={() => setChangeDateDialogOpen(true)} disabled={selectedLoanIds.size === 0} className='hidden sm:flex'>
                     <CalendarCog className="mr-2 h-4 w-4" />
                     Mover Fecha
                 </Button>
             )}
+            <Button 
+                variant="outline" 
+                size="icon"
+                onClick={() => setAccumulateAllDialogOpen(true)} 
+                disabled={!selectedPromotora || allPromotoraActiveLoans.length === 0 || !hasAssumedPaymentsInPromotora || isAccumulatingAll}
+                className="text-emerald-700 dark:text-emerald-400 border-emerald-300 dark:border-emerald-800 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 shrink-0"
+                title={!selectedPromotora 
+                    ? "Selecciona una promotora primero" 
+                    : !hasAssumedPaymentsInPromotora 
+                        ? "No hay pagos asumidos pendientes por acumular en esta promotora" 
+                        : "Acumular pagos asumidos de todas las semanas activas de la promotora"}
+                aria-label="Acumular pagos de todas las semanas activas"
+            >
+                {isAccumulatingAll ? <Loader2 className="h-4 w-4 animate-spin" /> : <Coins className="h-4 w-4" />}
+            </Button>
             <Button variant="outline" onClick={handleExportPDF} disabled={filteredLoans.length === 0} className='flex-1 md:flex-none'>
                 <FileDown className="mr-2 h-4 w-4" />
                 PDF
@@ -1292,8 +1370,26 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
                       {Array.from({ length: 16 }, (_, i) => {
                           const weekNumber = i + 1;
                           const isCurrentWeek = weekNumber === currentGroupWeek;
+                          
+                          let headerTitle = `Semana ${weekNumber}`;
+                          if (selectedWeek) {
+                              const groupSat = getSaturdayOfWeek(new Date(selectedWeek));
+                              const colDate = new Date(groupSat);
+                              colDate.setDate(groupSat.getDate() + (weekNumber * 7));
+                              headerTitle += ` (Inicia ${formatDate(colDate.toISOString())})`;
+                          }
+
                           return (
-                            <TableHead key={i} className={cn("text-center py-1.5 px-0.5 border-r h-8 font-black text-[10px] uppercase text-slate-700", isCurrentWeek && "bg-blue-100 dark:bg-blue-900/30")}>{`S${i + 1}`}</TableHead>
+                            <TableHead 
+                              key={i} 
+                              title={headerTitle}
+                              className={cn(
+                                "text-center py-1.5 px-0.5 border-r h-8 font-black text-[10px] uppercase text-slate-700 transition-colors", 
+                                isCurrentWeek && "bg-blue-100 dark:bg-blue-900/40 text-blue-800 dark:text-blue-200 font-black"
+                              )}
+                            >
+                              {`S${i + 1}`}
+                            </TableHead>
                           );
                       })}
                       <TableHead className="text-right sticky right-0 bg-card z-10 py-1.5 px-2 h-8 font-black text-[10px] uppercase text-slate-700">Acciones</TableHead>
@@ -1608,6 +1704,42 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
                 <AlertDialogAction onClick={handleRevertPayments} disabled={isReverting} className="bg-orange-600 hover:bg-orange-700">
                     {isReverting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RotateCcw className="mr-2 h-4 w-4" />}
                     Confirmar Reversión
+                </AlertDialogAction>
+            </AlertDialogFooter>
+        </AlertDialogContent>
+    </AlertDialog>
+
+    <AlertDialog open={accumulateAllDialogOpen} onOpenChange={setAccumulateAllDialogOpen}>
+        <AlertDialogContent>
+            <AlertDialogHeader>
+                <AlertDialogTitle className="sr-only">Acumular pagos de todas las semanas</AlertDialogTitle>
+                <AlertDialogDescription asChild>
+                    <div className="space-y-3 pt-1 text-left text-sm text-foreground/80">
+                        <p>
+                            Esta acción formalizará todos los abonos asumidos de <strong>todas las semanas activas</strong> para la promotora <strong className="text-foreground font-black">{selectedPromotoraObj?.name || 'seleccionada'}</strong>.
+                        </p>
+                        <div className="bg-muted/60 p-3 rounded-xl border space-y-1.5 text-xs text-muted-foreground">
+                            <div className="flex justify-between">
+                                <span>Préstamos activos a revisar:</span>
+                                <strong className="text-foreground">{allPromotoraActiveLoans.length}</strong>
+                            </div>
+                            <div className="flex justify-between">
+                                <span>Semanas operativas involucradas:</span>
+                                <strong className="text-foreground">{loanWeeks.length}</strong>
+                            </div>
+                        </div>
+                    </div>
+                </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+                <AlertDialogCancel disabled={isAccumulatingAll}>Cancelar</AlertDialogCancel>
+                <AlertDialogAction 
+                    onClick={handleAccumulateAllWeeksPayments} 
+                    disabled={isAccumulatingAll} 
+                    className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold"
+                >
+                    {isAccumulatingAll ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CheckCircle2 className="mr-2 h-4 w-4" />}
+                    Confirmar y Acumular Todo
                 </AlertDialogAction>
             </AlertDialogFooter>
         </AlertDialogContent>

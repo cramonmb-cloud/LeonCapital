@@ -14,6 +14,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
+import Loading from '@/app/dashboard/loading';
 import {
     Form,
     FormControl,
@@ -420,9 +421,8 @@ export function PersonalClientPage() {
                 </CardHeader>
                 <CardContent className="p-0 overflow-x-auto">
                     {loading ? (
-                        <div className="flex flex-col items-center justify-center py-20 gap-3">
-                            <Loader2 className="h-10 w-10 animate-spin text-primary" />
-                            <span className="text-sm font-semibold text-muted-foreground">Cargando directorio de personal...</span>
+                        <div className="py-8">
+                            <Loading message="Estamos cargando el personal" subtitle="Consultando expedientes del equipo" showSkeletonPreview={false} />
                         </div>
                     ) : filteredPersonal.length === 0 ? (
                         <div className="text-center py-16 space-y-3">

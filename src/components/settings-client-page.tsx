@@ -45,7 +45,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Trash2, Loader2, Image as ImageIcon, Pencil, History, ShieldAlert, Building2, MessageSquare, Sparkles, RefreshCcw, AlertTriangle, Download, Upload, FileJson, User, UserCheck, MapPin, Route, Building, ChevronUp, ChevronDown, Key, Printer, Users } from "lucide-react";
 import { ImageUploadButton } from "./image-upload-button";
 import { useToast } from "@/hooks/use-toast";
-import { deleteAllDataAction, saveLogoAction, saveAppNameAction, saveGuarantorLimitAction, accumulateAllSystemPaymentsAction, saveWhatsAppTemplateAction, revertExtraWeekPaymentsAction, importBackupAction, savePlazaWhatsAppTemplatesAction, saveMenuConfigAction, saveMenuColorsAction, saveStaffTypesAction, saveImprentaUrlAction, mergeDuplicateClientsAction } from "@/app/dashboard/ajustes/actions";
+import { deleteAllDataAction, saveLogoAction, saveAppNameAction, saveGuarantorLimitAction, rotateGuarantorAuthCodeNowAction, accumulateAllSystemPaymentsAction, saveWhatsAppTemplateAction, revertExtraWeekPaymentsAction, importBackupAction, savePlazaWhatsAppTemplatesAction, saveMenuConfigAction, saveMenuColorsAction, saveStaffTypesAction, saveImprentaUrlAction, mergeDuplicateClientsAction } from "@/app/dashboard/ajustes/actions";
 import { useRouter } from "next/navigation";
 import type { AppConfig, WhatsAppTemplates } from "@/lib/types";
 import { Separator } from "./ui/separator";
@@ -314,6 +314,29 @@ export function SettingsClientPage({ initialConfig, mode = 'system' }: SettingsC
             toast({ variant: 'destructive', title: 'Error', description: error.message });
         } finally {
             setIsSaving(false);
+        }
+    };
+
+    const [isRotatingCode, setIsRotatingCode] = useState(false);
+
+    const onRotateAuthCode = async () => {
+        setIsRotatingCode(true);
+        try {
+            const res = await rotateGuarantorAuthCodeNowAction();
+            if (res.success && res.code) {
+                setGuarantorAuthCodeState(res.code);
+                toast({
+                    title: 'Clave Generada y Actualizada',
+                    description: `Nueva clave de 6 dígitos: ${res.code}. Se rotará automáticamente cada 7 días.`,
+                });
+                router.refresh();
+            } else {
+                throw new Error(res.message);
+            }
+        } catch (err: any) {
+            toast({ variant: 'destructive', title: 'Error al generar clave', description: err.message });
+        } finally {
+            setIsRotatingCode(false);
         }
     };
 
@@ -938,17 +961,37 @@ export function SettingsClientPage({ initialConfig, mode = 'system' }: SettingsC
                                         </p>
                                     </div>
                                     <div className="space-y-2">
-                                        <label className="text-sm font-bold block">Clave de Autorización (6 dígitos)</label>
-                                        <Input 
-                                            type="text" 
-                                            maxLength={6}
-                                            value={guarantorAuthCodeState} 
-                                            onChange={(e) => setGuarantorAuthCodeState(e.target.value)}
-                                            placeholder="Ej: 123456"
-                                            className="bg-white dark:bg-zinc-950"
-                                        />
+                                        <div className="flex items-center justify-between">
+                                            <label className="text-sm font-bold block">Clave de Autorización (6 dígitos)</label>
+                                            <span className="text-[11px] font-semibold text-amber-600 dark:text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-full border border-amber-500/20 flex items-center gap-1">
+                                                <RefreshCcw className="h-3 w-3" /> Auto-rota cada 7 días
+                                            </span>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            <Input 
+                                                type="text" 
+                                                maxLength={6}
+                                                value={guarantorAuthCodeState} 
+                                                onChange={(e) => setGuarantorAuthCodeState(e.target.value.replace(/\D/g, ''))}
+                                                placeholder="Ej: 123456"
+                                                className="bg-white dark:bg-zinc-950 font-mono text-base font-bold tracking-widest text-center max-w-[140px]"
+                                            />
+                                            <Button
+                                                type="button"
+                                                variant="outline"
+                                                size="sm"
+                                                onClick={onRotateAuthCode}
+                                                disabled={isRotatingCode}
+                                                className="h-10 text-xs font-semibold gap-1.5"
+                                                title="Generar nueva clave aleatoria de 6 dígitos inmediatamente"
+                                            >
+                                                {isRotatingCode ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCcw className="h-3.5 w-3.5" />}
+                                                Generar Aleatoria
+                                            </Button>
+                                        </div>
                                         <p className="text-xs text-muted-foreground">
-                                            Código de seguridad de 6 dígitos requerido para ignorar el límite del aval desde el formulario de registro de créditos.
+                                            Código de seguridad de 6 dígitos requerido para ignorar el límite de aval al registrar créditos. 
+                                            Se actualiza automáticamente de forma aleatoria cada 7 días y se muestra directamente arriba del logotipo en el Dashboard exclusivamente al usuario <strong>CRISTOBAL</strong> para copiar con un clic.
                                         </p>
                                     </div>
                                 </div>

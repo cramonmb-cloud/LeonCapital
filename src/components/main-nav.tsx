@@ -129,27 +129,29 @@ export function MainNav({
   };
 
   if (isMobile) {
-
     return (
         <div className="flex flex-col gap-4">
-            {/* Mobile Tab Selector */}
-            <div className="flex bg-muted p-1 rounded-xl border border-border/10 mx-4 justify-between relative h-10 items-center">
-              {/* Mobile Sliding Pill Background */}
+            {/* Mobile Tab Selector - Apple Liquid Glass */}
+            <div className="flex liquid-glass-track p-1 rounded-2xl mx-4 justify-between relative h-11 items-center">
+              {/* Mobile Sliding Pill Background with specular sheen */}
               <div 
-                className="absolute top-1 bottom-1 rounded-lg transition-all duration-300 ease-in-out shadow-sm"
+                className="absolute top-1 bottom-1 rounded-xl transition-all duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] liquid-glass-pill overflow-hidden"
                 style={{
                   left: activeTab === 'operacion' ? '4px' : 'calc(50% + 2px)',
                   width: 'calc(50% - 6px)',
-                  backgroundColor: activeTab === 'operacion' ? operacionColor : administracionColor,
+                  backgroundColor: currentTabColor,
+                  boxShadow: `0 4px 14px -1px ${currentTabColor}60, inset 0 1px 1.5px 0 rgba(255, 255, 255, 0.8), inset 0 -1px 1px 0 rgba(0, 0, 0, 0.2)`
                 }}
-              />
+              >
+                <div className="absolute inset-0 bg-gradient-to-b from-white/40 via-white/10 to-transparent pointer-events-none rounded-xl" />
+              </div>
               <button
                 onClick={() => setActiveTab('operacion')}
                 className={cn(
-                  "flex-1 py-2 rounded-lg text-xs font-bold text-center transition-all relative z-10",
+                  "flex-1 py-2.5 rounded-xl text-xs font-black tracking-wide text-center transition-all relative z-10 active:scale-95",
                   activeTab === 'operacion'
-                    ? "text-white font-black"
-                    : "text-muted-foreground"
+                    ? "text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.4)]"
+                    : "text-muted-foreground/80 hover:text-foreground"
                 )}
               >
                 Operación
@@ -157,17 +159,18 @@ export function MainNav({
               <button
                 onClick={() => setActiveTab('administracion')}
                 className={cn(
-                  "flex-1 py-2 rounded-lg text-xs font-bold text-center transition-all relative z-10",
+                  "flex-1 py-2.5 rounded-xl text-xs font-black tracking-wide text-center transition-all relative z-10 active:scale-95",
                   activeTab === 'administracion'
-                    ? "text-white font-black"
-                    : "text-muted-foreground"
+                    ? "text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.4)]"
+                    : "text-muted-foreground/80 hover:text-foreground"
                 )}
               >
                 Administración
               </button>
             </div>
 
-            <div key={activeTab} className="flex flex-col gap-1.5 px-2 animate-in fade-in slide-in-from-left-3 duration-300">
+            {/* Mobile Sub-Links - Liquid Glass Cards */}
+            <div key={activeTab} className="flex flex-col gap-2 px-3 py-1 animate-in fade-in slide-in-from-left-3 duration-300">
                 {filteredLinks.length > 0 ? (
                   filteredLinks.map((link) => {
                     const isActive = pathname === link.href || (link.href !== '/dashboard' && pathname.startsWith(link.href));
@@ -176,23 +179,46 @@ export function MainNav({
                             key={link.href}
                             href={link.href}
                             className={cn(
-                                'group flex items-center gap-3 rounded-xl px-4 py-3 text-sm font-medium transition-all duration-200 active:scale-95',
+                                'group flex items-center justify-between rounded-2xl px-4 py-3 text-sm font-bold transition-all duration-200 active:scale-[0.98] border backdrop-blur-md relative overflow-hidden',
                                 isActive 
-                                    ? 'shadow-sm' 
-                                    : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                                    ? 'shadow-md font-black' 
+                                    : 'text-slate-700 dark:text-zinc-300 bg-white/35 dark:bg-white/5 border-white/50 dark:border-white/10 hover:bg-white/60 dark:hover:bg-white/10 hover:text-foreground'
                             )}
                             style={isActive ? {
-                              backgroundColor: `${currentTabColor}15`,
-                              color: currentTabColor,
-                              boxShadow: `0 0 0 1px ${currentTabColor}30`
+                              background: `linear-gradient(135deg, ${currentTabColor}22, ${currentTabColor}08)`,
+                              borderColor: `${currentTabColor}45`,
+                              boxShadow: `0 6px 20px -2px ${currentTabColor}25, inset 0 1px 1.5px rgba(255, 255, 255, 0.85)`,
+                              color: currentTabColor
                             } : undefined}
                             onClick={onLinkClick}
                         >
-                            <link.icon 
-                              className={getIconClass(link.id, isActive)} 
-                              style={isActive && link.id !== 'overduePortfolio' && link.id !== 'carteraVencida' && link.id !== 'control' ? { color: currentTabColor } : undefined}
-                            />
-                            {link.label}
+                            <div className="flex items-center gap-3">
+                              <div className={cn(
+                                "p-2 rounded-xl transition-all duration-300 flex items-center justify-center",
+                                isActive 
+                                  ? "bg-white/90 dark:bg-zinc-800/90 shadow-sm border border-white/80 dark:border-white/20" 
+                                  : "bg-white/50 dark:bg-white/10 group-hover:bg-white/80"
+                              )}>
+                                <link.icon 
+                                  className={getIconClass(link.id, isActive, "h-4 w-4")} 
+                                  style={isActive && link.id !== 'overduePortfolio' && link.id !== 'carteraVencida' && link.id !== 'control' ? { 
+                                    color: currentTabColor,
+                                    filter: `drop-shadow(0 2px 6px ${currentTabColor}70)`
+                                  } : undefined}
+                                />
+                              </div>
+                              <span className="tracking-tight">{link.label}</span>
+                            </div>
+
+                            {isActive && (
+                              <div 
+                                className="w-1.5 h-6 rounded-full transition-all duration-300"
+                                style={{ 
+                                  backgroundColor: currentTabColor,
+                                  boxShadow: `0 0 10px ${currentTabColor}`
+                                }}
+                              />
+                            )}
                         </Link>
                     );
                   })
@@ -204,9 +230,16 @@ export function MainNav({
     );
   }
 
+  // Desktop Sub-Menu: Apple Liquid Glass Floating Capsule Dock
   return (
-        <div className="flex items-center bg-muted/40 p-1 rounded-full border border-border/50 backdrop-blur-sm shadow-inner h-10 transition-all duration-300">
-            <div key={activeTab} className="flex items-center gap-1.5 h-full animate-in fade-in slide-in-from-bottom-1 duration-300">
+        <div 
+          className="flex items-center liquid-glass-dock p-1.5 rounded-full transition-all duration-500 my-0.5 relative z-20"
+          style={{
+            borderColor: `${currentTabColor}35`,
+            boxShadow: `0 8px 24px -4px rgba(0, 0, 0, 0.06), 0 0 20px -6px ${currentTabColor}25, inset 0 1px 1.5px 0 rgba(255, 255, 255, 0.95)`
+          }}
+        >
+            <div key={activeTab} className="flex items-center gap-1.5 h-full animate-in fade-in slide-in-from-bottom-2 duration-300">
                 {filteredLinks.length > 0 ? (
                   filteredLinks.map((link) => {
                     const isActive = pathname === link.href || (link.href !== '/dashboard' && pathname.startsWith(link.href));
@@ -215,29 +248,32 @@ export function MainNav({
                             key={link.href}
                             href={link.href}
                             className={cn(
-                                'group flex items-center gap-2 rounded-full px-4 py-1.5 text-xs font-bold transition-all duration-300 relative overflow-hidden h-full',
+                                'group flex items-center gap-2 rounded-full px-4 py-1.5 text-xs font-bold transition-all duration-300 relative overflow-hidden h-full active:scale-95',
                                 isActive 
-                                    ? 'bg-background text-foreground shadow-md ring-1 ring-border/50 translate-y-[-1px]' 
-                                    : 'text-muted-foreground hover:text-foreground hover:bg-background/50'
+                                    ? 'liquid-glass-sub-active text-slate-900 dark:text-white font-black shadow-sm' 
+                                    : 'text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white hover:bg-white/40 dark:hover:bg-white/10'
                             )}
                         >
                             <link.icon 
                               className={getIconClass(link.id, isActive, "h-4 w-4")} 
                               style={isActive && link.id !== 'overduePortfolio' && link.id !== 'carteraVencida' && link.id !== 'control' ? { 
                                 color: currentTabColor,
-                                filter: `drop-shadow(0 0 8px ${currentTabColor}60)`
+                                filter: `drop-shadow(0 2px 6px ${currentTabColor}70)`
                               } : undefined}
                             />
                             <span className={cn(
-                                "transition-all duration-300",
-                                isActive ? "opacity-100" : "opacity-80 group-hover:opacity-100"
+                                "transition-all duration-300 tracking-tight",
+                                isActive ? "opacity-100 font-black" : "opacity-85 group-hover:opacity-100"
                             )}>
                                 {link.label}
                             </span>
                             {isActive && (
                                 <span 
-                                  className="absolute bottom-0.5 left-1/2 -translate-x-1/2 w-1.5 h-1.5 rounded-full animate-pulse" 
-                                  style={{ backgroundColor: currentTabColor }}
+                                  className="absolute bottom-0.5 left-1/2 -translate-x-1/2 w-4 h-1 rounded-full animate-pulse" 
+                                  style={{ 
+                                    backgroundColor: currentTabColor,
+                                    boxShadow: `0 0 10px 1px ${currentTabColor}`
+                                  }}
                                 />
                             )}
                         </Link>

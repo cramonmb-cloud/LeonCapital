@@ -15,25 +15,60 @@ import {
 import { useRealtimeData } from '@/hooks/use-realtime-data';
 import { useAuth } from '@/hooks/use-auth';
 import { getAppConfig } from '@/lib/firestore-data';
-import { Users, Landmark, Banknote, TrendingUp, Receipt, Calendar, ChevronLeft, ChevronRight, RotateCcw } from 'lucide-react';
+import { Users, Landmark, Banknote, TrendingUp, Receipt, Calendar, ChevronLeft, ChevronRight, RotateCcw, KeyRound, Copy, Check, ShieldCheck } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import Image from 'next/image';
 import { Logo } from '@/components/logo';
 import { useEffect, useState, useMemo } from 'react';
 import Loading from './loading';
 import { getSaturdayOfWeek, getMexicoNow } from '@/lib/utils';
+import { useToast } from '@/hooks/use-toast';
+import { getOrRotateGuarantorAuthCodeAction } from '@/app/dashboard/ajustes/actions';
+import type { AppConfig } from '@/lib/types';
 
 export default function DashboardPage() {
+    const { toast } = useToast();
     const { data, loading: dataLoading } = useRealtimeData(undefined, {
-        enabledCollections: ['clients', 'loans']
+        enabledCollections: ['clients', 'loans', 'config']
     });
     const { appUser, loading: authLoading } = useAuth();
-    const [config, setConfig] = useState<{logoUrl?: string, logoFormat?: 'square' | 'horizontal', logoHeightDashboard?: number, logoWidthDashboard?: number} | null>(null);
+    const [config, setConfig] = useState<AppConfig | null>(null);
     const [selectedWeekValue, setSelectedWeekValue] = useState<string>('');
+    const [codeCopied, setCodeCopied] = useState(false);
     
+    // Identificar si el usuario activo es CRISTOBAL
+    const isCristobal = useMemo(() => appUser?.username?.trim().toUpperCase() === 'CRISTOBAL', [appUser]);
+
+    // Verificar y rotar la clave si pasaron 7 días
     useEffect(() => {
+        getOrRotateGuarantorAuthCodeAction().catch(err => console.error('Error auto-rotating code:', err));
         getAppConfig().then(setConfig);
     }, []);
+
+    const activeConfig = data?.config || config;
+    const guarantorAuthCode = activeConfig?.guarantorAuthCode || '';
+    const guarantorAuthCodeUpdatedAt = activeConfig?.guarantorAuthCodeUpdatedAt;
+
+    // Calcular días restantes de los 7 días
+    const daysRemaining = useMemo(() => {
+        if (!guarantorAuthCodeUpdatedAt) return 7;
+        const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
+        const elapsed = Date.now() - new Date(guarantorAuthCodeUpdatedAt).getTime();
+        const remaining = Math.max(0, Math.ceil((SEVEN_DAYS_MS - elapsed) / (1000 * 60 * 60 * 24)));
+        return remaining;
+    }, [guarantorAuthCodeUpdatedAt]);
+
+    const handleCopyAuthCode = (e: React.MouseEvent) => {
+        e.stopPropagation();
+        if (!guarantorAuthCode) return;
+        navigator.clipboard.writeText(guarantorAuthCode);
+        setCodeCopied(true);
+        toast({
+            title: 'Clave Copiada',
+            description: `Clave de autorización (${guarantorAuthCode}) copiada al portapapeles.`,
+        });
+        setTimeout(() => setCodeCopied(false), 2500);
+    };
 
     const { clients = [], loans = [] } = data || {};
 
@@ -193,15 +228,61 @@ export default function DashboardPage() {
 
     return (
         <div className="flex flex-col gap-5">
-            {config?.logoUrl && (
+            {/* Clave de Autorización para CRISTOBAL (Arriba del logotipo con botón de copiar) */}
+            {isCristobal && guarantorAuthCode && (
+                <div className="flex justify-center mt-2 -mb-2 z-10 animate-in fade-in slide-in-from-top-2 duration-500">
+                    <div className="inline-flex items-center gap-2.5 px-4 py-1.5 rounded-full bg-slate-900/95 dark:bg-zinc-900/95 text-white shadow-xl border border-amber-500/40 backdrop-blur-md">
+                        <div className="flex items-center gap-1.5 text-[10px] font-black tracking-wider uppercase text-zinc-300">
+                            <KeyRound className="h-3.5 w-3.5 text-amber-400 animate-pulse" />
+                            <span className="hidden sm:inline">Clave Autorización:</span>
+                            <span className="sm:hidden">Clave:</span>
+                        </div>
+                        
+                        <div className="flex items-center bg-black/50 px-2.5 py-0.5 rounded-full border border-amber-500/30 font-mono shadow-inner">
+                            <span className="font-black text-xs sm:text-sm tracking-widest text-amber-300 select-all">
+                                {guarantorAuthCode}
+                            </span>
+                        </div>
+
+                        <Button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            onClick={handleCopyAuthCode}
+                            className="h-6 px-2 text-[10px] font-black text-zinc-200 hover:text-white hover:bg-white/10 rounded-full transition-all gap-1 active:scale-95 border border-white/10"
+                            title="Copiar clave de autorización"
+                        >
+                            {codeCopied ? (
+                                <>
+                                    <Check className="h-3 w-3 text-emerald-400" />
+                                    <span className="text-emerald-400">Copiado</span>
+                                </>
+                            ) : (
+                                <>
+                                    <Copy className="h-3 w-3 text-amber-300" />
+                                    <span>Copiar</span>
+                                </>
+                            )}
+                        </Button>
+
+                        {daysRemaining !== null && (
+                            <span className="hidden md:inline text-[9px] font-bold text-zinc-400 border-l border-zinc-700 pl-2">
+                                {daysRemaining <= 1 ? 'Rotación hoy' : `Rota en ${daysRemaining}d`}
+                            </span>
+                        )}
+                    </div>
+                </div>
+            )}
+
+            {activeConfig?.logoUrl && (
                 <div className="flex justify-center mt-3 md:mt-2">
                     <div className="relative animate-in fade-in zoom-in duration-700 flex items-center justify-center">
                         <Logo 
-                            logoUrl={config.logoUrl} 
-                            logoFormat={config.logoFormat} 
+                            logoUrl={activeConfig.logoUrl} 
+                            logoFormat={activeConfig.logoFormat} 
                             size="xl" 
-                            customHeight={config.logoHeightDashboard}
-                            customWidth={config.logoWidthDashboard}
+                            customHeight={activeConfig.logoHeightDashboard}
+                            customWidth={activeConfig.logoWidthDashboard}
                             showText={false}
                         />
                     </div>

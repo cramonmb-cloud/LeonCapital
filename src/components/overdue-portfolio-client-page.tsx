@@ -16,7 +16,12 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
-import { X, Search, Filter, ChevronDown, ChevronUp, CalendarDays, Eye, EyeOff, CalendarRange, LayoutGrid, List, User, Building, MapPin, RotateCcw } from 'lucide-react';
+import { 
+  X, Search, Filter, ChevronDown, ChevronUp, CalendarDays, Eye, EyeOff, CalendarRange, 
+  LayoutGrid, List, User, Building, MapPin, RotateCcw,
+  ArrowUpDown, ArrowUp, ArrowDown, ArrowUpAZ, ArrowDownZA,
+  ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight
+} from 'lucide-react';
 import { generateColorPalette, cn } from '@/lib/utils';
 import { useRealtimeData } from '@/hooks/use-realtime-data';
 import {
@@ -195,6 +200,91 @@ export function OverduePortfolioClientPage({
     const totalDue = filteredLoans.reduce((acc, details) => acc + details.amountDue, 0);
     const totalClients = new Set(filteredLoans.map(d => d.client.id)).size;
 
+    // Sorting & Pagination States
+    type SortField = 'client' | 'startDate' | 'maturityDate';
+    type SortOrder = 'asc' | 'desc';
+
+    const [sortField, setSortField] = useState<SortField>('client');
+    const [sortOrder, setSortOrder] = useState<SortOrder>('asc');
+    const [pageSize, setPageSize] = useState<number | 'all'>(20);
+    const [currentPage, setCurrentPage] = useState<number>(1);
+
+    const getStartTimestamp = (d: OverdueLoanDetails) => {
+        const t = new Date(d.loan.startDate).getTime();
+        return isNaN(t) ? 0 : t;
+    };
+
+    const getMaturityTimestamp = (d: OverdueLoanDetails) => {
+        try {
+            const s = new Date(d.loan.startDate);
+            if (isNaN(s.getTime())) return 0;
+            const m = new Date(s);
+            m.setUTCDate(s.getUTCDate() + ((d.loanPlan?.termInWeeks || 0) * 7));
+            return m.getTime();
+        } catch {
+            return 0;
+        }
+    };
+
+    const sortedLoans = useMemo(() => {
+        return [...filteredLoans].sort((a, b) => {
+            if (sortField === 'client') {
+                const nameA = a.client?.name?.trim() || '';
+                const nameB = b.client?.name?.trim() || '';
+                const comp = nameA.localeCompare(nameB, 'es', { sensitivity: 'base' });
+                return sortOrder === 'asc' ? comp : -comp;
+            }
+            if (sortField === 'startDate') {
+                const timeA = getStartTimestamp(a);
+                const timeB = getStartTimestamp(b);
+                return sortOrder === 'asc' ? timeA - timeB : timeB - timeA;
+            }
+            if (sortField === 'maturityDate') {
+                const timeA = getMaturityTimestamp(a);
+                const timeB = getMaturityTimestamp(b);
+                return sortOrder === 'asc' ? timeA - timeB : timeB - timeA;
+            }
+            return 0;
+        });
+    }, [filteredLoans, sortField, sortOrder]);
+
+    // Reset pagination to page 1 on filter, search, sort, or page-size change
+    useEffect(() => {
+        setCurrentPage(1);
+    }, [
+        searchTerm, 
+        selectedPlaza, 
+        selectedLocalidad, 
+        selectedPromotora, 
+        selectedFailures, 
+        selectedStartDate, 
+        startFilterMode, 
+        selectedMaturityDate, 
+        maturityFilterMode, 
+        pageSize, 
+        sortField, 
+        sortOrder
+    ]);
+
+    const totalItems = sortedLoans.length;
+    const totalPages = pageSize === 'all' ? 1 : Math.max(1, Math.ceil(totalItems / (pageSize as number)));
+    const actualPage = Math.min(Math.max(1, currentPage), totalPages);
+
+    const paginatedLoans = useMemo(() => {
+        if (pageSize === 'all') return sortedLoans;
+        const start = (actualPage - 1) * (pageSize as number);
+        return sortedLoans.slice(start, start + (pageSize as number));
+    }, [sortedLoans, actualPage, pageSize]);
+
+    const handleToggleSort = (field: SortField) => {
+        if (sortField === field) {
+            setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc');
+        } else {
+            setSortField(field);
+            setSortOrder(field === 'client' ? 'asc' : 'desc');
+        }
+    };
+
     const formatDate = (iso: string) => {
         const date = new Date(iso);
         const userTimezoneOffset = date.getTimezoneOffset() * 60000;
@@ -227,6 +317,148 @@ export function OverduePortfolioClientPage({
         setSelectedStartDate('all');
         setSelectedMaturityDate('all');
         setPromotoraSearchTerm('');
+        setSortField('client');
+        setSortOrder('asc');
+        setPageSize(20);
+        setCurrentPage(1);
+    };
+
+    const renderPagination = (position: 'top' | 'bottom') => {
+        if (totalItems === 0) return null;
+
+        const getPageNumbers = () => {
+            if (totalPages <= 7) {
+                return Array.from({ length: totalPages }, (_, i) => i + 1);
+            }
+            if (actualPage <= 4) {
+                return [1, 2, 3, 4, 5, '...', totalPages];
+            }
+            if (actualPage >= totalPages - 3) {
+                return [1, '...', totalPages - 4, totalPages - 3, totalPages - 2, totalPages - 1, totalPages];
+            }
+            return [1, '...', actualPage - 1, actualPage, actualPage + 1, '...', totalPages];
+        };
+
+        const pageNumbers = getPageNumbers();
+        const startItem = pageSize === 'all' ? 1 : (actualPage - 1) * (pageSize as number) + 1;
+        const endItem = pageSize === 'all' ? totalItems : Math.min(actualPage * (pageSize as number), totalItems);
+
+        return (
+            <div className={cn(
+                "flex flex-col sm:flex-row items-center justify-between gap-3 bg-white/90 dark:bg-zinc-900/90 border border-slate-200/80 dark:border-zinc-800 p-2.5 rounded-xl shadow-xs",
+                position === 'top' ? "mb-3" : "mt-4"
+            )}>
+                {/* Resumen */}
+                <div className="text-[11px] text-muted-foreground font-bold flex items-center gap-1.5">
+                    {pageSize === 'all' ? (
+                        <>Mostrando todos los <span className="font-extrabold text-foreground">{totalItems}</span> préstamos</>
+                    ) : (
+                        <>
+                            Mostrando <span className="font-extrabold text-foreground">{startItem}</span> - <span className="font-extrabold text-foreground">{endItem}</span> de <span className="font-extrabold text-foreground">{totalItems}</span> préstamos
+                        </>
+                    )}
+                </div>
+
+                {/* Controles de página y selector de tamaño */}
+                <div className="flex flex-wrap items-center gap-3">
+                    {/* Selector de tamaño de página: 20, 40, 100, todo */}
+                    <div className="flex items-center gap-1.5">
+                        <span className="text-[9px] uppercase text-muted-foreground font-black tracking-wider">Mostrar:</span>
+                        <div className="inline-flex rounded-lg border border-slate-200 dark:border-zinc-700 bg-slate-100/70 dark:bg-zinc-800 p-0.5">
+                            {([20, 40, 100, 'all'] as const).map((size) => {
+                                const isSelected = pageSize === size;
+                                return (
+                                    <button
+                                        key={size}
+                                        type="button"
+                                        onClick={() => setPageSize(size)}
+                                        className={cn(
+                                            "px-2.5 py-0.5 text-xs font-black rounded-md transition-all",
+                                            isSelected 
+                                                ? "bg-white dark:bg-zinc-700 text-blue-700 dark:text-blue-400 shadow-xs" 
+                                                : "text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white hover:bg-white/50"
+                                        )}
+                                    >
+                                        {size === 'all' ? 'Todo' : size}
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    </div>
+
+                    {/* Botones de navegación si no es 'all' y hay más de 1 página */}
+                    {pageSize !== 'all' && totalPages > 1 && (
+                        <div className="flex items-center gap-1">
+                            <Button
+                                variant="outline"
+                                size="icon"
+                                onClick={() => setCurrentPage(1)}
+                                disabled={actualPage === 1}
+                                className="h-7 w-7 rounded-lg text-slate-600 dark:text-zinc-300"
+                                title="Primera página"
+                            >
+                                <ChevronsLeft className="h-3.5 w-3.5" />
+                            </Button>
+                            <Button
+                                variant="outline"
+                                size="icon"
+                                onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                                disabled={actualPage === 1}
+                                className="h-7 w-7 rounded-lg text-slate-600 dark:text-zinc-300"
+                                title="Página anterior"
+                            >
+                                <ChevronLeft className="h-3.5 w-3.5" />
+                            </Button>
+
+                            <div className="flex items-center gap-1 px-0.5">
+                                {pageNumbers.map((pageNum, idx) => {
+                                    if (pageNum === '...') {
+                                        return <span key={`ellipsis-${idx}`} className="px-1 text-xs text-muted-foreground font-bold">...</span>;
+                                    }
+                                    const isCurrent = pageNum === actualPage;
+                                    return (
+                                        <button
+                                            key={pageNum}
+                                            type="button"
+                                            onClick={() => setCurrentPage(pageNum as number)}
+                                            className={cn(
+                                                "h-7 min-w-[28px] px-1.5 text-xs font-black rounded-lg transition-all",
+                                                isCurrent 
+                                                    ? "bg-blue-600 text-white shadow-xs" 
+                                                    : "hover:bg-slate-100 dark:hover:bg-zinc-800 text-slate-700 dark:text-zinc-300 font-bold"
+                                            )}
+                                        >
+                                            {pageNum}
+                                        </button>
+                                    );
+                                })}
+                            </div>
+
+                            <Button
+                                variant="outline"
+                                size="icon"
+                                onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                                disabled={actualPage === totalPages}
+                                className="h-7 w-7 rounded-lg text-slate-600 dark:text-zinc-300"
+                                title="Página siguiente"
+                            >
+                                <ChevronRight className="h-3.5 w-3.5" />
+                            </Button>
+                            <Button
+                                variant="outline"
+                                size="icon"
+                                onClick={() => setCurrentPage(totalPages)}
+                                disabled={actualPage === totalPages}
+                                className="h-7 w-7 rounded-lg text-slate-600 dark:text-zinc-300"
+                                title="Última página"
+                            >
+                                <ChevronsRight className="h-3.5 w-3.5" />
+                            </Button>
+                        </div>
+                    )}
+                </div>
+            </div>
+        );
     };
 
     return (
@@ -337,6 +569,31 @@ export function OverduePortfolioClientPage({
                                     )}
                                 </div>
                             )}
+                        </div>
+
+                        {/* Selector de Ordenamiento */}
+                        <div className="w-full md:w-[200px]">
+                            <label className="text-[9px] font-black uppercase text-slate-500 ml-1 mb-1 block">Ordenar Por</label>
+                            <Select 
+                                value={`${sortField}-${sortOrder}`} 
+                                onValueChange={(val) => {
+                                    const [f, o] = val.split('-') as [SortField, SortOrder];
+                                    setSortField(f);
+                                    setSortOrder(o);
+                                }}
+                            >
+                                <SelectTrigger className="h-10 text-xs uppercase font-bold rounded-xl border-slate-200">
+                                    <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="client-asc">Cliente (A - Z)</SelectItem>
+                                    <SelectItem value="client-desc">Cliente (Z - A)</SelectItem>
+                                    <SelectItem value="startDate-desc">Inicio (Reciente)</SelectItem>
+                                    <SelectItem value="startDate-asc">Inicio (Antigua)</SelectItem>
+                                    <SelectItem value="maturityDate-desc">Vence (Reciente)</SelectItem>
+                                    <SelectItem value="maturityDate-asc">Vence (Antigua)</SelectItem>
+                                </SelectContent>
+                            </Select>
                         </div>
 
                         {/* Selector de Vista */}
@@ -600,7 +857,7 @@ export function OverduePortfolioClientPage({
             <div className="flex justify-between items-center mt-4 mb-2 px-1">
                 <div className="space-y-0.5">
                     <h3 className="text-xs font-black uppercase text-zinc-700 tracking-wider">
-                        {filteredLoans.length} {filteredLoans.length === 1 ? 'Préstamo Encontrado' : 'Préstamos Encontrados'}
+                        {sortedLoans.length} {sortedLoans.length === 1 ? 'Préstamo Encontrado' : 'Préstamos Encontrados'}
                         {activePromotoraName && (
                             <>
                                 {' de la promotora '}
@@ -614,10 +871,13 @@ export function OverduePortfolioClientPage({
                 </div>
             </div>
 
+            {/* Paginación Superior */}
+            {renderPagination('top')}
+
             {viewMode === 'cards' ? (
                 <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-x-3 gap-y-1 pt-1">
-                    {filteredLoans.length > 0 ? (
-                        filteredLoans.map(details => (
+                    {paginatedLoans.length > 0 ? (
+                        paginatedLoans.map(details => (
                            <OverdueCard 
                                 key={details.loan.id} 
                                 details={details} 
@@ -643,17 +903,73 @@ export function OverduePortfolioClientPage({
                         <Table>
                             <TableHeader className="bg-zinc-50 border-b border-zinc-200">
                                 <TableRow className="hover:bg-zinc-50">
-                                    <TableHead className="text-zinc-700 font-extrabold text-[9px] uppercase py-2 tracking-wider border-r border-zinc-200 min-w-[200px]">Cliente / Zona</TableHead>
+                                    <TableHead className="text-zinc-700 font-extrabold text-[9px] uppercase py-2 tracking-wider border-r border-zinc-200 min-w-[200px]">
+                                        <button
+                                            type="button"
+                                            onClick={() => handleToggleSort('client')}
+                                            className="flex items-center gap-1 hover:text-blue-600 transition-colors uppercase font-extrabold group"
+                                            title="Ordenar alfabéticamente por cliente"
+                                        >
+                                            <span>Cliente / Zona</span>
+                                            {sortField === 'client' ? (
+                                                sortOrder === 'asc' ? <ArrowUpAZ className="h-3.5 w-3.5 text-blue-600" /> : <ArrowDownZA className="h-3.5 w-3.5 text-blue-600" />
+                                            ) : (
+                                                <ArrowUpDown className="h-3 w-3 opacity-40 group-hover:opacity-100" />
+                                            )}
+                                        </button>
+                                    </TableHead>
                                     <TableHead className="text-zinc-700 font-extrabold text-[9px] uppercase py-2 tracking-wider border-r border-zinc-200 min-w-[180px]">Domicilio / Contacto</TableHead>
                                     <TableHead className="text-zinc-700 font-extrabold text-[9px] uppercase py-2 tracking-wider border-r border-zinc-200 min-w-[180px]">Responsable (Aval)</TableHead>
-                                    <TableHead className="text-zinc-700 font-extrabold text-center text-[9px] uppercase py-2 tracking-wider border-r border-zinc-200 min-w-[100px]">Fechas (Inicio/Vence)</TableHead>
+                                    <TableHead className="text-zinc-700 font-extrabold text-center text-[9px] uppercase py-2 tracking-wider border-r border-zinc-200 min-w-[170px]">
+                                        <div className="flex flex-col items-center gap-1">
+                                            <span className="text-[9px] text-zinc-500 font-black">Fechas (Inicio / Vence)</span>
+                                            <div className="inline-flex items-center gap-1 bg-zinc-200/80 dark:bg-zinc-800 p-0.5 rounded-lg">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => handleToggleSort('startDate')}
+                                                    className={cn(
+                                                        "px-2 py-0.5 rounded text-[9px] font-black uppercase flex items-center gap-1 transition-all",
+                                                        sortField === 'startDate'
+                                                            ? "bg-blue-600 text-white shadow-xs"
+                                                            : "text-zinc-600 dark:text-zinc-300 hover:text-zinc-900 hover:bg-zinc-100 dark:hover:bg-zinc-700"
+                                                    )}
+                                                    title="Ordenar por Fecha de Inicio"
+                                                >
+                                                    Inicio
+                                                    {sortField === 'startDate' ? (
+                                                        sortOrder === 'asc' ? <ArrowUp className="h-2.5 w-2.5" /> : <ArrowDown className="h-2.5 w-2.5" />
+                                                    ) : (
+                                                        <ArrowUpDown className="h-2 w-2 opacity-50" />
+                                                    )}
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => handleToggleSort('maturityDate')}
+                                                    className={cn(
+                                                        "px-2 py-0.5 rounded text-[9px] font-black uppercase flex items-center gap-1 transition-all",
+                                                        sortField === 'maturityDate'
+                                                            ? "bg-red-600 text-white shadow-xs"
+                                                            : "text-zinc-600 dark:text-zinc-300 hover:text-zinc-900 hover:bg-zinc-100 dark:hover:bg-zinc-700"
+                                                    )}
+                                                    title="Ordenar por Fecha de Vencimiento"
+                                                >
+                                                    Vence
+                                                    {sortField === 'maturityDate' ? (
+                                                        sortOrder === 'asc' ? <ArrowUp className="h-2.5 w-2.5" /> : <ArrowDown className="h-2.5 w-2.5" />
+                                                    ) : (
+                                                        <ArrowUpDown className="h-2 w-2 opacity-50" />
+                                                    )}
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </TableHead>
                                     <TableHead className="text-zinc-700 font-extrabold text-[9px] uppercase py-2 tracking-wider border-r border-zinc-200 min-w-[160px]">Estado Financiero</TableHead>
                                     <TableHead className="text-zinc-700 font-extrabold text-center text-[9px] uppercase py-2 tracking-wider min-w-[120px]">Acciones</TableHead>
                                 </TableRow>
                             </TableHeader>
                             <TableBody>
-                                {filteredLoans.length > 0 ? (
-                                    filteredLoans.map(details => (
+                                {paginatedLoans.length > 0 ? (
+                                    paginatedLoans.map(details => (
                                         <OverdueCard 
                                             key={details.loan.id} 
                                             details={details} 
@@ -679,6 +995,9 @@ export function OverduePortfolioClientPage({
                     </div>
                 </div>
             )}
+
+            {/* Paginación Inferior */}
+            {renderPagination('bottom')}
         </div>
     );
 }

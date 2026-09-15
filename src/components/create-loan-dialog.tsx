@@ -382,11 +382,11 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
         const loanPlan = loanPlans.find(p => p.id === activeLoan.loanPlanId);
         if (loanPlan) {
             const weeklyPayment = (activeLoan.amount / 1000) * loanPlan.weeklyPaymentRate;
-            const rawCurrentLoanWeek = getCurrentLoanWeekNumber(activeLoan.startDate);
+            const currentLoanWeek = getCurrentLoanWeekNumber(activeLoan.startDate);
 
             const baseTerm = loanPlan.termInWeeks;
             let missedWeeksCount = 0;
-            for (let i = 1; i < rawCurrentLoanWeek - 1; i++) {
+            for (let i = 1; i < currentLoanWeek; i++) {
                 const p = activeLoan.payments.find(p => p.weekNumber === i);
                 if (p && p.amount < weeklyPayment) missedWeeksCount++;
             }
@@ -399,7 +399,7 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
                 const p = activeLoan.payments.find(pay => pay.weekNumber === i);
                 if (p) {
                     effectivePaidBase += p.amount;
-                } else if (i < rawCurrentLoanWeek - 1) {
+                } else if (i < currentLoanWeek) {
                     effectivePaidBase += weeklyPayment;
                 }
             }
@@ -412,7 +412,7 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
             }
 
             const settlementAmount = baseDebt + penaltyDebt;
-            const futureWeeksCount = Math.max(0, termInWeeks - rawCurrentLoanWeek + 1);
+            const futureWeeksCount = Math.max(0, termInWeeks - currentLoanWeek + 1);
             
             const hierarchy = getHierarchy(activeLoan.promotoraId);
 

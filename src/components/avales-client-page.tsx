@@ -53,6 +53,11 @@ import {
   List,
   ChevronLeft,
   ChevronRight,
+  ChevronsLeft,
+  ChevronsRight,
+  ArrowUpDown,
+  ArrowUpAZ,
+  ArrowDownZA,
   Sparkles,
   UserCheck,
   CircleDot,
@@ -353,8 +358,9 @@ export function AvalesClientPage({
   const [filterType, setFilterType] = useState<'all' | 'linked-active' | 'self-active' | 'multiple' | 'clean'>('all');
   const [backedClientsFilter, setBackedClientsFilter] = useState<string>('all');
   const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState<number | 'all'>(20);
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
   const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [showAll, setShowAll] = useState(false);
   const [selectedLoan, setSelectedLoan] = useState<Loan | null>(null);
   const [isLoanModalOpen, setIsLoanModalOpen] = useState(false);
 
@@ -445,7 +451,7 @@ export function AvalesClientPage({
       }
     });
 
-    return Object.values(grouped);
+    return Object.values(grouped).sort((a, b) => (a.name || '').localeCompare(b.name || '', 'es', { sensitivity: 'base' }));
   }, [clients, loans]);
 
   // Statistics
@@ -486,18 +492,171 @@ export function AvalesClientPage({
     });
   }, [endorsers, searchTerm, filterType, backedClientsFilter]);
 
-  const totalPages = Math.ceil(filteredEndorsers.length / ITEMS_PER_PAGE);
+  const sortedEndorsers = useMemo(() => {
+    return [...filteredEndorsers].sort((a, b) => {
+      const nameA = a.name || '';
+      const nameB = b.name || '';
+      const comp = nameA.localeCompare(nameB, 'es', { sensitivity: 'base' });
+      return sortOrder === 'asc' ? comp : -comp;
+    });
+  }, [filteredEndorsers, sortOrder]);
+
+  const totalItems = sortedEndorsers.length;
+  const totalPages = pageSize === 'all' ? 1 : Math.max(1, Math.ceil(totalItems / (pageSize as number)));
+  const actualPage = Math.min(Math.max(1, currentPage), totalPages);
 
   const visibleEndorsers = useMemo(() => {
-    if (showAll) return filteredEndorsers;
-    const start = (currentPage - 1) * ITEMS_PER_PAGE;
-    return filteredEndorsers.slice(start, start + ITEMS_PER_PAGE);
-  }, [filteredEndorsers, currentPage, showAll]);
+    if (pageSize === 'all') return sortedEndorsers;
+    const start = (actualPage - 1) * (pageSize as number);
+    return sortedEndorsers.slice(start, start + (pageSize as number));
+  }, [sortedEndorsers, actualPage, pageSize]);
 
   // Reset page when criteria changes
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchTerm, filterType, backedClientsFilter]);
+  }, [searchTerm, filterType, backedClientsFilter, pageSize, sortOrder]);
+
+  const toggleSortOrder = () => {
+    setSortOrder(prev => (prev === 'asc' ? 'desc' : 'asc'));
+  };
+
+  const renderPagination = (position: 'top' | 'bottom') => {
+    if (totalItems === 0) return null;
+
+    const getPageNumbers = () => {
+      if (totalPages <= 7) {
+        return Array.from({ length: totalPages }, (_, i) => i + 1);
+      }
+      if (actualPage <= 4) {
+        return [1, 2, 3, 4, 5, '...', totalPages];
+      }
+      if (actualPage >= totalPages - 3) {
+        return [1, '...', totalPages - 4, totalPages - 3, totalPages - 2, totalPages - 1, totalPages];
+      }
+      return [1, '...', actualPage - 1, actualPage, actualPage + 1, '...', totalPages];
+    };
+
+    const pageNumbers = getPageNumbers();
+    const startItem = pageSize === 'all' ? 1 : (actualPage - 1) * (pageSize as number) + 1;
+    const endItem = pageSize === 'all' ? totalItems : Math.min(actualPage * (pageSize as number), totalItems);
+
+    return (
+      <div className={cn(
+        "flex flex-col sm:flex-row items-center justify-between gap-3 bg-white/90 dark:bg-zinc-900/90 border border-slate-200/80 dark:border-zinc-800 p-2.5 rounded-xl shadow-xs",
+        position === 'top' ? "mb-3" : "mt-4"
+      )}>
+        {/* Resumen */}
+        <div className="text-[11px] text-muted-foreground font-bold flex items-center gap-1.5">
+          {pageSize === 'all' ? (
+            <>Mostrando todos los <span className="font-extrabold text-foreground">{totalItems}</span> avales</>
+          ) : (
+            <>
+              Mostrando <span className="font-extrabold text-foreground">{startItem}</span> - <span className="font-extrabold text-foreground">{endItem}</span> de <span className="font-extrabold text-foreground">{totalItems}</span> avales
+            </>
+          )}
+        </div>
+
+        {/* Controles de página y selector de tamaño */}
+        <div className="flex flex-wrap items-center gap-3">
+          {/* Selector de tamaño de página: 20, 40, 100, todo */}
+          <div className="flex items-center gap-1.5">
+            <span className="text-[9px] uppercase text-muted-foreground font-black tracking-wider">Mostrar:</span>
+            <div className="inline-flex rounded-lg border border-slate-200 dark:border-zinc-700 bg-slate-100/70 dark:bg-zinc-800 p-0.5">
+              {([20, 40, 100, 'all'] as const).map((size) => {
+                const isSelected = pageSize === size;
+                return (
+                  <button
+                    key={size}
+                    type="button"
+                    onClick={() => setPageSize(size)}
+                    className={cn(
+                      "px-2.5 py-0.5 text-xs font-black rounded-md transition-all",
+                      isSelected 
+                        ? "bg-white dark:bg-zinc-700 text-indigo-700 dark:text-indigo-400 shadow-xs" 
+                        : "text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white hover:bg-white/50"
+                    )}
+                  >
+                    {size === 'all' ? 'Todo' : size}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Botones de navegación si no es 'all' y hay más de 1 página */}
+          {pageSize !== 'all' && totalPages > 1 && (
+            <div className="flex items-center gap-1">
+              <Button
+                variant="outline"
+                size="icon"
+                onClick={() => setCurrentPage(1)}
+                disabled={actualPage === 1}
+                className="h-7 w-7 rounded-lg text-slate-600 dark:text-zinc-300"
+                title="Primera página"
+              >
+                <ChevronsLeft className="h-3.5 w-3.5" />
+              </Button>
+              <Button
+                variant="outline"
+                size="icon"
+                onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                disabled={actualPage === 1}
+                className="h-7 w-7 rounded-lg text-slate-600 dark:text-zinc-300"
+                title="Página anterior"
+              >
+                <ChevronLeft className="h-3.5 w-3.5" />
+              </Button>
+
+              <div className="flex items-center gap-1 px-0.5">
+                {pageNumbers.map((pageNum, idx) => {
+                  if (pageNum === '...') {
+                    return <span key={`ellipsis-${idx}`} className="px-1 text-xs text-muted-foreground font-bold">...</span>;
+                  }
+                  const isCurrent = pageNum === actualPage;
+                  return (
+                    <button
+                      key={pageNum}
+                      type="button"
+                      onClick={() => setCurrentPage(pageNum as number)}
+                      className={cn(
+                        "h-7 min-w-[28px] px-1.5 text-xs font-black rounded-lg transition-all",
+                        isCurrent 
+                          ? "bg-indigo-600 text-white shadow-xs" 
+                          : "hover:bg-slate-100 dark:hover:bg-zinc-800 text-slate-700 dark:text-zinc-300 font-bold"
+                      )}
+                    >
+                      {pageNum}
+                    </button>
+                  );
+                })}
+              </div>
+
+              <Button
+                variant="outline"
+                size="icon"
+                onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                disabled={actualPage === totalPages}
+                className="h-7 w-7 rounded-lg text-slate-600 dark:text-zinc-300"
+                title="Página siguiente"
+              >
+                <ChevronRight className="h-3.5 w-3.5" />
+              </Button>
+              <Button
+                variant="outline"
+                size="icon"
+                onClick={() => setCurrentPage(totalPages)}
+                disabled={actualPage === totalPages}
+                className="h-7 w-7 rounded-lg text-slate-600 dark:text-zinc-300"
+                title="Última página"
+              >
+                <ChevronsRight className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
 
   const toggleExpand = (normName: string) => {
     setExpandedId(prev => (prev === normName ? null : normName));
@@ -719,13 +878,30 @@ export function AvalesClientPage({
             </div>
           </div>
 
+          {/* Pagination Top */}
+          {renderPagination('top')}
+
           {/* Table View */}
           <div className="overflow-x-auto rounded-xl border border-border/40">
             <Table>
               <TableHeader className="bg-muted/30">
                 <TableRow className="hover:bg-transparent">
                   <TableHead className="w-[40px]"></TableHead>
-                  <TableHead className="font-black text-[9px] uppercase tracking-widest text-muted-foreground py-3">Nombre del Aval</TableHead>
+                  <TableHead className="font-black text-[9px] uppercase tracking-widest text-muted-foreground py-3">
+                    <button
+                      type="button"
+                      onClick={toggleSortOrder}
+                      className="flex items-center gap-1.5 hover:text-indigo-600 transition-colors uppercase font-black"
+                      title="Ordenar alfabéticamente (A-Z / Z-A)"
+                    >
+                      <span>Nombre del Aval</span>
+                      {sortOrder === 'asc' ? (
+                        <ArrowUpAZ className="h-3.5 w-3.5 text-indigo-600" />
+                      ) : (
+                        <ArrowDownZA className="h-3.5 w-3.5 text-indigo-600" />
+                      )}
+                    </button>
+                  </TableHead>
                   <TableHead className="font-black text-[9px] uppercase tracking-widest text-muted-foreground py-3">Dirección</TableHead>
                   <TableHead className="font-black text-[9px] uppercase tracking-widest text-muted-foreground py-3">Teléfono</TableHead>
                   <TableHead className="font-black text-[9px] uppercase tracking-widest text-muted-foreground py-3 text-center">Clientes Respaldados</TableHead>
@@ -1016,48 +1192,8 @@ export function AvalesClientPage({
           </div>
         </CardContent>
 
-        {/* Pagination */}
-        {!showAll && totalPages > 1 && (
-          <CardFooter className="flex flex-col sm:flex-row items-center justify-between gap-4 py-4 border-t border-border/10">
-            <div className="text-xs font-black uppercase text-muted-foreground">
-              Mostrando {visibleEndorsers.length} de {filteredEndorsers.length} avales
-            </div>
-            <div className="flex items-center gap-4">
-              <span className="text-xs font-black uppercase text-zinc-600">
-                Página {currentPage} de {totalPages}
-              </span>
-              <div className="flex gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
-                  disabled={currentPage === 1}
-                  className="rounded-xl h-9 text-xs font-bold uppercase border-border/60"
-                >
-                  <ChevronLeft className="h-4 w-4 mr-1" />
-                  Anterior
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
-                  disabled={currentPage === totalPages}
-                  className="rounded-xl h-9 text-xs font-bold uppercase border-border/60"
-                >
-                  Siguiente
-                  <ChevronRight className="h-4 w-4 ml-1" />
-                </Button>
-              </div>
-            </div>
-          </CardFooter>
-        )}
-        {showAll && filteredEndorsers.length > ITEMS_PER_PAGE && (
-          <CardFooter className="py-4 border-t border-border/10 justify-center">
-            <p className="text-xs font-black uppercase text-muted-foreground">
-              Mostrando lista completa ({filteredEndorsers.length} avales)
-            </p>
-          </CardFooter>
-        )}
+        {/* Pagination Bottom */}
+        {renderPagination('bottom')}
       </Card>
 
       {/* Modal para detalles del préstamo */}

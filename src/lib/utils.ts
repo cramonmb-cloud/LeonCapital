@@ -51,16 +51,17 @@ export function getSaturdayOfWeek(dateInput: Date | string = new Date()): Date {
 }
 
 /**
- * Calcula el número de semana operativa de un préstamo (1-indexado)
- * relativo a una fecha de referencia (por defecto hora CDMX actual).
+ * Calcula el número de semana operativa de abono de un préstamo (1-indexado).
+ * Relativo a la fecha de referencia (por defecto hora CDMX actual).
  * Cambia exactamente a las 00:00:00 del sábado (hora CDMX).
+ * La Semana 1 (S1) corresponde al primer sábado de abono (+7 días del sábado de registro).
  */
 export function getCurrentLoanWeekNumber(startDateInput: Date | string, referenceDate: Date = getMexicoNow()): number {
   const startSat = getSaturdayOfWeek(startDateInput);
   const currentSat = getSaturdayOfWeek(referenceDate);
   const diffMs = currentSat.getTime() - startSat.getTime();
   const diffWeeks = Math.round(diffMs / (1000 * 3600 * 24 * 7));
-  return Math.max(1, diffWeeks + 1);
+  return Math.max(0, diffWeeks);
 }
 
 /**

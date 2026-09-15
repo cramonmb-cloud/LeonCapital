@@ -248,13 +248,33 @@ export async function getUsers(): Promise<AppUser[]> {
     }
 }
 
-// Fetch app configuration
+// Fetch app configuration with 7-day auto-rotation for guarantorAuthCode
 export async function getAppConfig(): Promise<AppConfig | null> {
     const configRef = doc(db, 'config', 'main');
     try {
         const configSnap = await getDoc(configRef);
         if (configSnap.exists()) {
-            return configSnap.data() as AppConfig;
+            const data = configSnap.data() as AppConfig;
+            const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
+            const now = Date.now();
+            const lastUpdated = data.guarantorAuthCodeUpdatedAt ? new Date(data.guarantorAuthCodeUpdatedAt).getTime() : 0;
+            const isExpired = !data.guarantorAuthCode || !data.guarantorAuthCodeUpdatedAt || (now - lastUpdated >= SEVEN_DAYS_MS);
+
+            if (isExpired) {
+                const newCode = Math.floor(100000 + Math.random() * 900000).toString();
+                const newUpdatedAt = new Date().toISOString();
+                updateDoc(configRef, {
+                    guarantorAuthCode: newCode,
+                    guarantorAuthCodeUpdatedAt: newUpdatedAt
+                }).catch(err => console.error("Error auto-rotating guarantorAuthCode:", err));
+                return {
+                    ...data,
+                    guarantorAuthCode: newCode,
+                    guarantorAuthCodeUpdatedAt: newUpdatedAt
+                };
+            }
+
+            return data;
         }
         return null;
     } catch (err) {

@@ -79,7 +79,7 @@ export function MobileNavBar() {
         isVisible ? "translate-y-0 opacity-100" : "translate-y-32 opacity-0 pointer-events-none"
       )}
     >
-      <nav className="relative flex items-center justify-around px-2 py-2 rounded-[2.5rem] bg-background/85 backdrop-blur-2xl border-2 border-blue-500/40 shadow-[0_15px_40px_-5px_rgba(59,130,246,0.4)]">
+      <nav className="relative flex items-center justify-around px-2.5 py-2 rounded-[2.5rem] liquid-glass-dock border border-white/70 dark:border-white/15 shadow-[0_16px_40px_-8px_rgba(0,0,0,0.15),_inset_0_1px_1.5px_rgba(255,255,255,0.9)]">
         {linksToShow.map((link) => {
           const isActive = pathname === link.href || (link.href !== '/dashboard' && pathname.startsWith(link.href));
           return (
@@ -93,7 +93,7 @@ export function MobileNavBar() {
             >
               <div className={cn(
                 "p-2.5 rounded-2xl transition-all duration-500 relative",
-                isActive && "bg-white shadow-[0_8px_25px_-5px_rgba(0,0,0,0.15)] -translate-y-1.5"
+                isActive && "bg-white/90 dark:bg-zinc-800/90 shadow-[0_8px_20px_-4px_rgba(0,0,0,0.12),_inset_0_1px_1px_rgba(255,255,255,1)] border border-white/80 dark:border-white/20 -translate-y-1.5"
               )}>
                 <link.icon 
                   className={cn("h-5 w-5 transition-transform duration-300", isActive && "scale-110")} 

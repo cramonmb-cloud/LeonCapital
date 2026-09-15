@@ -68,7 +68,7 @@ export function ClientesConFallos({ loans, clients, loanPlans }: ClientesConFall
                 let totalFailures = 0;
                 let totalFailureAmount = 0;
 
-                for (let i = 1; i < currentLoanWeek - 1; i++) {
+                for (let i = 1; i < currentLoanWeek; i++) {
                     const paymentForWeek = loan.payments.find(p => p.weekNumber === i);
                     if (!paymentForWeek || paymentForWeek.isReverted) continue; // Skip assumed and reverted payments
 

@@ -11,6 +11,7 @@ interface LogoProps {
   customHeight?: number;
   customWidth?: number;
   showText?: boolean;
+  borderless?: boolean;
 }
 
 export function Logo({ 
@@ -21,7 +22,8 @@ export function Logo({
   logoFormat = 'square',
   customHeight,
   customWidth,
-  showText = true
+  showText = true,
+  borderless = false,
 }: LogoProps) {
   const dimensions = {
     square: {
@@ -59,8 +61,8 @@ export function Logo({
       <div 
         className={cn(
           "relative overflow-hidden transition-all duration-300 group-hover:scale-105 group-active:scale-95 flex items-center justify-center",
-          size === 'sm' || size === 'md' ? "rounded-xl" : "rounded-2xl",
-          "border border-border/40 bg-white/95 shadow-[0_8px_30px_rgb(0,0,0,0.06),_0_0_15px_rgba(59,130,246,0.03)] hover:border-primary/30 hover:shadow-[0_8px_35px_rgba(59,130,246,0.12),_0_0_20px_rgba(59,130,246,0.15)]",
+          !borderless && (size === 'sm' || size === 'md' ? "rounded-xl" : "rounded-2xl"),
+          !borderless && "border border-border/40 bg-white/95 shadow-[0_8px_30px_rgb(0,0,0,0.06),_0_0_15px_rgba(59,130,246,0.03)] hover:border-primary/30 hover:shadow-[0_8px_35px_rgba(59,130,246,0.12),_0_0_20px_rgba(59,130,246,0.15)]",
           !customHeight && !customWidth ? dimensions[formatKey][sizeKey] : aspectClass
         )}
         style={{
@@ -83,11 +85,11 @@ export function Logo({
               src={logoUrl} 
               alt="Logo" 
               fill
-              className="object-contain p-1.5" 
+              className={cn("object-contain", borderless ? "p-0" : "p-1.5")} 
             />
           )
         ) : (
-          <div className="flex h-full w-full items-center justify-center bg-primary/10 text-primary">
+          <div className={cn("flex h-full w-full items-center justify-center text-primary", !borderless && "bg-primary/10")}>
             <CreditCard className={cn(size === 'sm' ? 'h-3.5 w-3.5' : size === 'xl' ? 'h-12 w-12' : 'h-5 w-5')} />
           </div>
         )}

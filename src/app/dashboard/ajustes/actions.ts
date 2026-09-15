@@ -1,7 +1,7 @@
 'use server';
 
 import { db } from '@/lib/firebase';
-import { collection, getDocs, writeBatch, doc, addDoc, deleteDoc, setDoc, increment, Timestamp, updateDoc } from 'firebase/firestore';
+import { collection, getDocs, writeBatch, doc, getDoc, addDoc, deleteDoc, setDoc, increment, Timestamp, updateDoc } from 'firebase/firestore';
 import { revalidatePath } from 'next/cache';
 import type { Plaza, Localidad, Promotora, AppUser, AppConfig, Loan, LoanPlan, Client, WalletTransaction, WhatsAppTemplates } from '@/lib/types';
 
@@ -342,11 +342,62 @@ export async function saveAppNameAction(appName: string) {
 export async function saveGuarantorLimitAction(limit: number, authCode: string) {
     try {
         const configRef = doc(db, 'config', 'main');
-        await setDoc(configRef, { maxGuarantorClients: limit, guarantorAuthCode: authCode }, { merge: true });
+        await setDoc(configRef, { 
+            maxGuarantorClients: limit, 
+            guarantorAuthCode: authCode,
+            guarantorAuthCodeUpdatedAt: new Date().toISOString()
+        }, { merge: true });
         revalidatePath('/dashboard', 'layout');
         return { success: true, message: 'Configuración de límite y clave de aval guardados con éxito.' };
     } catch (error: any) {
         return { success: false, message: `Error al guardar la configuración de avales: ${error.message}` };
+    }
+}
+
+export async function getOrRotateGuarantorAuthCodeAction(): Promise<{ code: string; updatedAt: string; rotated: boolean }> {
+    try {
+        const configRef = doc(db, 'config', 'main');
+        const snap = await getDoc(configRef);
+        const data = (snap.data() || {}) as AppConfig;
+        const currentCode = data.guarantorAuthCode;
+        const updatedAtStr = data.guarantorAuthCodeUpdatedAt;
+        
+        const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
+        const now = Date.now();
+        const lastUpdated = updatedAtStr ? new Date(updatedAtStr).getTime() : 0;
+        const isExpired = !currentCode || !updatedAtStr || (now - lastUpdated >= SEVEN_DAYS_MS);
+
+        if (isExpired) {
+            const newCode = Math.floor(100000 + Math.random() * 900000).toString();
+            const newUpdatedAt = new Date().toISOString();
+            await setDoc(configRef, {
+                guarantorAuthCode: newCode,
+                guarantorAuthCodeUpdatedAt: newUpdatedAt
+            }, { merge: true });
+            revalidatePath('/dashboard', 'layout');
+            return { code: newCode, updatedAt: newUpdatedAt, rotated: true };
+        }
+
+        return { code: currentCode, updatedAt: updatedAtStr, rotated: false };
+    } catch (error: any) {
+        console.error('Error rotating guarantor auth code:', error);
+        return { code: '000000', updatedAt: new Date().toISOString(), rotated: false };
+    }
+}
+
+export async function rotateGuarantorAuthCodeNowAction(): Promise<{ success: boolean; code?: string; message: string }> {
+    try {
+        const configRef = doc(db, 'config', 'main');
+        const newCode = Math.floor(100000 + Math.random() * 900000).toString();
+        const newUpdatedAt = new Date().toISOString();
+        await setDoc(configRef, {
+            guarantorAuthCode: newCode,
+            guarantorAuthCodeUpdatedAt: newUpdatedAt
+        }, { merge: true });
+        revalidatePath('/dashboard', 'layout');
+        return { success: true, code: newCode, message: `Nueva clave de autorización generada: ${newCode}` };
+    } catch (error: any) {
+        return { success: false, message: `Error al generar la clave: ${error.message}` };
     }
 }
 
