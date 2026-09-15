@@ -1,7 +1,8 @@
 'use client';
 
-import { PlusCircle, Loader2 } from 'lucide-react';
+import { PlusCircle, Loader2, CheckCircle2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import {
   Card,
   CardContent,
@@ -13,6 +14,7 @@ import {
 import { useRealtimeData } from '@/hooks/use-realtime-data';
 import Link from 'next/link';
 import Loading from '../loading';
+import { cn } from '@/lib/utils';
 
 export default function LoanPlansPage() {
   const { data, loading } = useRealtimeData(undefined, {
@@ -50,9 +52,16 @@ export default function LoanPlansPage() {
 
       <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
         {loanPlans.map((plan) => (
-          <Card key={plan.id}>
+          <Card key={plan.id} className={cn(plan.isDefault && "ring-2 ring-emerald-500/80 border-emerald-500/40")}>
             <CardHeader>
-              <CardTitle>{plan.name}</CardTitle>
+              <div className="flex items-center justify-between gap-2">
+                <CardTitle>{plan.name}</CardTitle>
+                {plan.isDefault && (
+                  <Badge className="bg-emerald-600 hover:bg-emerald-600 text-white font-black text-[10px] tracking-wider uppercase px-2 py-0.5 shadow-sm flex items-center gap-1">
+                    <CheckCircle2 className="h-3 w-3" /> Predeterminado
+                  </Badge>
+                )}
+              </div>
               <CardDescription>{plan.description}</CardDescription>
             </CardHeader>
             <CardContent>

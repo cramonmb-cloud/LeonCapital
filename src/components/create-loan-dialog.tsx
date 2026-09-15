@@ -173,11 +173,13 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
   const [authCodeError, setAuthCodeError] = useState(false);
 
 
+  const defaultPlan = useMemo(() => loanPlans.find(p => p.isDefault), [loanPlans]);
+
   const form = useForm<LoanFormValues>({
     resolver: zodResolver(step === 1 ? stepOneSchema : formSchema),
     defaultValues: {
       promotoraId: initialSelection?.promotoraId || '',
-      loanPlanId: '',
+      loanPlanId: defaultPlan?.id || '',
       amount: 0,
       clientName: '',
       phone: '',
@@ -195,6 +197,12 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
       endorsementGuarantee: '1.- \n2.- \n3.- \n4.- ',
     },
   });
+
+  useEffect(() => {
+    if (defaultPlan?.id && !form.getValues('loanPlanId')) {
+      form.setValue('loanPlanId', defaultPlan.id);
+    }
+  }, [defaultPlan, form]);
 
   const sortedPlazas = useMemo(() => [...plazas].sort((a, b) => (a?.name || '').localeCompare(b?.name || '')), [plazas]);
   const filteredLocalidades = useMemo(() => localidades.filter(l => l.plazaId === selectedPlaza).sort((a, b) => (a?.name || '').localeCompare(b?.name || '')), [localidades, selectedPlaza]);
@@ -268,6 +276,19 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
               textarea.setSelectionRange(targetPos, targetPos);
             }, 0);
           } else {
+            // Si ya no hay más líneas predefinidas (ej. después de 4.-), avanzar a la siguiente sección
+            if (currentItemNumber >= 4) {
+              if (fieldName === 'guarantee') {
+                const nextEl = document.querySelector<HTMLElement>('[name="endorsement"]');
+                nextEl?.focus();
+                return;
+              } else if (fieldName === 'endorsementGuarantee') {
+                const submitBtn = document.querySelector<HTMLElement>('button[type="submit"]');
+                submitBtn?.focus();
+                return;
+              }
+            }
+
             const newPrefix = `\n${nextItemNumber}.- `;
             const before = val.substring(0, start);
             const after = val.substring(end);
@@ -295,6 +316,20 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
     }
   };
 
+  const handleFieldEnter = (e: React.KeyboardEvent<HTMLElement>, nextFieldName: string) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      e.stopPropagation();
+      const nextElement = document.querySelector<HTMLElement>(`[name="${nextFieldName}"]`);
+      if (nextElement) {
+        nextElement.focus();
+        if (nextElement instanceof HTMLInputElement) {
+          nextElement.select?.();
+        }
+      }
+    }
+  };
+
   useEffect(() => {
     if (open) {
       if (initialSelection) {
@@ -311,7 +346,7 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
       setActiveLoanDetails(null);
       form.reset({
         promotoraId: initialSelection?.promotoraId || '',
-        loanPlanId: '',
+        loanPlanId: defaultPlan?.id || '',
         amount: 0,
         clientName: '',
         phone: '',
@@ -331,7 +366,7 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
     } else {
       form.reset({
         promotoraId: '',
-        loanPlanId: '',
+        loanPlanId: defaultPlan?.id || '',
         amount: 0,
         clientName: '',
         phone: '',
@@ -359,7 +394,7 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
       setSelectedPlaza('');
       setSelectedLocalidad('');
     }
-  }, [open]);
+  }, [open, defaultPlan, initialSelection]);
 
 
   const getHierarchy = (promotoraId?: string) => {
@@ -710,6 +745,13 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
             return;
         }
         setStep(2);
+        setTimeout(() => {
+          const streetInput = document.querySelector<HTMLElement>('input[name="street"]');
+          streetInput?.focus();
+          if (streetInput instanceof HTMLInputElement) {
+            streetInput.select?.();
+          }
+        }, 80);
     }
   };
 
@@ -817,6 +859,11 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
 
 
   const onSubmit = async (values: LoanFormValues) => {
+    if (step === 1) {
+      handleNextStep();
+      return;
+    }
+
     // Check guarantor client limit if configured
     if (maxGuarantorClients > 0 && values.endorsement) {
       const activeBackings = getGuarantorActiveBacking(values.endorsement);
@@ -963,7 +1010,21 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
                       <FormLabel className="text-[10px] font-black uppercase text-muted-foreground">Nombre del Cliente</FormLabel>
                         <div className="flex items-center gap-2">
                           <FormControl>
-                            <Input placeholder="Busca o registra un cliente" {...field} onChange={handleClientNameChange} autoComplete="off" className="uppercase h-10 font-bold flex-grow text-sm placeholder:text-zinc-400 placeholder:normal-case placeholder:font-normal" />
+                            <Input 
+                              placeholder="Busca o registra un cliente" 
+                              {...field} 
+                              onChange={handleClientNameChange} 
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  setMatchingClients([]);
+                                  handleFieldEnter(e, 'amount');
+                                }
+                              }}
+                              autoComplete="off" 
+                              className="uppercase h-10 font-bold flex-grow text-sm placeholder:text-zinc-400 placeholder:normal-case placeholder:font-normal" 
+                            />
                           </FormControl>
                           <IdScanner onDataExtracted={handleDataExtracted} />
                         </div>
@@ -1092,7 +1153,19 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
                       <FormItem className="space-y-1">
                         <FormLabel className="text-[10px] font-black uppercase text-muted-foreground">Monto del Préstamo ($)</FormLabel>
                         <FormControl>
-                          <Input type="number" placeholder="Ej: 1000" {...field} className="h-10 font-bold text-sm placeholder:text-zinc-400 placeholder:normal-case placeholder:font-normal" />
+                          <Input 
+                            type="number" 
+                            placeholder="Ej: 1000" 
+                            {...field} 
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                handleNextStep();
+                              }
+                            }}
+                            className="h-10 font-bold text-sm placeholder:text-zinc-400 placeholder:normal-case placeholder:font-normal" 
+                          />
                         </FormControl>
                         <FormMessage />
                       </FormItem>
@@ -1129,7 +1202,13 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
                       <FormItem className="space-y-1">
                         <FormLabel className="text-[9px] font-black uppercase text-muted-foreground">Calle y Número</FormLabel>
                         <FormControl>
-                          <Input placeholder="Ej: Av. Principal 123" {...field} value={field.value || ''} className="h-9 text-xs uppercase font-bold placeholder:text-zinc-400 placeholder:normal-case placeholder:font-normal" />
+                          <Input 
+                            placeholder="Ej: Av. Principal 123" 
+                            {...field} 
+                            value={field.value || ''} 
+                            onKeyDown={(e) => handleFieldEnter(e, 'neighborhood')}
+                            className="h-9 text-xs uppercase font-bold placeholder:text-zinc-400 placeholder:normal-case placeholder:font-normal" 
+                          />
                         </FormControl>
                         <FormMessage className="text-[9px]" />
                       </FormItem>
@@ -1146,7 +1225,13 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
                           <FormItem className="space-y-1">
                             <FormLabel className="text-[9px] font-black uppercase text-muted-foreground">Colonia</FormLabel>
                             <FormControl>
-                              <Input placeholder="Centro" {...field} value={field.value || ''} className="h-9 text-xs uppercase font-bold placeholder:text-zinc-400 placeholder:normal-case placeholder:font-normal" />
+                              <Input 
+                                placeholder="Centro" 
+                                {...field} 
+                                value={field.value || ''} 
+                                onKeyDown={(e) => handleFieldEnter(e, 'postalCode')}
+                                className="h-9 text-xs uppercase font-bold placeholder:text-zinc-400 placeholder:normal-case placeholder:font-normal" 
+                              />
                             </FormControl>
                             <FormMessage className="text-[9px]" />
                           </FormItem>
@@ -1161,7 +1246,13 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
                           <FormItem className="space-y-1">
                             <FormLabel className="text-[9px] font-black uppercase text-muted-foreground">C.P.</FormLabel>
                             <FormControl>
-                              <Input placeholder="63000" {...field} value={field.value || ''} className="h-9 text-xs uppercase font-bold placeholder:text-zinc-400 placeholder:normal-case placeholder:font-normal" />
+                              <Input 
+                                placeholder="63000" 
+                                {...field} 
+                                value={field.value || ''} 
+                                onKeyDown={(e) => handleFieldEnter(e, 'city')}
+                                className="h-9 text-xs uppercase font-bold placeholder:text-zinc-400 placeholder:normal-case placeholder:font-normal" 
+                              />
                             </FormControl>
                             <FormMessage className="text-[9px]" />
                           </FormItem>
@@ -1180,7 +1271,13 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
                           <FormItem className="space-y-1">
                             <FormLabel className="text-[9px] font-black uppercase text-muted-foreground">Ciudad o Localidad</FormLabel>
                             <FormControl>
-                              <Input placeholder="Tepic" {...field} value={field.value || ''} className="h-9 text-xs uppercase font-bold placeholder:text-zinc-400 placeholder:normal-case placeholder:font-normal" />
+                              <Input 
+                                placeholder="Tepic" 
+                                {...field} 
+                                value={field.value || ''} 
+                                onKeyDown={(e) => handleFieldEnter(e, 'phone')}
+                                className="h-9 text-xs uppercase font-bold placeholder:text-zinc-400 placeholder:normal-case placeholder:font-normal" 
+                              />
                             </FormControl>
                             <FormMessage className="text-[9px]" />
                           </FormItem>
@@ -1195,7 +1292,13 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
                           <FormItem className="space-y-1">
                             <FormLabel className="text-[9px] font-black uppercase text-muted-foreground">Teléfono</FormLabel>
                             <FormControl>
-                              <Input placeholder="Ej: 311-000-000" {...field} value={field.value || ''} className="h-9 text-xs uppercase font-bold placeholder:text-zinc-400 placeholder:normal-case placeholder:font-normal" />
+                              <Input 
+                                placeholder="Ej: 311-000-000" 
+                                {...field} 
+                                value={field.value || ''} 
+                                onKeyDown={(e) => handleFieldEnter(e, 'guarantee')}
+                                className="h-9 text-xs uppercase font-bold placeholder:text-zinc-400 placeholder:normal-case placeholder:font-normal" 
+                              />
                             </FormControl>
                             <FormMessage className="text-[9px]" />
                           </FormItem>
@@ -1244,6 +1347,14 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
                             {...field} 
                             value={field.value || ''} 
                             onChange={handleGuarantorNameChange}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                setMatchingGuarantors([]);
+                                handleFieldEnter(e, 'endorsementStreet');
+                              }
+                            }}
                             autoComplete="off"
                             className="h-9 text-xs uppercase font-bold placeholder:text-zinc-400 placeholder:normal-case placeholder:font-normal" 
                             onBlur={(e) => {
@@ -1286,7 +1397,13 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
                       <FormItem className="space-y-1">
                         <FormLabel className="text-[9px] font-black uppercase text-muted-foreground">Calle y Número del Aval</FormLabel>
                         <FormControl>
-                          <Input placeholder="Domicilio del aval" {...field} value={field.value || ''} className="h-9 text-xs uppercase font-bold placeholder:text-zinc-400 placeholder:normal-case placeholder:font-normal" />
+                          <Input 
+                            placeholder="Domicilio del aval" 
+                            {...field} 
+                            value={field.value || ''} 
+                            onKeyDown={(e) => handleFieldEnter(e, 'endorsementNeighborhood')}
+                            className="h-9 text-xs uppercase font-bold placeholder:text-zinc-400 placeholder:normal-case placeholder:font-normal" 
+                          />
                         </FormControl>
                         <FormMessage className="text-[9px]" />
                       </FormItem>
@@ -1303,7 +1420,13 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
                           <FormItem className="space-y-1">
                             <FormLabel className="text-[9px] font-black uppercase text-muted-foreground">Colonia</FormLabel>
                             <FormControl>
-                              <Input placeholder="Centro" {...field} value={field.value || ''} className="h-9 text-xs uppercase font-bold placeholder:text-zinc-400 placeholder:normal-case placeholder:font-normal" />
+                              <Input 
+                                placeholder="Centro" 
+                                {...field} 
+                                value={field.value || ''} 
+                                onKeyDown={(e) => handleFieldEnter(e, 'endorsementPostalCode')}
+                                className="h-9 text-xs uppercase font-bold placeholder:text-zinc-400 placeholder:normal-case placeholder:font-normal" 
+                              />
                             </FormControl>
                             <FormMessage className="text-[9px]" />
                           </FormItem>
@@ -1318,7 +1441,13 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
                           <FormItem className="space-y-1">
                             <FormLabel className="text-[9px] font-black uppercase text-muted-foreground">C.P.</FormLabel>
                             <FormControl>
-                              <Input placeholder="63000" {...field} value={field.value || ''} className="h-9 text-xs uppercase font-bold placeholder:text-zinc-400 placeholder:normal-case placeholder:font-normal" />
+                              <Input 
+                                placeholder="63000" 
+                                {...field} 
+                                value={field.value || ''} 
+                                onKeyDown={(e) => handleFieldEnter(e, 'endorsementCity')}
+                                className="h-9 text-xs uppercase font-bold placeholder:text-zinc-400 placeholder:normal-case placeholder:font-normal" 
+                              />
                             </FormControl>
                             <FormMessage className="text-[9px]" />
                           </FormItem>
@@ -1337,7 +1466,13 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
                           <FormItem className="space-y-1">
                             <FormLabel className="text-[9px] font-black uppercase text-muted-foreground">Ciudad o Localidad</FormLabel>
                             <FormControl>
-                              <Input placeholder="Tepic" {...field} value={field.value || ''} className="h-9 text-xs uppercase font-bold placeholder:text-zinc-400 placeholder:normal-case placeholder:font-normal" />
+                              <Input 
+                                placeholder="Tepic" 
+                                {...field} 
+                                value={field.value || ''} 
+                                onKeyDown={(e) => handleFieldEnter(e, 'endorsementPhone')}
+                                className="h-9 text-xs uppercase font-bold placeholder:text-zinc-400 placeholder:normal-case placeholder:font-normal" 
+                              />
                             </FormControl>
                             <FormMessage className="text-[9px]" />
                           </FormItem>
@@ -1352,7 +1487,13 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
                           <FormItem className="space-y-1">
                             <FormLabel className="text-[9px] font-black uppercase text-muted-foreground">Teléfono</FormLabel>
                             <FormControl>
-                              <Input placeholder="Ej: 311-000-00" {...field} value={field.value || ''} className="h-9 text-xs uppercase font-bold placeholder:text-zinc-400 placeholder:normal-case placeholder:font-normal" />
+                              <Input 
+                                placeholder="Ej: 311-000-00" 
+                                {...field} 
+                                value={field.value || ''} 
+                                onKeyDown={(e) => handleFieldEnter(e, 'endorsementGuarantee')}
+                                className="h-9 text-xs uppercase font-bold placeholder:text-zinc-400 placeholder:normal-case placeholder:font-normal" 
+                              />
                             </FormControl>
                             <FormMessage className="text-[9px]" />
                           </FormItem>

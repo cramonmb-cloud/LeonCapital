@@ -30,7 +30,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
-import { Trash, Loader2 } from 'lucide-react';
+import { Trash, Loader2, BookmarkCheck } from 'lucide-react';
 import { useState } from 'react';
 import { deleteLoanPlanAction, saveLoanPlanAction } from '@/app/dashboard/planes/actions';
 
@@ -40,6 +40,7 @@ const formSchema = z.object({
   weeklyPaymentRate: z.coerce.number().min(0, 'El abono semanal no puede ser negativo.'),
   termInWeeks: z.coerce.number().int().min(1, 'El plazo debe ser de al menos 1 semana.'),
   highlight: z.boolean().optional(),
+  isDefault: z.boolean().optional(),
 });
 
 type PlanFormValues = z.infer<typeof formSchema>;
@@ -63,6 +64,7 @@ export function PlanForm({ plan }: PlanFormProps) {
           weeklyPaymentRate: plan.weeklyPaymentRate,
           termInWeeks: plan.termInWeeks,
           highlight: plan.highlight || false,
+          isDefault: plan.isDefault || false,
         }
       : {
           name: '',
@@ -70,6 +72,7 @@ export function PlanForm({ plan }: PlanFormProps) {
           weeklyPaymentRate: 0,
           termInWeeks: 1,
           highlight: false,
+          isDefault: false,
         },
   });
 
@@ -208,6 +211,32 @@ export function PlanForm({ plan }: PlanFormProps) {
                     />
                   </FormControl>
                   <FormLabel className="text-xs font-bold uppercase cursor-pointer select-none text-muted-foreground">Resaltar Préstamos con este Plan</FormLabel>
+                </FormItem>
+              )}
+            />
+
+            <FormField
+              control={form.control}
+              name="isDefault"
+              render={({ field }) => (
+                <FormItem className="flex flex-row items-start space-x-2.5 space-y-0 p-3 rounded-xl border border-primary/20 bg-primary/5">
+                  <FormControl className="mt-0.5">
+                    <input
+                      type="checkbox"
+                      checked={field.value || false}
+                      onChange={field.onChange}
+                      className="rounded border-slate-300 text-primary focus:ring-primary h-4 w-4 cursor-pointer"
+                    />
+                  </FormControl>
+                  <div className="space-y-1">
+                    <FormLabel className="text-xs font-bold uppercase cursor-pointer select-none text-foreground flex items-center gap-1.5">
+                      <BookmarkCheck className="h-4 w-4 text-primary" />
+                      Plan Predeterminado para Nuevos Préstamos
+                    </FormLabel>
+                    <p className="text-[11px] text-muted-foreground leading-snug">
+                      Se seleccionará automáticamente al crear un nuevo préstamo. Solo puede haber 1 plan predeterminado; al marcar este, cualquier otro dejará de serlo.
+                    </p>
+                  </div>
                 </FormItem>
               )}
             />

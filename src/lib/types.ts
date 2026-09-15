@@ -19,6 +19,7 @@ export type LoanPlan = {
   termInWeeks: number;
   weeklyPaymentRate: number; 
   highlight?: boolean;
+  isDefault?: boolean;
 };
 
 export type Payment = {
