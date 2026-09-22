@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useForm } from 'react-hook-form';
 import { z } from 'zod';
@@ -145,6 +145,8 @@ const cleanGuaranteeValue = (val: string | undefined) => {
 
 export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidades, promotoras, initialSelection }: CreateLoanDialogProps) {
   const [open, setOpen] = useState(false);
+  const prevOpenRef = useRef(false);
+  const [showExitConfirm, setShowExitConfirm] = useState(false);
   const [step, setStep] = useState(1);
   const [matchingClients, setMatchingClients] = useState<Client[]>([]);
   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
@@ -331,7 +333,8 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
   };
 
   useEffect(() => {
-    if (open) {
+    // Only execute reset when the dialog transitions from CLOSED to OPEN
+    if (open && !prevOpenRef.current) {
       if (initialSelection) {
         setSelectedPlaza(initialSelection.plazaId);
         setSelectedLocalidad(initialSelection.localidadId);
@@ -363,27 +366,8 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
         endorsementPhone: '',
         endorsementGuarantee: '1.- \n2.- \n3.- \n4.- ',
       });
-    } else {
-      form.reset({
-        promotoraId: '',
-        loanPlanId: defaultPlan?.id || '',
-        amount: 0,
-        clientName: '',
-        phone: '',
-        street: '',
-        neighborhood: '',
-        postalCode: '',
-        city: '',
-        guarantee: '1.- \n2.- \n3.- \n4.- ',
-        endorsement: '',
-        endorsementStreet: '',
-        endorsementNeighborhood: '',
-        endorsementPostalCode: '',
-        endorsementCity: '',
-        endorsementPhone: '',
-        endorsementGuarantee: '1.- \n2.- \n3.- \n4.- ',
-      });
-      setStep(1);
+    } else if (!open && prevOpenRef.current) {
+      // Clean up auxiliary search states on close
       setMatchingClients([]);
       setMatchingGuarantors([]);
       setShowAuthCodeModal(false);
@@ -391,9 +375,8 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
       setAuthCodeError(false);
       setSelectedClient(null);
       setActiveLoanDetails(null);
-      setSelectedPlaza('');
-      setSelectedLocalidad('');
     }
+    prevOpenRef.current = open;
   }, [open, defaultPlan, initialSelection]);
 
 
@@ -839,7 +822,13 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
                     title: 'Préstamo Creado',
                     description: `El préstamo para ${values.clientName} ha sido creado exitosamente.`,
                 });
+                setShowConfirmation(false);
+                setFormValues(null);
                 setOpen(false);
+                setStep(1);
+                setSelectedClient(null);
+                setActiveLoanDetails(null);
+                form.reset();
             } else {
                 throw new Error(result.message || 'Error desconocido');
             }
@@ -847,13 +836,12 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
         } catch (error: any) {
             toast({
                 variant: 'destructive',
-                title: 'Error',
+                title: 'Error al Crear Préstamo',
                 description: error.message || 'Hubo un error al crear el préstamo. Por favor, inténtelo de nuevo.',
             });
+            setShowConfirmation(false);
         } finally {
             setIsSubmitting(false);
-            setShowConfirmation(false);
-            setFormValues(null);
         }
     };
 
@@ -875,24 +863,39 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
       }
     }
 
-    const cleanedGuarantee = cleanGuaranteeValue(values.guarantee);
-    const cleanedEndorsementGuarantee = cleanGuaranteeValue(values.endorsementGuarantee);
+    // Always require confirmation before creating the credit
+    setFormValues(values);
+    setShowConfirmation(true);
+  };
 
-    const step2Fields = [
-        values.phone, values.street, values.neighborhood, values.postalCode,
-        values.city, cleanedGuarantee, values.endorsement, values.endorsementStreet,
-        values.endorsementNeighborhood, values.endorsementPostalCode,
-        values.endorsementCity, values.endorsementPhone, cleanedEndorsementGuarantee
-    ];
+  const handleOpenChange = (newOpen: boolean) => {
+    if (!newOpen) {
+      const currentValues = form.getValues();
+      const hasData = (
+        step === 2 ||
+        (currentValues.clientName && currentValues.clientName.trim().length > 0) ||
+        (currentValues.amount && Number(currentValues.amount) > 0) ||
+        (currentValues.street && currentValues.street.trim().length > 0) ||
+        (currentValues.endorsement && currentValues.endorsement.trim().length > 0)
+      );
 
-    const areStep2FieldsEmpty = step2Fields.every(field => !field || field.trim() === '');
-
-    if (areStep2FieldsEmpty) {
-        setFormValues(values);
-        setShowConfirmation(true);
+      if (hasData && !isSubmitting) {
+        setShowExitConfirm(true);
+        return;
+      }
+      setOpen(false);
     } else {
-        await proceedWithSubmission(values);
+      setOpen(true);
     }
+  };
+
+  const handleConfirmExit = () => {
+    setShowExitConfirm(false);
+    setOpen(false);
+    setStep(1);
+    setSelectedClient(null);
+    setActiveLoanDetails(null);
+    form.reset();
   };
 
   const handleAuthorize = () => {
@@ -967,7 +970,7 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
 
   return (
     <>
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogTrigger asChild>
         <Button disabled={!initialSelection?.promotoraId}>
           <PlusCircle className="mr-2 h-4 w-4" />
@@ -978,6 +981,7 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
         className="sm:max-w-[850px] max-h-[95vh] overflow-y-auto p-5"
         onPointerDownOutside={(e) => e.preventDefault()}
         onInteractOutside={(e) => e.preventDefault()}
+        onEscapeKeyDown={(e) => e.preventDefault()}
       >
         <Form {...form}>
           <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-3">
@@ -1546,17 +1550,95 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
       </DialogContent>
     </Dialog>
     <AlertDialog open={showConfirmation} onOpenChange={setShowConfirmation}>
+        <AlertDialogContent className="rounded-xl max-w-lg">
+            <AlertDialogHeader>
+                <AlertDialogTitle className="font-black uppercase tracking-tight flex items-center gap-2 text-blue-950 dark:text-blue-200">
+                    <CheckCircle2 className="h-5 w-5 text-emerald-600" />
+                    <span>Confirmar Creación de Crédito</span>
+                </AlertDialogTitle>
+                <AlertDialogDescription asChild>
+                    <div className="space-y-3 pt-2 text-xs">
+                      <p className="font-medium text-muted-foreground">
+                        Por favor revisa el resumen del préstamo antes de registrarlo formalmente en el sistema:
+                      </p>
+
+                      {formValues && (
+                        <div className="bg-slate-50 dark:bg-zinc-900 p-3.5 rounded-xl border space-y-2 text-slate-800 dark:text-zinc-200">
+                          <div className="flex justify-between border-b pb-1.5">
+                            <span className="font-black uppercase text-[10px] text-muted-foreground">Cliente:</span>
+                            <span className="font-black uppercase text-xs">{formValues.clientName}</span>
+                          </div>
+                          <div className="flex justify-between border-b pb-1.5">
+                            <span className="font-black uppercase text-[10px] text-muted-foreground">Monto Solicitado:</span>
+                            <span className="font-black text-xs text-emerald-600 dark:text-emerald-400">{formatCurrency(formValues.amount)}</span>
+                          </div>
+                          <div className="flex justify-between border-b pb-1.5">
+                            <span className="font-black uppercase text-[10px] text-muted-foreground">Plan / Abono Semanal:</span>
+                            <span className="font-bold text-xs">{loanPlans.find(p => p.id === formValues.loanPlanId)?.name || '—'} ({formatCurrency(calculatedAbono)}/sem)</span>
+                          </div>
+                          <div className="flex justify-between border-b pb-1.5">
+                            <span className="font-black uppercase text-[10px] text-muted-foreground">Promotora:</span>
+                            <span className="font-bold text-xs uppercase">{currentHierarchy.promotoraName}</span>
+                          </div>
+                          {formValues.endorsement && (
+                            <div className="flex justify-between">
+                              <span className="font-black uppercase text-[10px] text-muted-foreground">Aval:</span>
+                              <span className="font-bold text-xs uppercase text-blue-600 dark:text-blue-400">{formValues.endorsement}</span>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter className="gap-2 pt-2">
+                <AlertDialogCancel 
+                  onClick={() => setShowConfirmation(false)} 
+                  className="rounded-lg font-bold"
+                  disabled={isSubmitting}
+                >
+                    Revisar / Volver
+                </AlertDialogCancel>
+                <AlertDialogAction 
+                  onClick={(e) => { 
+                    e.preventDefault();
+                    if (formValues && !isSubmitting) proceedWithSubmission(formValues); 
+                  }} 
+                  className="rounded-lg font-black uppercase bg-blue-600 hover:bg-blue-700 text-white"
+                  disabled={isSubmitting}
+                >
+                    {isSubmitting ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Registrando Crédito...
+                      </>
+                    ) : (
+                      'Sí, Confirmar y Crear Crédito'
+                    )}
+                </AlertDialogAction>
+            </AlertDialogFooter>
+        </AlertDialogContent>
+    </AlertDialog>
+
+    <AlertDialog open={showExitConfirm} onOpenChange={setShowExitConfirm}>
         <AlertDialogContent className="rounded-xl">
             <AlertDialogHeader>
-                <AlertDialogTitle className="font-black uppercase tracking-tight">¿Continuar con datos incompletos?</AlertDialogTitle>
+                <AlertDialogTitle className="font-black uppercase tracking-tight text-red-600 flex items-center gap-2">
+                    <AlertTriangle className="h-5 w-5 text-red-500" /> ¿Salir sin guardar el crédito?
+                </AlertDialogTitle>
                 <AlertDialogDescription className="font-bold text-xs">
-                    No se han registrado todos los datos del cliente o del aval (dirección, teléfono, garantías). ¿Deseas crear el préstamo de todos modos con la información actual?
+                    Tienes datos capturados en el formulario. Si sales ahora, se perderá la información del préstamo que estás registrando.
                 </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter className="gap-2">
-                <AlertDialogCancel onClick={() => setFormValues(null)} className="rounded-lg font-bold">Cancelar</AlertDialogCancel>
-                <AlertDialogAction onClick={() => { if (formValues) proceedWithSubmission(formValues); }} className="rounded-lg font-bold bg-blue-600">
-                    Sí, Crear Préstamo
+                <AlertDialogCancel className="rounded-lg font-bold">
+                    Continuar Capturando
+                </AlertDialogCancel>
+                <AlertDialogAction 
+                    onClick={handleConfirmExit} 
+                    className="rounded-lg font-black uppercase bg-red-600 hover:bg-red-700 text-white"
+                >
+                    Sí, Descartar y Salir
                 </AlertDialogAction>
             </AlertDialogFooter>
         </AlertDialogContent>

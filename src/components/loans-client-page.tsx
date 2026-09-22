@@ -159,6 +159,15 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
   const filteredLocalidades = useMemo(() => localidades.filter(l => l.plazaId === selectedPlaza).sort((a, b) => (a?.name || '').localeCompare(b?.name || '', 'es', { sensitivity: 'base' })), [localidades, selectedPlaza]);
   const filteredPromotoras = useMemo(() => promotoras.filter(p => p.localidadId === selectedLocalidad).sort((a, b) => (a?.name || '').localeCompare(b?.name || '')), [promotoras, selectedLocalidad]);
 
+  const initialSelectionForCreateLoan = useMemo(() => {
+    if (!selectedPromotora) return undefined;
+    return {
+      plazaId: selectedPlaza,
+      localidadId: selectedLocalidad,
+      promotoraId: selectedPromotora,
+    };
+  }, [selectedPlaza, selectedLocalidad, selectedPromotora]);
+
   // Memoize all promotoras with their plaza/localidad details for the search box
   const allPromotorasWithDetails = useMemo(() => {
     return promotoras.map(p => {
@@ -1271,11 +1280,7 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
               plazas={plazas}
               localidades={localidades}
               promotoras={promotoras}
-              initialSelection={{
-                plazaId: selectedPlaza,
-                localidadId: selectedLocalidad,
-                promotoraId: selectedPromotora,
-              }}
+              initialSelection={initialSelectionForCreateLoan}
              />
         </div>
       </div>
