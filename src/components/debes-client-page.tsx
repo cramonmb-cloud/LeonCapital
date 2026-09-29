@@ -205,6 +205,10 @@ export function DebesClientPage({
         for (let w = 1; w <= elapsedWeeks; w++) {
           const weekSaturdayTime = loanSaturdayTime + (w * 7 * 24 * 3600 * 1000);
           const paymentsInWeek = (loan.payments || []).filter(p => {
+            if (p.isReverted) return false;
+            if (p.weekNumber && p.weekNumber > 0) {
+              return p.weekNumber === w;
+            }
             const paymentDate = parseLocalDate(p.date);
             const paymentSaturday = getSaturdayOfWeek(paymentDate);
             return paymentSaturday.getTime() === weekSaturdayTime;
@@ -352,7 +356,13 @@ export function DebesClientPage({
           const expectedForLoan = isActive ? weeklyPayment : 0;
           realDebeEntregar += expectedForLoan;
 
+          const targetWeekNumber = Math.round((weekTime - loanSaturdayTime) / (7 * 24 * 3600 * 1000));
+
           const paymentsInWeek = (loan.payments || []).filter(p => {
+            if (p.isReverted) return false;
+            if (p.weekNumber && p.weekNumber > 0) {
+              return p.weekNumber === targetWeekNumber;
+            }
             const paymentDate = parseLocalDate(p.date);
             const paymentSaturday = getSaturdayOfWeek(paymentDate);
             return paymentSaturday.getTime() === weekTime;

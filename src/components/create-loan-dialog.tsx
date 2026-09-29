@@ -54,7 +54,7 @@ import { IdScanner } from './id-scanner';
 import type { IdDataOutput } from '@/ai/flows/extract-id-data-flow';
 import { useAuth } from '@/hooks/use-auth';
 import { useRealtimeData } from '@/hooks/use-realtime-data';
-import { getCurrentLoanWeekNumber } from '@/lib/utils';
+import { getCurrentLoanWeekNumber, parseEndorsement } from '@/lib/utils';
 
 const stepOneSchema = z.object({
   promotoraId: z.string().min(1, 'Debes seleccionar una promotora.'),
@@ -456,48 +456,23 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
     form.setValue('city', client.city || '');
     form.setValue('guarantee', client.guarantee || '1.- \n2.- \n3.- \n4.- ');
     
-    // Parse combined endorsement string: "NAME (STREET, NEIGHBORHOOD, CP, CITY, Tel: PHONE, Garantía: GUARANTEE)"
-    const endorsementMatch = client.endorsement.match(/(.*) \((.*)\)/);
-    if (endorsementMatch) {
-        const name = endorsementMatch[1].trim();
-        const detailsStr = endorsementMatch[2];
-        const details = detailsStr.split(',').map(s => s.trim());
-        
-        form.setValue('endorsement', name);
-        
-        // Extract phone
-        const phoneIndex = details.findIndex(d => d.toUpperCase().startsWith('TEL:'));
-        if (phoneIndex !== -1) {
-            const phone = details[phoneIndex].replace(/Tel:\s*/i, '');
-            form.setValue('endorsementPhone', phone);
-            details.splice(phoneIndex, 1);
-        } else {
-            form.setValue('endorsementPhone', '');
-        }
-
-        // Extract guarantee
-        const guaranteeIndex = details.findIndex(d => d.toUpperCase().startsWith('GARANTÍA:') || d.toUpperCase().startsWith('GARANTIA:'));
-        if (guaranteeIndex !== -1) {
-            const guarantee = details[guaranteeIndex].replace(/Garantía:\s*|Garantia:\s*/i, '');
-            form.setValue('endorsementGuarantee', guarantee || '1.- \n2.- \n3.- \n4.- ');
-            details.splice(guaranteeIndex, 1);
-        } else {
-            form.setValue('endorsementGuarantee', '1.- \n2.- \n3.- \n4.- ');
-        }
-
-        // Remaining parts are usually Street, Neighborhood, CP, City in order
-        if (details[0]) form.setValue('endorsementStreet', details[0]);
-        if (details[1]) form.setValue('endorsementNeighborhood', details[1]);
-        if (details[2]) form.setValue('endorsementPostalCode', details[2]);
-        if (details[3]) form.setValue('endorsementCity', details[3]);
+    if (client.endorsement) {
+      const parsed = parseEndorsement(client.endorsement);
+      form.setValue('endorsement', parsed.name);
+      form.setValue('endorsementStreet', parsed.street);
+      form.setValue('endorsementNeighborhood', parsed.neighborhood);
+      form.setValue('endorsementPostalCode', parsed.postalCode);
+      form.setValue('endorsementCity', parsed.city);
+      form.setValue('endorsementPhone', parsed.phone);
+      form.setValue('endorsementGuarantee', parsed.guarantees || '1.- \n2.- \n3.- \n4.- ');
     } else {
-        form.setValue('endorsement', client.endorsement);
-        form.setValue('endorsementStreet', '');
-        form.setValue('endorsementNeighborhood', '');
-        form.setValue('endorsementPostalCode', '');
-        form.setValue('endorsementCity', '');
-        form.setValue('endorsementPhone', '');
-        form.setValue('endorsementGuarantee', '1.- \n2.- \n3.- \n4.- ');
+      form.setValue('endorsement', '');
+      form.setValue('endorsementStreet', '');
+      form.setValue('endorsementNeighborhood', '');
+      form.setValue('endorsementPostalCode', '');
+      form.setValue('endorsementCity', '');
+      form.setValue('endorsementPhone', '');
+      form.setValue('endorsementGuarantee', '1.- \n2.- \n3.- \n4.- ');
     }
   };
 
@@ -512,51 +487,35 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
     const guarantorMap = new Map<string, GuarantorSuggestion>();
     
     clients.forEach(client => {
+      // 1. Extraer del aval registrado en los clientes
       if (client.endorsement) {
-        const match = client.endorsement.match(/(.*) \((.*)\)/);
-        const guarantorName = match ? match[1].trim().toUpperCase() : client.endorsement.trim().toUpperCase();
-        
-        if (guarantorName && !guarantorMap.has(guarantorName)) {
-          if (match) {
-            const detailsStr = match[2];
-            const details = detailsStr.split(',').map(s => s.trim());
-            
-            // Extract phone
-            const phoneIndex = details.findIndex(d => d.toUpperCase().startsWith('TEL:'));
-            let phone = '';
-            if (phoneIndex !== -1) {
-              phone = details[phoneIndex].replace(/Tel:\s*/i, '');
-              details.splice(phoneIndex, 1);
-            }
-            
-            // Extract guarantee
-            const guaranteeIndex = details.findIndex(d => d.toUpperCase().startsWith('GARANTÍA:') || d.toUpperCase().startsWith('GARANTIA:'));
-            let guarantee = '';
-            if (guaranteeIndex !== -1) {
-              guarantee = details[guaranteeIndex].replace(/Garantía:\s*|Garantia:\s*/i, '');
-              details.splice(guaranteeIndex, 1);
-            }
-            
-            guarantorMap.set(guarantorName, {
-              name: guarantorName,
-              street: details[0] || '',
-              neighborhood: details[1] || '',
-              postalCode: details[2] || '',
-              city: details[3] || '',
-              phone,
-              guarantee
-            });
-          } else {
-            guarantorMap.set(guarantorName, {
-              name: guarantorName,
-              street: '',
-              neighborhood: '',
-              postalCode: '',
-              city: '',
-              phone: '',
-              guarantee: ''
-            });
-          }
+        const parsed = parseEndorsement(client.endorsement);
+        if (parsed.name && !guarantorMap.has(parsed.name)) {
+          guarantorMap.set(parsed.name, {
+            name: parsed.name,
+            street: parsed.street,
+            neighborhood: parsed.neighborhood,
+            postalCode: parsed.postalCode,
+            city: parsed.city,
+            phone: parsed.phone,
+            guarantee: parsed.guarantees
+          });
+        }
+      }
+
+      // 2. Extraer clientes registrados como potenciales avales
+      if (client.name) {
+        const clientNameUpper = client.name.trim().toUpperCase();
+        if (!guarantorMap.has(clientNameUpper)) {
+          guarantorMap.set(clientNameUpper, {
+            name: clientNameUpper,
+            street: client.street || '',
+            neighborhood: client.neighborhood || '',
+            postalCode: client.postalCode || '',
+            city: client.city || '',
+            phone: client.phone || '',
+            guarantee: client.guarantee || ''
+          });
         }
       }
     });
@@ -565,12 +524,34 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
   }, [clients]);
 
   const handleGuarantorNameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const name = e.target.value.toUpperCase();
-    form.setValue('endorsement', name);
+    const rawVal = e.target.value.toUpperCase();
     
-    if (name.length >= 2) {
+    // Si el usuario pega o introduce un formato compuesto: "NOMBRE (CALLE, COLONIA, TEL: ...)"
+    if (rawVal.includes('(')) {
+      const parsed = parseEndorsement(rawVal);
+      if (parsed.name) {
+        form.setValue('endorsement', parsed.name);
+        if (parsed.street) form.setValue('endorsementStreet', parsed.street);
+        if (parsed.neighborhood) form.setValue('endorsementNeighborhood', parsed.neighborhood);
+        if (parsed.postalCode) form.setValue('endorsementPostalCode', parsed.postalCode);
+        if (parsed.city) form.setValue('endorsementCity', parsed.city);
+        if (parsed.phone) form.setValue('endorsementPhone', parsed.phone);
+        if (parsed.guarantees) form.setValue('endorsementGuarantee', parsed.guarantees);
+        setMatchingGuarantors([]);
+        toast({
+          title: 'Datos del Aval Detectados',
+          description: `Se distribuyeron los datos de ${parsed.name} en sus campos correspondientes.`,
+        });
+        return;
+      }
+    }
+
+    form.setValue('endorsement', rawVal);
+    
+    const trimmed = rawVal.trim();
+    if (trimmed.length >= 2) {
       const matches = registeredGuarantors.filter(g => 
-        g.name.includes(name)
+        g.name.includes(trimmed)
       );
       setMatchingGuarantors(matches);
     } else {
@@ -587,6 +568,8 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
     form.setValue('endorsementPhone', guarantor.phone);
     if (guarantor.guarantee) {
       form.setValue('endorsementGuarantee', guarantor.guarantee);
+    } else {
+      form.setValue('endorsementGuarantee', '1.- \n2.- \n3.- \n4.- ');
     }
     setMatchingGuarantors([]);
     toast({
@@ -602,49 +585,17 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
     
     for (const client of clients) {
       if (client.endorsement) {
-        const match = client.endorsement.match(/(.*) \((.*)\)/);
-        const guarantorName = match ? match[1].trim().toUpperCase() : client.endorsement.trim().toUpperCase();
-        if (guarantorName === searchName) {
-          if (match) {
-            const detailsStr = match[2];
-            const details = detailsStr.split(',').map(s => s.trim());
-            
-            // Extract phone
-            const phoneIndex = details.findIndex(d => d.toUpperCase().startsWith('TEL:'));
-            let phone = '';
-            if (phoneIndex !== -1) {
-              phone = details[phoneIndex].replace(/Tel:\s*/i, '');
-              details.splice(phoneIndex, 1);
-            }
-            
-            // Extract guarantee
-            const guaranteeIndex = details.findIndex(d => d.toUpperCase().startsWith('GARANTÍA:') || d.toUpperCase().startsWith('GARANTIA:'));
-            let guarantee = '';
-            if (guaranteeIndex !== -1) {
-              guarantee = details[guaranteeIndex].replace(/Garantía:\s*|Garantia:\s*/i, '');
-              details.splice(guaranteeIndex, 1);
-            }
-            
-            return {
-              name: guarantorName,
-              street: details[0] || '',
-              neighborhood: details[1] || '',
-              postalCode: details[2] || '',
-              city: details[3] || '',
-              phone,
-              guarantee
-            };
-          } else {
-            return {
-              name: guarantorName,
-              street: '',
-              neighborhood: '',
-              postalCode: '',
-              city: '',
-              phone: '',
-              guarantee: ''
-            };
-          }
+        const parsed = parseEndorsement(client.endorsement);
+        if (parsed.name === searchName) {
+          return {
+            name: parsed.name,
+            street: parsed.street,
+            neighborhood: parsed.neighborhood,
+            postalCode: parsed.postalCode,
+            city: parsed.city,
+            phone: parsed.phone,
+            guarantee: parsed.guarantees
+          };
         }
       }
     }
@@ -655,17 +606,16 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
   const getGuarantorActiveBacking = (guarantorNameInput: string) => {
     if (!guarantorNameInput || guarantorNameInput.trim().length < 3) return [];
     
-    const searchName = guarantorNameInput.trim().toUpperCase();
+    const parsedInput = parseEndorsement(guarantorNameInput);
+    const searchName = (parsedInput.name || guarantorNameInput).trim().toUpperCase();
     const activeBackings: { clientName: string; plaza: string; localidad: string; promotora: string }[] = [];
     
     clients.forEach(client => {
       if (selectedClient && client.id === selectedClient.id) return;
       
       if (client.endorsement) {
-        const match = client.endorsement.match(/(.*) \((.*)\)/);
-        const name = match ? match[1].trim().toUpperCase() : client.endorsement.trim().toUpperCase();
-        
-        if (name === searchName) {
+        const parsed = parseEndorsement(client.endorsement);
+        if (parsed.name === searchName) {
           const activeLoans = loans.filter(l => l.clientId === client.id && (l.status === 'Active' || l.status === 'Overdue'));
           
           if (activeLoans.length > 0) {
@@ -1370,7 +1320,10 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
                           />
                         </FormControl>
                         {matchingGuarantors.length > 0 && (
-                          <Card className="absolute left-0 right-0 z-50 mt-1 shadow-2xl border-2 dark:bg-zinc-950">
+                          <Card 
+                            className="absolute left-0 right-0 z-50 mt-1 shadow-2xl border-2 dark:bg-zinc-950"
+                            onMouseDown={(e) => e.preventDefault()}
+                          >
                               <ul className="max-h-60 overflow-y-auto divide-y">
                                   {matchingGuarantors.map((guarantor, idx) => (
                                       <li key={idx}
@@ -1378,8 +1331,10 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
                                           onClick={() => selectGuarantor(guarantor)}>
                                           <div className="flex flex-col">
                                               <span className="font-black text-xs uppercase text-blue-900 dark:text-blue-300">{guarantor.name}</span>
-                                              {guarantor.street && (
-                                                 <span className="text-[9px] font-bold text-muted-foreground uppercase">{guarantor.street}, {guarantor.neighborhood}</span>
+                                              {(guarantor.street || guarantor.neighborhood || guarantor.city || guarantor.phone) && (
+                                                 <span className="text-[9px] font-bold text-muted-foreground uppercase">
+                                                   {[guarantor.street, guarantor.neighborhood, guarantor.city, guarantor.phone ? `Tel: ${guarantor.phone}` : ''].filter(Boolean).join(', ')}
+                                                 </span>
                                               )}
                                           </div>
                                           <Badge variant="outline" className="text-[8px] font-black border-blue-200 text-blue-600 bg-blue-50 dark:bg-blue-950/50">REGISTRADO</Badge>

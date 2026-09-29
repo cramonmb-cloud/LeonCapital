@@ -122,3 +122,91 @@ export function generateColorPalette(numColors: number): string[] {
 
   return extendedPalette;
 }
+
+export interface ParsedEndorsement {
+  name: string;
+  street: string;
+  neighborhood: string;
+  postalCode: string;
+  city: string;
+  phone: string;
+  guarantees: string;
+}
+
+/**
+ * Parsea de forma robusta la cadena compuesta de un aval:
+ * "NOMBRE (CALLE, COLONIA, CP, CIUDAD, Tel: TELEFONO, Garantía: GARANTIAS)"
+ * asegurando soporte ante saltos de línea (\n), diferentes órdenes o ausencia de espacios.
+ */
+export function parseEndorsement(endorsementStr: string): ParsedEndorsement {
+  if (!endorsementStr) {
+    return { name: '', street: '', neighborhood: '', postalCode: '', city: '', phone: '', guarantees: '' };
+  }
+
+  const trimmed = endorsementStr.trim();
+  const parenIndex = trimmed.indexOf('(');
+
+  if (parenIndex === -1) {
+    return {
+      name: trimmed.toUpperCase(),
+      street: '',
+      neighborhood: '',
+      postalCode: '',
+      city: '',
+      phone: '',
+      guarantees: ''
+    };
+  }
+
+  const name = trimmed.substring(0, parenIndex).trim().toUpperCase();
+
+  // Contenido dentro del paréntesis
+  let inside = trimmed.substring(parenIndex + 1).trim();
+  if (inside.endsWith(')')) {
+    inside = inside.substring(0, inside.length - 1).trim();
+  }
+
+  // Extraer teléfono (Tel: ...)
+  let phone = '';
+  const phoneMatch = inside.match(/Tel(?:[eé]fono)?:\s*([^,]+)/i);
+  if (phoneMatch) {
+    phone = phoneMatch[1].trim().toUpperCase();
+    inside = inside.replace(phoneMatch[0], '');
+  }
+
+  // Extraer garantías (Garantía: ...)
+  let guarantees = '';
+  const guaranteeMatch = inside.match(/Garant[ií]a:\s*([\s\S]+)$/i);
+  if (guaranteeMatch) {
+    guarantees = guaranteeMatch[1].trim().toUpperCase();
+    inside = inside.replace(guaranteeMatch[0], '');
+  }
+
+  // Dar formato con saltos de línea a garantías si vienen continuas (ej. 1.- ALGO2.- OTRO)
+  if (guarantees) {
+    guarantees = guarantees.replace(/(\d+\.-)/g, '\n$1').trim();
+  }
+
+  // Limpiar y separar partes de la dirección
+  const addressParts = inside
+    .split(',')
+    .map(p => p.trim().toUpperCase())
+    .filter(p => p !== '' && !p.startsWith('TEL') && !p.startsWith('GARANT'));
+
+  let street = addressParts[0] || '';
+  let neighborhood = addressParts[1] || '';
+  let postalCode = addressParts[2] || '';
+  let city = addressParts[3] || '';
+
+  // Si el código postal no son números (4 o 5 dígitos) y no hay ciudad asignada
+  if (postalCode && !/^\d{4,5}$/.test(postalCode) && !city) {
+    city = postalCode;
+    postalCode = '';
+  }
+
+  if (addressParts.length > 4 && !city) {
+    city = addressParts.slice(3).join(', ');
+  }
+
+  return { name, street, neighborhood, postalCode, city, phone, guarantees };
+}
