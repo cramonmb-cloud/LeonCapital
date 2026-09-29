@@ -39,6 +39,7 @@ export type Loan = {
   startDate: string;
   status: 'Active' | 'Overdue' | 'Paid Off' | 'Pagado desde CV';
   payments: Payment[];
+  createdAt?: string;
 };
 
 export type Wallet = {

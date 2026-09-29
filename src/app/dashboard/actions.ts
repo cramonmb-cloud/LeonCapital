@@ -130,6 +130,7 @@ export async function createLoanAction(input: CreateLoanInput) {
             startDate: saturday.toISOString(),
             status: 'Active' as const,
             payments: [],
+            createdAt: mexicoNow.toISOString(),
         };
         
         await addDoc(collection(db, 'loans'), newLoan);

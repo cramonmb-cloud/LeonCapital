@@ -44,7 +44,7 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import type { Client, Loan, LoanPlan, Promotora, Plaza, Localidad } from '@/lib/types';
-import { PlusCircle, Loader2, AlertTriangle, BadgeDollarSign, Calendar, CheckCircle2 } from 'lucide-react';
+import { PlusCircle, Loader2, AlertTriangle, BadgeDollarSign, Calendar, CheckCircle2, X } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { createLoanAction, payOffLoanAction } from '@/app/dashboard/actions';
 import { useRouter } from 'next/navigation';
@@ -54,7 +54,7 @@ import { IdScanner } from './id-scanner';
 import type { IdDataOutput } from '@/ai/flows/extract-id-data-flow';
 import { useAuth } from '@/hooks/use-auth';
 import { useRealtimeData } from '@/hooks/use-realtime-data';
-import { getCurrentLoanWeekNumber, parseEndorsement } from '@/lib/utils';
+import { getCurrentLoanWeekNumber, parseEndorsement, getMexicoNow, getSaturdayOfWeek } from '@/lib/utils';
 
 const stepOneSchema = z.object({
   promotoraId: z.string().min(1, 'Debes seleccionar una promotora.'),
@@ -91,6 +91,18 @@ interface GuarantorSuggestion {
   city: string;
   phone: string;
   guarantee: string;
+}
+
+interface CapturedLoanItem {
+  id: string;
+  clientName: string;
+  amount: number;
+  ratePerThousand: number;
+  weeklyPayment: number;
+  termInWeeks: number;
+  planName: string;
+  promotoraId: string;
+  capturedDate: string;
 }
 
 interface CreateLoanDialogProps {
@@ -148,6 +160,7 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
   const prevOpenRef = useRef(false);
   const [showExitConfirm, setShowExitConfirm] = useState(false);
   const [step, setStep] = useState(1);
+  const [localCapturedLoans, setLocalCapturedLoans] = useState<CapturedLoanItem[]>([]);
   const [matchingClients, setMatchingClients] = useState<Client[]>([]);
   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
   const [activeLoanDetails, setActiveLoanDetails] = useState<ActiveLoanDetails | null>(null);
@@ -214,6 +227,87 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
   const watchLoanPlanId = form.watch('loanPlanId');
   const watchAmount = form.watch('amount');
   const watchPromotoraId = form.watch('promotoraId');
+
+  // Préstamos capturados visibles: solo los registrados en el DÍA ACTUAL (hora México) que aún no han sido acumulados
+  const capturedLoans = useMemo(() => {
+    const currentPromId = watchPromotoraId || initialSelection?.promotoraId;
+    if (!currentPromId) return [];
+
+    const mexicoNow = getMexicoNow();
+    const todayMexicoStr = mexicoNow.toLocaleDateString('en-CA');
+
+    const clientMap = new Map(clients.map(c => [c.id, c.name]));
+    const planMap = new Map(loanPlans.map(p => [p.id, p]));
+
+    // Préstamos de Firestore de esta promotora, capturados HOY y sin pagos activos (sin acumular)
+    const unaccumulatedFromDb = loans.filter(l => {
+      if (l.promotoraId !== currentPromId) return false;
+      if (l.status !== 'Active') return false;
+
+      // Verificar que haya sido capturado en el día de hoy (hora México)
+      if (l.createdAt) {
+        const loanCreatedDate = new Date(l.createdAt).toLocaleDateString('en-CA', { timeZone: 'America/Mexico_City' });
+        if (loanCreatedDate !== todayMexicoStr) return false;
+      } else {
+        // Préstamos sin fecha de creación explícita no se muestran para evitar cargar días anteriores
+        return false;
+      }
+
+      const hasActivePayments = (l.payments || []).some(p => !p.isReverted);
+      return !hasActivePayments;
+    });
+
+    const mappedDbLoans: CapturedLoanItem[] = unaccumulatedFromDb.map(l => {
+      const plan = planMap.get(l.loanPlanId);
+      const clientName = (clientMap.get(l.clientId) || 'CLIENTE').toUpperCase();
+      const rate = plan?.weeklyPaymentRate || 0;
+      const wp = plan ? (l.amount / 1000) * rate : 0;
+      return {
+        id: l.id,
+        clientName,
+        amount: l.amount,
+        ratePerThousand: rate,
+        weeklyPayment: wp,
+        termInWeeks: plan?.termInWeeks || 0,
+        planName: plan?.name || '—',
+        promotoraId: l.promotoraId || currentPromId,
+        capturedDate: todayMexicoStr,
+      };
+    });
+
+    // Unir con los locales recién registrados que pertenezcan a HOY
+    const dbLoanIds = new Set(unaccumulatedFromDb.map(l => l.id));
+    const pendingLocals = localCapturedLoans.filter(loc => 
+      loc.promotoraId === currentPromId && 
+      loc.capturedDate === todayMexicoStr && 
+      !dbLoanIds.has(loc.id)
+    );
+
+    const result: CapturedLoanItem[] = [...pendingLocals];
+    mappedDbLoans.forEach(dbItem => {
+      const alreadyInList = result.some(r => r.id === dbItem.id || (r.clientName === dbItem.clientName && r.amount === dbItem.amount));
+      if (!alreadyInList) {
+        result.push(dbItem);
+      }
+    });
+
+    return result;
+  }, [loans, clients, loanPlans, watchPromotoraId, initialSelection, localCapturedLoans]);
+
+  // Si los préstamos en Firestore ya tienen pagos acumulados o ya cambió el día, depurar la lista local
+  useEffect(() => {
+    if (localCapturedLoans.length > 0) {
+      const todayMexicoStr = getMexicoNow().toLocaleDateString('en-CA');
+      setLocalCapturedLoans(prev => prev.filter(local => {
+        if (local.capturedDate !== todayMexicoStr) return false;
+        const matchingLoan = loans.find(l => l.id === local.id || (l.status === 'Active' && l.promotoraId === local.promotoraId && l.amount === local.amount));
+        if (matchingLoan && (matchingLoan.payments || []).some(p => p.weekNumber === 1 && !p.isReverted)) {
+          return false;
+        }
+        return true;
+      }));
+    }
+  }, [loans, localCapturedLoans.length]);
 
   const calculatedAbono = useMemo(() => {
     if (!watchLoanPlanId || !watchAmount) return 0;
@@ -768,17 +862,68 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
             });
 
             if (result.success) {
+                const plan = loanPlans.find(p => p.id === values.loanPlanId);
+                const weeklyPayment = plan ? (Number(values.amount) / 1000) * plan.weeklyPaymentRate : 0;
+                const ratePerThousand = plan ? plan.weeklyPaymentRate : 0;
+                const todayMexicoStr = getMexicoNow().toLocaleDateString('en-CA');
+
+                // Registrar en la lista local de préstamos capturados de la sesión actual
+                setLocalCapturedLoans(prev => [
+                    {
+                        id: `local-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+                        clientName: values.clientName.trim().toUpperCase(),
+                        amount: Number(values.amount),
+                        ratePerThousand: ratePerThousand,
+                        weeklyPayment: weeklyPayment,
+                        termInWeeks: plan?.termInWeeks || 0,
+                        planName: plan?.name || '—',
+                        promotoraId: values.promotoraId,
+                        capturedDate: todayMexicoStr,
+                    },
+                    ...prev
+                ]);
+
                 toast({
-                    title: 'Préstamo Creado',
-                    description: `El préstamo para ${values.clientName} ha sido creado exitosamente.`,
+                    title: 'Préstamo Creado Exitosamente',
+                    description: `El préstamo para ${values.clientName} ha sido registrado. Puedes continuar capturando el siguiente cliente.`,
                 });
+                
+                router.refresh();
                 setShowConfirmation(false);
                 setFormValues(null);
-                setOpen(false);
+                // NO cerramos la ventana: volvemos al paso 1 para capturar al siguiente cliente
                 setStep(1);
                 setSelectedClient(null);
                 setActiveLoanDetails(null);
-                form.reset();
+                setMatchingClients([]);
+                setMatchingGuarantors([]);
+
+                // Mantener promotora y tipo de préstamo seleccionados, limpiar datos del cliente
+                form.reset({
+                    promotoraId: values.promotoraId,
+                    loanPlanId: values.loanPlanId,
+                    amount: 0,
+                    clientName: '',
+                    phone: '',
+                    street: '',
+                    neighborhood: '',
+                    postalCode: '',
+                    city: '',
+                    guarantee: '1.- \n2.- \n3.- \n4.- ',
+                    endorsement: '',
+                    endorsementStreet: '',
+                    endorsementNeighborhood: '',
+                    endorsementPostalCode: '',
+                    endorsementCity: '',
+                    endorsementPhone: '',
+                    endorsementGuarantee: '1.- \n2.- \n3.- \n4.- ',
+                });
+
+                // Foco automático en el campo del nombre del cliente para captura rápida
+                setTimeout(() => {
+                    const clientInput = document.querySelector<HTMLInputElement>('input[name="clientName"]');
+                    clientInput?.focus();
+                }, 120);
             } else {
                 throw new Error(result.message || 'Error desconocido');
             }
@@ -837,6 +982,23 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
     } else {
       setOpen(true);
     }
+  };
+
+  const handleFinishCapture = () => {
+    const currentValues = form.getValues();
+    const hasData = (
+      step === 2 ||
+      (currentValues.clientName && currentValues.clientName.trim().length > 0) ||
+      (currentValues.amount && Number(currentValues.amount) > 0) ||
+      (currentValues.street && currentValues.street.trim().length > 0) ||
+      (currentValues.endorsement && currentValues.endorsement.trim().length > 0)
+    );
+
+    if (hasData && !isSubmitting) {
+      setShowExitConfirm(true);
+      return;
+    }
+    setOpen(false);
   };
 
   const handleConfirmExit = () => {
@@ -935,8 +1097,15 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
       >
         <Form {...form}>
           <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-3">
-            <DialogHeader className="space-y-0.5 pb-2 border-b">
-              <DialogTitle className="uppercase font-black tracking-tight text-lg">Crear Nuevo Préstamo - Paso {step} de 2</DialogTitle>
+            <DialogHeader className="flex flex-row items-center justify-between space-y-0 pb-2 border-b">
+              <DialogTitle className="uppercase font-black tracking-tight text-lg">
+                Crear Nuevo Préstamo - Paso {step} de 2
+              </DialogTitle>
+              {capturedLoans.length > 0 && (
+                <Badge variant="outline" className="text-[10px] font-black border-emerald-300 bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:border-emerald-800 dark:text-emerald-300">
+                  {capturedLoans.length} {capturedLoans.length === 1 ? 'crédito capturado' : 'créditos capturados'}
+                </Badge>
+              )}
             </DialogHeader>
 
             {step === 1 && (
@@ -1138,6 +1307,73 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
                       />
                     </FormControl>
                   </FormItem>
+                </div>
+
+                {/* Sección de Préstamos Capturados (Estilo Ventana de Captura) */}
+                <div className="mt-4 border rounded-xl bg-slate-50/70 dark:bg-zinc-900/60 border-slate-200 dark:border-zinc-800 overflow-hidden shadow-sm">
+                  <div className="bg-slate-100/90 dark:bg-zinc-800/80 px-3.5 py-2 border-b border-slate-200 dark:border-zinc-700 flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-black uppercase tracking-tight text-slate-700 dark:text-zinc-200">
+                        Préstamos capturados
+                      </span>
+                      {capturedLoans.length > 0 && (
+                        <Badge variant="secondary" className="text-[10px] font-black bg-blue-100 dark:bg-blue-950/80 text-blue-700 dark:text-blue-300 border-blue-200">
+                          {capturedLoans.length} {capturedLoans.length === 1 ? 'registrado' : 'registrados'}
+                        </Badge>
+                      )}
+                    </div>
+                    {capturedLoans.length > 0 && (
+                      <div className="text-[11px] font-black text-emerald-700 dark:text-emerald-400">
+                        Total acumulado: {formatCurrency(capturedLoans.reduce((sum, l) => sum + l.amount, 0))}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="overflow-x-auto max-h-48 overflow-y-auto">
+                    <table className="w-full text-left text-xs border-collapse">
+                      <thead>
+                        <tr className="border-b bg-white dark:bg-zinc-950/60 text-[10px] font-black uppercase text-slate-500 dark:text-zinc-400 sticky top-0 z-10">
+                          <th className="py-2 px-3">Cliente</th>
+                          <th className="py-2 px-3 text-right">Importe</th>
+                          <th className="py-2 px-3 text-right">Abono Semanal</th>
+                          <th className="py-2 px-3 text-center">Plazo</th>
+                          <th className="py-2 px-3 text-center">Tipo</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 dark:divide-zinc-800">
+                        {capturedLoans.length === 0 ? (
+                          <tr>
+                            <td colSpan={5} className="py-8 text-center text-xs text-muted-foreground italic font-medium">
+                              No hay prestamos capturados segun el criterio CR
+                            </td>
+                          </tr>
+                        ) : (
+                          capturedLoans.map((loan, idx) => (
+                            <tr 
+                              key={loan.id || idx} 
+                              className="hover:bg-blue-50/50 dark:hover:bg-blue-950/20 transition-colors"
+                            >
+                              <td className="py-2 px-3 font-black uppercase text-slate-800 dark:text-zinc-200">
+                                {loan.clientName}
+                              </td>
+                              <td className="py-2 px-3 text-right font-black text-emerald-600 dark:text-emerald-400">
+                                {formatCurrency(loan.amount)}
+                              </td>
+                              <td className="py-2 px-3 text-right font-bold text-slate-600 dark:text-zinc-400">
+                                {formatCurrency(loan.weeklyPayment)}
+                              </td>
+                              <td className="py-2 px-3 text-center font-bold text-slate-600 dark:text-zinc-400">
+                                {loan.termInWeeks ? `${loan.termInWeeks} sem` : '—'}
+                              </td>
+                              <td className="py-2 px-3 text-center font-bold text-slate-600 dark:text-zinc-400">
+                                {loan.ratePerThousand}
+                              </td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
               </div>
             )}
@@ -1486,18 +1722,36 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
               </div>
             )}
 
-            <DialogFooter className="gap-2 sm:gap-0">
+            <DialogFooter className="flex flex-row items-center justify-between w-full pt-2">
                 {step === 1 && (
-                     <Button type="button" onClick={handleNextStep} disabled={!!activeLoanDetails} className="w-full sm:w-auto font-black uppercase h-11 px-8">Siguiente Paso</Button>
+                     <>
+                        <Button 
+                          type="button" 
+                          variant="outline" 
+                          onClick={handleFinishCapture}
+                          className="border-red-200 hover:bg-red-50 text-red-600 hover:text-red-700 dark:border-red-900/50 dark:hover:bg-red-950/40 font-black uppercase h-11 px-5 flex items-center gap-1.5 shadow-sm"
+                        >
+                          <X className="h-4 w-4 text-red-500" />
+                          Terminar
+                        </Button>
+                        <Button 
+                          type="button" 
+                          onClick={handleNextStep} 
+                          disabled={!!activeLoanDetails} 
+                          className="font-black uppercase h-11 px-8"
+                        >
+                          Siguiente Paso
+                        </Button>
+                     </>
                 )}
                 {step === 2 && (
-                     <>
+                     <div className="flex justify-between items-center w-full">
                         <Button type="button" variant="outline" onClick={() => setStep(1)} className="font-black uppercase h-11">Atrás</Button>
                         <Button type="submit" disabled={isSubmitting} className="font-black uppercase h-11 px-8">
                             {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                             Confirmar y Crear Crédito
                         </Button>
-                     </>
+                     </div>
                 )}
             </DialogFooter>
           </form>
