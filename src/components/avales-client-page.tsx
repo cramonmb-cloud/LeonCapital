@@ -74,7 +74,7 @@ import {
   Home
 } from 'lucide-react';
 import Link from 'next/link';
-import { cn } from '@/lib/utils';
+import { cn, getCurrentLoanWeekNumber } from '@/lib/utils';
 
 interface jsPDFWithAutoTable extends jsPDF {
   autoTable: (options: UserOptions) => jsPDF;
@@ -1206,14 +1206,8 @@ export function AvalesClientPage({
             const weeklyPayment = plan ? (currentSelectedLoan.amount / 1000) * plan.weeklyPaymentRate : 0;
             const baseTerm = plan?.termInWeeks || 16;
             
-            const now = new Date();
-            const loanStartDate = new Date(currentSelectedLoan.startDate);
-            const startDayUTC = new Date(Date.UTC(loanStartDate.getUTCFullYear(), loanStartDate.getUTCMonth(), loanStartDate.getUTCDate()));
-            const todayUTC = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
-            const daysDiff = Math.round((todayUTC.getTime() - startDayUTC.getTime()) / (1000 * 3600 * 24));
-            const currentWeekSafe = Math.max(1, Math.floor((daysDiff - 1) / 7) + 1);
-            
-            const isExpired = currentWeekSafe > baseTerm + 1;
+            const currentLoanWeek = Math.max(1, getCurrentLoanWeekNumber(currentSelectedLoan.startDate));
+            const isExpired = currentLoanWeek > baseTerm;
 
             let missedCount = 0;
             let totalPaidInBaseTerm = 0;
@@ -1227,7 +1221,7 @@ export function AvalesClientPage({
                   missedCount++;
                   baseArrears += (weeklyPayment - p.amount);
                 }
-              } else if (i < currentWeekSafe - 1) {
+              } else if (i < currentLoanWeek) {
                 missedCount++;
                 baseArrears += weeklyPayment;
               }
@@ -1329,7 +1323,7 @@ export function AvalesClientPage({
                         <div className="bg-white border rounded-xl p-2 text-center shadow-sm">
                           <p className="text-[8px] font-black text-zinc-400 uppercase tracking-widest mb-0.5">Semana</p>
                           <p className="text-base font-black text-zinc-900 leading-none">
-                            {Math.min(currentWeekSafe, totalTerm)} <span className="text-zinc-300 text-xs">/ {totalTerm}</span>
+                            {Math.min(currentLoanWeek, totalTerm)} <span className="text-zinc-300 text-xs">/ {totalTerm}</span>
                           </p>
                         </div>
                         <div className="bg-indigo-50/50 border border-indigo-100 rounded-xl p-2 text-center shadow-sm">
@@ -1436,7 +1430,6 @@ export function AvalesClientPage({
                                 
                                 const dueDate = new Date(currentSelectedLoan.startDate);
                                 dueDate.setDate(dueDate.getDate() + (weekNum * 7));
-                                const isPastDate = now > dueDate;
                                 
                                 let statusText = 'Pendiente';
                                 let statusType: 'PAID' | 'MISSED' | 'PENDING' = 'PENDING';
@@ -1452,7 +1445,7 @@ export function AvalesClientPage({
                                       statusText = 'FALLO';
                                       statusType = 'MISSED';
                                     }
-                                } else if (isPastDate || weekNum < currentWeekSafe - 1) {
+                                } else if (weekNum < currentLoanWeek) {
                                   statusText = 'FALLO';
                                   statusType = 'MISSED';
                                 } else {
@@ -1460,7 +1453,7 @@ export function AvalesClientPage({
                                   statusType = 'PENDING';
                                 }
 
-                                const isCurrentWeek = weekNum === currentWeekSafe;
+                                const isCurrentWeek = weekNum === currentLoanWeek;
 
                               return (
                                 <TableRow 

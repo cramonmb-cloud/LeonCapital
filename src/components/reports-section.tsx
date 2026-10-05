@@ -13,6 +13,7 @@ import 'jspdf-autotable';
 import type { UserOptions } from 'jspdf-autotable';
 import { useToast } from '@/hooks/use-toast';
 import type { DateRange } from 'react-day-picker';
+import { getCurrentLoanWeekNumber } from '@/lib/utils';
 
 interface jsPDFWithAutoTable extends jsPDF {
   autoTable: (options: UserOptions) => jsPDF;
@@ -109,11 +110,8 @@ export function ReportsSection({ loans, clients, loanPlans, plazas, localidades,
           // Segment by report type
           const weeklyPayment = (loan.amount / 1000) * plan.weeklyPaymentRate;
           const baseTerm = plan.termInWeeks;
-          const loanStartDate = parseDate(loan.startDate);
-          const startDayUTC = new Date(Date.UTC(loanStartDate.getUTCFullYear(), loanStartDate.getUTCMonth(), loanStartDate.getUTCDate()));
-          const daysDiff = Math.round((todayUTC.getTime() - startDayUTC.getTime()) / (1000 * 3600 * 24));
-          const rawCurrentLoanWeek = Math.max(1, Math.floor((daysDiff - 1) / 7) + 1);
-          const isExpired = rawCurrentLoanWeek > baseTerm + 1;
+          const currentLoanWeek = Math.max(1, getCurrentLoanWeekNumber(loan.startDate));
+          const isExpired = currentLoanWeek > baseTerm;
 
           const currentPayments = loan.payments || [];
           const actualTotalPaid = currentPayments.reduce((acc, p) => acc + p.amount, 0);
@@ -130,7 +128,7 @@ export function ReportsSection({ loans, clients, loanPlans, plazas, localidades,
                 missedCount++;
                 baseArrears += (weeklyPayment - p.amount);
               }
-            } else if (i < rawCurrentLoanWeek - 1) {
+            } else if (i < currentLoanWeek) {
               missedCount++;
               baseArrears += weeklyPayment;
             }
@@ -177,9 +175,7 @@ export function ReportsSection({ loans, clients, loanPlans, plazas, localidades,
           let baseArrears = 0;
 
           const loanStartDate = parseDate(loan.startDate);
-          const startDayUTC = new Date(Date.UTC(loanStartDate.getUTCFullYear(), loanStartDate.getUTCMonth(), loanStartDate.getUTCDate()));
-          const daysDiff = Math.round((todayUTC.getTime() - startDayUTC.getTime()) / (1000 * 3600 * 24));
-          const rawCurrentLoanWeek = Math.max(1, Math.floor((daysDiff - 1) / 7) + 1);
+          const currentLoanWeek = Math.max(1, getCurrentLoanWeekNumber(loan.startDate));
 
           for (let i = 1; i <= baseTerm; i++) {
             const p = currentPayments.find(pay => pay.weekNumber === i);
@@ -189,13 +185,13 @@ export function ReportsSection({ loans, clients, loanPlans, plazas, localidades,
                 missedCount++;
                 baseArrears += (weeklyPayment - p.amount);
               }
-            } else if (i < rawCurrentLoanWeek - 1) {
+            } else if (i < currentLoanWeek) {
               missedCount++;
               baseArrears += weeklyPayment;
             }
           }
 
-          const hasPenalty = (missedCount >= 2) || (rawCurrentLoanWeek > baseTerm + 1 && totalPaidInBaseTerm < (baseTerm * weeklyPayment));
+          const hasPenalty = (missedCount >= 2) || (currentLoanWeek > baseTerm && totalPaidInBaseTerm < (baseTerm * weeklyPayment));
           let penaltyArrear = 0;
           if (hasPenalty) {
               const penaltyWeekNum = baseTerm + 1;
@@ -273,15 +269,12 @@ export function ReportsSection({ loans, clients, loanPlans, plazas, localidades,
             
             const weeklyPayment = (loan.amount / 1000) * plan.weeklyPaymentRate;
             const baseTerm = plan.termInWeeks;
-            const loanStartDate = parseDate(loan.startDate);
-            const startDayUTC = new Date(Date.UTC(loanStartDate.getUTCFullYear(), loanStartDate.getUTCMonth(), loanStartDate.getUTCDate()));
-            const daysDiff = Math.round((todayUTC.getTime() - startDayUTC.getTime()) / (1000 * 3600 * 24));
-            const rawCurrentLoanWeek = Math.max(1, Math.floor((daysDiff - 1) / 7) + 1);
+            const currentLoanWeek = Math.max(1, getCurrentLoanWeekNumber(loan.startDate));
 
             let missedCount = 0;
             for (let i = 1; i <= baseTerm; i++) {
               const p = loan.payments.find(pay => pay.weekNumber === i);
-              if (!p && i < rawCurrentLoanWeek - 1) {
+              if (!p && i < currentLoanWeek) {
                 missedCount++;
               }
             }
@@ -302,10 +295,7 @@ export function ReportsSection({ loans, clients, loanPlans, plazas, localidades,
           const weeklyPayment = (loan.amount / 1000) * plan.weeklyPaymentRate;
           const baseTerm = plan.termInWeeks;
           
-          const loanStartDate = parseDate(loan.startDate);
-          const startDayUTC = new Date(Date.UTC(loanStartDate.getUTCFullYear(), loanStartDate.getUTCMonth(), loanStartDate.getUTCDate()));
-          const daysDiff = Math.round((todayUTC.getTime() - startDayUTC.getTime()) / (1000 * 3600 * 24));
-          const rawCurrentLoanWeek = Math.max(1, Math.floor((daysDiff - 1) / 7) + 1);
+          const currentLoanWeek = Math.max(1, getCurrentLoanWeekNumber(loan.startDate));
 
           let missedCount = 0;
           const currentPayments = loan.payments || [];
@@ -313,11 +303,11 @@ export function ReportsSection({ loans, clients, loanPlans, plazas, localidades,
 
           for (let i = 1; i <= baseTerm; i++) {
             const p = currentPayments.find(pay => pay.weekNumber === i);
-            if (!p && i < rawCurrentLoanWeek - 1) {
+            if (!p && i < currentLoanWeek) {
               missedCount++;
             }
           }
-          const hasPenalty = (missedCount >= 2) || (rawCurrentLoanWeek > baseTerm + 1 && (actualTotalPaid < baseTerm * weeklyPayment));
+          const hasPenalty = (missedCount >= 2) || (currentLoanWeek > baseTerm && (actualTotalPaid < baseTerm * weeklyPayment));
           const totalTerm = baseTerm + (hasPenalty ? 1 : 0);
           totalDebt += Math.max(0, (totalTerm * weeklyPayment) - actualTotalPaid);
         });

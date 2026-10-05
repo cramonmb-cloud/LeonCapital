@@ -8,8 +8,8 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Search, Wallet, Calendar, Shield, Phone, Home, X, CircleDollarSign, Building, MapPin, List, ChevronRight, UserCheck, Smartphone, Info, Route, ArrowRight, AlertTriangle, User, Monitor, Filter, ListTodo, History, PencilLine } from 'lucide-react';
 import { Separator } from './ui/separator';
 import { Button } from './ui/button';
-import { cn } from '@/lib/utils';
 import { Badge } from './ui/badge';
+import { cn, getCurrentLoanWeekNumber } from '@/lib/utils';
 import { useAuth } from '@/hooks/use-auth';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { ScrollArea } from './ui/scroll-area';
@@ -202,15 +202,9 @@ export function ConsultarClientePage({ clients: allClients, loans: allLoans, loa
 
     const weeklyPayment = (activeLoan.amount / 1000) * loanPlan.weeklyPaymentRate;
     
-    const now = new Date();
-    const loanStartDate = new Date(activeLoan.startDate);
-    const startDayUTC = new Date(Date.UTC(loanStartDate.getUTCFullYear(), loanStartDate.getUTCMonth(), loanStartDate.getUTCDate()));
-    const todayUTC = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
-    const daysDiff = Math.round((todayUTC.getTime() - startDayUTC.getTime()) / (1000 * 3600 * 24));
-    const currentWeekSafe = Math.max(1, Math.floor((daysDiff - 1) / 7) + 1);
-    
+    const currentLoanWeek = Math.max(1, getCurrentLoanWeekNumber(activeLoan.startDate));
     const baseTerm = loanPlan.termInWeeks;
-    const isExpired = currentWeekSafe > baseTerm + 1;
+    const isExpired = currentLoanWeek > baseTerm;
 
     let missedCount = 0;
     let totalPaidInBaseTerm = 0;
@@ -224,7 +218,7 @@ export function ConsultarClientePage({ clients: allClients, loans: allLoans, loa
                 missedCount++;
                 baseArrears += (weeklyPayment - p.amount);
             }
-        } else if (i < currentWeekSafe - 1) {
+        } else if (i < currentLoanWeek) {
             missedCount++;
             baseArrears += weeklyPayment;
         }
@@ -240,7 +234,7 @@ export function ConsultarClientePage({ clients: allClients, loans: allLoans, loa
     const totalExpected = totalTerm * weeklyPayment;
     const totalBalanceDue = Math.max(0, totalExpected - actualTotalPaid);
 
-    const currentLoanWeekDisplay = Math.min(currentWeekSafe, totalTerm);
+    const currentLoanWeekDisplay = Math.min(currentLoanWeek, totalTerm);
     const promotora = allPromotoras.find(p => p.id === activeLoan.promotoraId);
     const localidad = allLocalidades.find(l => l.id === promotora?.localidadId);
     const plaza = allPlazas.find(p => p.id === localidad?.plazaId);
@@ -288,7 +282,7 @@ export function ConsultarClientePage({ clients: allClients, loans: allLoans, loa
 
         const dueDate = new Date(startDate);
         dueDate.setUTCDate(dueDate.getUTCDate() + (i * 7));
-        const isPast = today > dueDate;
+        const isPast = i < currentLoanWeek;
         
         let statusType: 'PAID' | 'MISSED' | 'PENDING' = 'PENDING';
         let statusText = '';
@@ -306,7 +300,7 @@ export function ConsultarClientePage({ clients: allClients, loans: allLoans, loa
                 statusText = 'FALLO';
                 statusType = 'MISSED';
             }
-        } else if (isPast || i < currentLoanWeek - 1) {
+        } else if (isPast) {
             statusText = 'FALLO';
             statusType = 'MISSED';
         } else {

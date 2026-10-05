@@ -23,7 +23,7 @@ import {
     DialogTitle,
 } from '@/components/ui/dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { cn, getSaturdayOfWeek } from '@/lib/utils';
+import { cn, getSaturdayOfWeek, getCurrentLoanWeekNumber } from '@/lib/utils';
 import { ManualPaymentAdjustmentDialog } from '@/components/manual-payment-adjustment-dialog';
 
 
@@ -124,15 +124,11 @@ export function ClientLoansTable({ clientLoans, loanPlans, allLoans, users, plaz
       if (!plan) return [];
 
       const weeklyPayment = (loanForDetails.amount / 1000) * plan.weeklyPaymentRate;
-      const today = new Date();
       const startDate = new Date(loanForDetails.startDate);
-      const startDayUTC = new Date(Date.UTC(startDate.getUTCFullYear(), startDate.getUTCMonth(), startDate.getUTCDate()));
-      const todayUTC = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()));
-      const daysDiff = Math.round((todayUTC.getTime() - startDayUTC.getTime()) / (1000 * 3600 * 24));
-      const currentWeekSafe = Math.max(1, Math.floor((daysDiff - 1) / 7) + 1);
+      const currentLoanWeek = Math.max(1, getCurrentLoanWeekNumber(loanForDetails.startDate));
 
       const baseTerm = plan.termInWeeks;
-      const isExpired = currentWeekSafe > baseTerm + 1;
+      const isExpired = currentLoanWeek > baseTerm;
 
       let missedCount = 0;
       let totalPaidInBaseTerm = 0;
@@ -141,7 +137,7 @@ export function ClientLoansTable({ clientLoans, loanPlans, allLoans, users, plaz
           if (p && !p.isReverted) {
               totalPaidInBaseTerm += p.amount;
               if (p.amount < weeklyPayment) missedCount++;
-          } else if (i < currentWeekSafe - 1) {
+          } else if (i < currentLoanWeek) {
               missedCount++;
           }
       }

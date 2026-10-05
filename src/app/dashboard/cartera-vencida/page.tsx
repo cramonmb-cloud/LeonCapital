@@ -1,6 +1,7 @@
 import { getClients, getLoanPlans, getActiveLoans, getPlazas, getLocalidades, getPromotoras, getAppConfig } from '@/lib/firestore-data';
 import type { Client, Loan, LoanPlan, Plaza, Localidad, Promotora } from '@/lib/types';
 import { OverduePortfolioClientPage } from '@/components/overdue-portfolio-client-page';
+import { getCurrentLoanWeekNumber } from '@/lib/utils';
 
 export type OverdueLoanDetails = {
     loan: Loan;
@@ -44,17 +45,9 @@ export default async function CarteraVencidaPage() {
             if (!client || !loanPlan) return null;
 
             const weeklyPayment = (loan.amount / 1000) * loanPlan.weeklyPaymentRate;
-            const today = new Date();
-            const loanStartDate = new Date(loan.startDate);
             const baseTerm = loanPlan.termInWeeks;
-            
-            // Normalización UTC para el cálculo de expiración
-            const startDayUTC = new Date(Date.UTC(loanStartDate.getUTCFullYear(), loanStartDate.getUTCMonth(), loanStartDate.getUTCDate()));
-            const todayUTC = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()));
-            const daysDiff = Math.round((todayUTC.getTime() - startDayUTC.getTime()) / (1000 * 3600 * 24));
-            
-            const rawCurrentLoanWeek = Math.max(1, Math.floor((daysDiff - 1) / 7) + 1);
-            const isExpired = rawCurrentLoanWeek > baseTerm + 1;
+            const currentLoanWeek = Math.max(1, getCurrentLoanWeekNumber(loan.startDate));
+            const isExpired = currentLoanWeek > baseTerm;
 
             // CARTERA VENCIDA: Solo préstamos expirados (superan plazo base)
             if (!isExpired) return null;

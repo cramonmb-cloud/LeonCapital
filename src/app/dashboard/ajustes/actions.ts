@@ -4,6 +4,7 @@ import { db } from '@/lib/firebase';
 import { collection, getDocs, writeBatch, doc, getDoc, addDoc, deleteDoc, setDoc, increment, Timestamp, updateDoc } from 'firebase/firestore';
 import { revalidatePath } from 'next/cache';
 import type { Plaza, Localidad, Promotora, AppUser, AppConfig, Loan, LoanPlan, Client, WalletTransaction, WhatsAppTemplates } from '@/lib/types';
+import { getCurrentLoanWeekNumber } from '@/lib/utils';
 
 // Helper to handle Firestore dates consistently in server actions
 const parseFirestoreDate = (date: any): Date => {
@@ -94,15 +95,14 @@ export async function accumulateAllSystemPaymentsAction(userId?: string, onlyPri
             if (!loanPlan) continue;
 
             const loanStartDate = parseFirestoreDate(loan.startDate);
-            const timeDiff = today.getTime() - loanStartDate.getTime();
-            const rawCurrentLoanWeek = Math.floor(timeDiff / (1000 * 3600 * 24 * 7)) + 1;
+            const currentLoanWeek = Math.max(1, getCurrentLoanWeekNumber(loanStartDate));
             
             const weeklyPaymentAmount = (loan.amount / 1000) * loanPlan.weeklyPaymentRate;
             const client = clients.find(c => c.id === loan.clientId);
             
             // REGLA DE SEGURIDAD: Solo procesar hasta el plazo base (loanPlan.termInWeeks)
             // No autocompletar la semana extra en sincronización masiva.
-            const rawLimit = onlyPriorWeek ? rawCurrentLoanWeek - 1 : rawCurrentLoanWeek;
+            const rawLimit = onlyPriorWeek ? currentLoanWeek - 1 : currentLoanWeek;
             const currentWeekToFill = Math.min(rawLimit, loanPlan.termInWeeks);
 
             const currentPayments = (loan.payments || []).map((p: any) => ({
@@ -153,9 +153,9 @@ export async function accumulateAllSystemPaymentsAction(userId?: string, onlyPri
             const totalLoanAmount = weeklyPaymentAmount * loanPlan.termInWeeks;
             let newStatus = loan.status;
             if (effectivePaid >= totalLoanAmount) {
-                newStatus = (loan.status === 'Overdue' || rawCurrentLoanWeek > loanPlan.termInWeeks) ? 'Pagado desde CV' : 'Paid Off';
+                newStatus = (loan.status === 'Overdue' || currentLoanWeek > loanPlan.termInWeeks) ? 'Pagado desde CV' : 'Paid Off';
             } else {
-                const isExpired = rawCurrentLoanWeek > loanPlan.termInWeeks + 1;
+                const isExpired = currentLoanWeek > loanPlan.termInWeeks;
                 if (isExpired) {
                     newStatus = 'Overdue';
                 }

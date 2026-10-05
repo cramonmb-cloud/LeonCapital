@@ -23,7 +23,7 @@ import {
     DialogDescription,
 } from '@/components/ui/dialog';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { cn, getSaturdayOfWeek } from '@/lib/utils';
+import { cn, getSaturdayOfWeek, getCurrentLoanWeekNumber } from '@/lib/utils';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import {
     Table,
@@ -94,13 +94,8 @@ export function OverdueCard({
         const loanStartDate = new Date(loan.startDate);
         const baseTerm = loanPlan.termInWeeks;
         
-        // Normalización UTC
-        const startDayUTC = new Date(Date.UTC(loanStartDate.getUTCFullYear(), loanStartDate.getUTCMonth(), loanStartDate.getUTCDate()));
-        const todayUTC = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()));
-        const daysDiff = Math.round((todayUTC.getTime() - startDayUTC.getTime()) / (1000 * 3600 * 24));
-        
-        const rawCurrentLoanWeek = Math.max(1, Math.floor((daysDiff - 1) / 7) + 1);
-        const isExpired = rawCurrentLoanWeek > baseTerm + 1;
+        const currentLoanWeek = Math.max(1, getCurrentLoanWeekNumber(loan.startDate));
+        const isExpired = currentLoanWeek > baseTerm;
 
         let missedCount = 0;
         let sumMissedAmount = 0;
@@ -113,7 +108,7 @@ export function OverdueCard({
                     missedCount++;
                     sumMissedAmount += (weeklyPayment - p.amount);
                 }
-            } else if (i < rawCurrentLoanWeek - 1) {
+            } else if (i < currentLoanWeek) {
                 missedCount++;
                 sumMissedAmount += weeklyPayment;
             }
@@ -140,7 +135,7 @@ export function OverdueCard({
         return {
             weeklyPayment,
             termInWeeks: baseTerm + (hasPenalty ? 1 : 0),
-            currentProgressWeek: Math.min(rawCurrentLoanWeek, baseTerm + (hasPenalty ? 1 : 0)),
+            currentProgressWeek: Math.min(currentLoanWeek, baseTerm + (hasPenalty ? 1 : 0)),
             loanWeekDate: getSaturdayOfWeek(loanStartDate),
             maturityDate,
             hasPenalty,
@@ -198,7 +193,7 @@ export function OverdueCard({
 
             const dueDate = new Date(startDate);
             dueDate.setUTCDate(dueDate.getUTCDate() + (i * 7));
-            const isPast = today > dueDate;
+            const isPast = i < metrics.currentProgressWeek;
             
             let statusType: 'PAID' | 'MISSED' | 'PENDING' = 'PENDING';
             let statusText = '';

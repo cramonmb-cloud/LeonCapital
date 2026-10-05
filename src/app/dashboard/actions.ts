@@ -331,13 +331,8 @@ export async function registerPaymentAction(loanId: string, paymentStartDate: Da
                 });
             }
             
-            const mexicoNow = getMexicoNow();
             const loanStartDate = parseFirestoreDate(loan.startDate);
-            
-            // Calculamos la diferencia de días basada en la fecha normalizada de México
-            const diffTime = Math.abs(mexicoNow.getTime() - loanStartDate.getTime());
-            const daysDiff = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-            const rawCurrentLoanWeek = Math.max(1, Math.floor((daysDiff - 1) / 7) + 1);
+            const currentLoanWeek = Math.max(1, getCurrentLoanWeekNumber(loanStartDate));
 
             const originalTotalPaid = (loan.payments || []).reduce((acc, p) => acc + p.amount, 0);
             const newTotalPaid = allPayments.reduce((acc, p) => acc + p.amount, 0);
@@ -370,12 +365,12 @@ export async function registerPaymentAction(loanId: string, paymentStartDate: Da
                 if (p) {
                     totalPaidInBaseTerm += p.amount;
                     if (p.amount < weeklyPayment) missedCount++;
-                } else if (i < rawCurrentLoanWeek - 1) {
+                } else if (i < currentLoanWeek) {
                     missedCount++;
                 }
             }
 
-            const isExpired = rawCurrentLoanWeek > baseTerm + 1;
+            const isExpired = currentLoanWeek > baseTerm;
             const hasPenalty = (missedCount >= 2) || (isExpired && totalPaidInBaseTerm < (baseTerm * weeklyPayment));
             
             const totalTerm = baseTerm + (hasPenalty ? 1 : 0);
@@ -386,7 +381,7 @@ export async function registerPaymentAction(loanId: string, paymentStartDate: Da
             if (balance <= 0) {
                 newStatus = (isExpired || hasPenalty) ? 'Pagado desde CV' : 'Paid Off';
             } else {
-                newStatus = (isExpired || rawCurrentLoanWeek > totalTerm + 1) ? 'Overdue' : 'Active';
+                newStatus = (isExpired || currentLoanWeek > totalTerm) ? 'Overdue' : 'Active';
             }
 
             transaction.update(loanRef, {
@@ -424,15 +419,11 @@ export async function payOffLoanAction(loanId: string, userId?: string) {
             }
 
             const weeklyPayment = (loan.amount / 1000) * loanPlan.weeklyPaymentRate;
-            const mexicoNow = getMexicoNow();
             const loanStartDate = parseFirestoreDate(loan.startDate);
-            
-            const diffTime = Math.abs(mexicoNow.getTime() - loanStartDate.getTime());
-            const daysDiff = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-            const rawCurrentLoanWeek = Math.max(1, Math.floor((daysDiff - 1) / 7) + 1);
+            const currentLoanWeek = Math.max(1, getCurrentLoanWeekNumber(loanStartDate));
             
             const baseTerm = loanPlan.termInWeeks;
-            const isExpired = rawCurrentLoanWeek > baseTerm + 1;
+            const isExpired = currentLoanWeek > baseTerm;
 
             const currentPayments = (loan.payments || []).map(p => ({
                 ...p,
@@ -446,7 +437,7 @@ export async function payOffLoanAction(loanId: string, userId?: string) {
                 if (p) {
                     totalPaidInBaseTerm += p.amount;
                     if (p.amount < weeklyPayment) missedCount++;
-                } else if (i < rawCurrentLoanWeek - 1) {
+                } else if (i < currentLoanWeek) {
                     missedCount++;
                 }
             }

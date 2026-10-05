@@ -23,8 +23,7 @@ import { useRealtimeData } from '@/hooks/use-realtime-data';
 import { query, where, collection } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import Loading from '@/app/dashboard/loading';
-import { generateColorPalette } from '@/lib/utils';
-import { cn } from '@/lib/utils';
+import { generateColorPalette, cn, getCurrentLoanWeekNumber } from '@/lib/utils';
 
 interface ControlClientPageProps {
     initialClients: Client[];
@@ -40,15 +39,7 @@ const checkPenalty = (loan: Loan, loanPlan: LoanPlan) => {
     let missedWeeksCount = 0;
     let totalPaidInBaseTerm = 0;
     
-    const today = new Date();
-    const loanStartDate = new Date(loan.startDate);
-    const startDayUTC = isNaN(loanStartDate.getTime()) 
-        ? new Date() 
-        : new Date(Date.UTC(loanStartDate.getUTCFullYear(), loanStartDate.getUTCMonth(), loanStartDate.getUTCDate()));
-    const todayUTC = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()));
-    const daysDiff = Math.round((todayUTC.getTime() - startDayUTC.getTime()) / (1000 * 3600 * 24));
-    const currentLoanWeek = isNaN(daysDiff) ? 1 : Math.max(1, Math.floor((daysDiff - 1) / 7) + 1);
-
+    const currentLoanWeek = Math.max(1, getCurrentLoanWeekNumber(loan.startDate));
     const baseTerm = loanPlan.termInWeeks;
     for (let i = 1; i <= baseTerm; i++) {
         const p = loan.payments.find(pay => pay.weekNumber === i);
@@ -56,12 +47,12 @@ const checkPenalty = (loan: Loan, loanPlan: LoanPlan) => {
             const pAmount = (p.amount === null || p.amount === undefined || isNaN(p.amount)) ? 0 : p.amount;
             totalPaidInBaseTerm += pAmount;
             if (pAmount < weeklyPayment) missedWeeksCount++;
-        } else if (i < currentLoanWeek - 1) {
+        } else if (i < currentLoanWeek) {
             missedWeeksCount++;
         }
     }
     
-    const isExpired = currentLoanWeek > baseTerm + 1;
+    const isExpired = currentLoanWeek > baseTerm;
     return (missedWeeksCount >= 2) || (isExpired && totalPaidInBaseTerm < (baseTerm * weeklyPayment));
 };
 
@@ -149,14 +140,7 @@ export function ControlClientPage({ initialClients, initialLoanPlans, initialPla
             const weeklyPayment = (loan.amount / 1000) * loanPlan.weeklyPaymentRate;
             const baseTerm = loanPlan.termInWeeks;
 
-            const today = new Date();
-            const loanStartDate = new Date(loan.startDate);
-            const startDayUTC = isNaN(loanStartDate.getTime()) 
-                ? new Date() 
-                : new Date(Date.UTC(loanStartDate.getUTCFullYear(), loanStartDate.getUTCMonth(), loanStartDate.getUTCDate()));
-            const todayUTC = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()));
-            const daysDiff = Math.round((todayUTC.getTime() - startDayUTC.getTime()) / (1000 * 3600 * 24));
-            const rawCurrentLoanWeek = isNaN(daysDiff) ? 1 : Math.max(1, Math.floor((daysDiff - 1) / 7) + 1);
+            const currentLoanWeek = Math.max(1, getCurrentLoanWeekNumber(loan.startDate));
             
             const actualTotalPaid = (loan.payments || []).reduce((sum, p) => {
                 const pAmount = (p.amount === null || p.amount === undefined || isNaN(p.amount)) ? 0 : p.amount;
@@ -164,7 +148,7 @@ export function ControlClientPage({ initialClients, initialLoanPlans, initialPla
             }, 0);
 
             // CARTERA VENCIDA (PRÉSTAMO EXPIRADO CON ADEUDO)
-            if (rawCurrentLoanWeek > baseTerm + 1) {
+            if (currentLoanWeek > baseTerm) {
                 let totalPaidInBase = 0;
                 let missedCount = 0;
                 for (let i = 1; i <= baseTerm; i++) {
@@ -204,7 +188,7 @@ export function ControlClientPage({ initialClients, initialLoanPlans, initialPla
                 if (p) {
                     const pAmount = (p.amount === null || p.amount === undefined || isNaN(p.amount)) ? 0 : p.amount;
                     effectivePaidForStats += pAmount;
-                } else if (i === rawCurrentLoanWeek - 1) {
+                } else if (i === currentLoanWeek) {
                     effectivePaidForStats += weeklyPayment;
                 }
             }

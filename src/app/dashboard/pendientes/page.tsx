@@ -2,6 +2,7 @@ import { getClients, getLoanPlans, getActiveLoans, getPlazas, getLocalidades, ge
 import type { Client, Loan, LoanPlan, Plaza, Localidad, Promotora } from '@/lib/types';
 import { OverduePortfolioClientPage } from '@/components/overdue-portfolio-client-page';
 import type { OverdueLoanDetails } from '../cartera-vencida/page';
+import { getCurrentLoanWeekNumber } from '@/lib/utils';
 
 export default async function OverduePortfolioPage() {
     const [loans, clients, loanPlans, plazas, localidades, promotoras, config] = await Promise.all([
@@ -26,15 +27,9 @@ export default async function OverduePortfolioPage() {
             if (!client || !loanPlan) return null;
 
             const weeklyPayment = (loan.amount / 1000) * loanPlan.weeklyPaymentRate;
-            const today = new Date();
-            const loanStartDate = new Date(loan.startDate);
             const baseTerm = loanPlan.termInWeeks;
-
-            // Normalización UTC para el cálculo de semanas
-            const startDayUTC = new Date(Date.UTC(loanStartDate.getUTCFullYear(), loanStartDate.getUTCMonth(), loanStartDate.getUTCDate()));
-            const todayUTC = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()));
-            const daysDiff = Math.round((todayUTC.getTime() - startDayUTC.getTime()) / (1000 * 3600 * 24));
-            const rawCurrentLoanWeek = Math.max(1, Math.floor((daysDiff - 1) / 7) + 1);
+            const currentLoanWeek = Math.max(1, getCurrentLoanWeekNumber(loan.startDate));
+            const isExpired = currentLoanWeek > baseTerm;
             
             let missedCount = 0;
             let totalPaidInBaseTerm = 0;
@@ -49,13 +44,11 @@ export default async function OverduePortfolioPage() {
                         missedCount++;
                         baseArrears += (weeklyPayment - p.amount);
                     }
-                } else if (i < rawCurrentLoanWeek - 1) {
+                } else if (i < currentLoanWeek) {
                     missedCount++;
                     baseArrears += weeklyPayment;
                 }
             }
-
-            const isExpired = rawCurrentLoanWeek > baseTerm + 1;
             // REGLA DINÁMICA: Penalización solo si tiene 2+ fallos o venció debiendo del base
             const hasPenalty = (missedCount >= 2) || (isExpired && totalPaidInBaseTerm < (baseTerm * weeklyPayment));
 
