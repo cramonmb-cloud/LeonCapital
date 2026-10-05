@@ -135,6 +135,7 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
   const [isAccumulating, setIsAccumulating] = useState(false);
   const [isAccumulatingAll, setIsAccumulatingAll] = useState(false);
   const [accumulateAllDialogOpen, setAccumulateAllDialogOpen] = useState(false);
+  const [selectedCutoffWeek, setSelectedCutoffWeek] = useState<string>('');
   const [isReverting, setIsReverting] = useState(false);
   const [isChangingDate, setIsChangingDate] = useState(false);
   const [isPayingOff, setIsPayingOff] = useState(false);
@@ -234,6 +235,12 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
     ).sort((a, b) => new Date(b).getTime() - new Date(a).getTime())
   , [loans, loanPlans]);
 
+  const availableCutoffWeeks = useMemo(() => {
+    const currentSatIso = getSaturdayOfWeek(getMexicoNow()).toISOString();
+    const set = new Set<string>([currentSatIso, ...loanWeeks]);
+    return Array.from(set).sort((a, b) => new Date(b).getTime() - new Date(a).getTime());
+  }, [loanWeeks]);
+
 
   const filteredLoans = useMemo(() => {
     const filtered = loans.filter(loan => {
@@ -285,6 +292,57 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
       return false;
     });
   }, [allPromotoraActiveLoans, loanPlans]);
+
+  const accumulatePreview = useMemo(() => {
+    if (!selectedCutoffWeek || !selectedPromotora || allPromotoraActiveLoans.length === 0) {
+      return { loansCount: 0, totalEligibleLoans: 0, paymentsCount: 0, totalAmount: 0 };
+    }
+
+    const cutoffSat = getSaturdayOfWeek(new Date(selectedCutoffWeek));
+    const eligibleLoans = allPromotoraActiveLoans.filter(l => {
+      const loanSat = getSaturdayOfWeek(l.startDate);
+      return loanSat.getTime() <= cutoffSat.getTime();
+    });
+
+    let paymentsCount = 0;
+    let totalAmount = 0;
+    let affectedLoansCount = 0;
+
+    eligibleLoans.forEach(loan => {
+      const plan = loanPlans.find(p => p.id === loan.loanPlanId);
+      if (!plan) return;
+
+      const targetLoanWeek = getCurrentLoanWeekNumber(loan.startDate, cutoffSat);
+      let missedCount = 0;
+      const wp = getWeeklyPaymentAmount(loan);
+      for (let i = 1; i < targetLoanWeek; i++) {
+        const p = (loan.payments || []).find(pay => pay.weekNumber === i);
+        if (p && p.amount < wp) missedCount++;
+      }
+      const term = plan.termInWeeks + (missedCount >= 2 ? 1 : 0);
+      const maxWeekToFill = Math.min(targetLoanWeek, term);
+
+      let loanHasNewPayments = false;
+      for (let w = 1; w <= maxWeekToFill; w++) {
+        const exists = (loan.payments || []).some(p => p.weekNumber === w);
+        if (!exists) {
+          paymentsCount++;
+          totalAmount += wp;
+          loanHasNewPayments = true;
+        }
+      }
+      if (loanHasNewPayments) {
+        affectedLoansCount++;
+      }
+    });
+
+    return {
+      loansCount: affectedLoansCount,
+      totalEligibleLoans: eligibleLoans.length,
+      paymentsCount,
+      totalAmount
+    };
+  }, [selectedCutoffWeek, selectedPromotora, allPromotoraActiveLoans, loanPlans]);
 
   useEffect(() => {
     setSelectedLoanIds(new Set());
@@ -609,16 +667,21 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
     };
 
     const handleAccumulateAllWeeksPayments = async () => {
-        if (!selectedPromotora || allPromotoraActiveLoans.length === 0) return;
+        if (!selectedPromotora || allPromotoraActiveLoans.length === 0 || !selectedCutoffWeek) return;
         
         setIsAccumulatingAll(true);
         try {
-            const loanIds = allPromotoraActiveLoans.map(l => l.id);
-            const result = await accumulateAssumedPaymentsAction(loanIds, appUser?.id);
+            const cutoffSat = getSaturdayOfWeek(new Date(selectedCutoffWeek));
+            const eligibleLoans = allPromotoraActiveLoans.filter(l => {
+                const loanSat = getSaturdayOfWeek(l.startDate);
+                return loanSat.getTime() <= cutoffSat.getTime();
+            });
+            const loanIds = eligibleLoans.map(l => l.id);
+            const result = await accumulateAssumedPaymentsAction(loanIds, appUser?.id, selectedCutoffWeek);
             if (result && result.success) {
                 toast({
                     title: 'Proceso Completado',
-                    description: `Se formalizaron los pagos de todas las semanas de la promotora. ${result.message}`,
+                    description: `Se formalizaron los pagos hasta la semana del ${formatDate(selectedCutoffWeek)}. ${result.message}`,
                 });
                 setAccumulateAllDialogOpen(false);
             } else {
@@ -1257,7 +1320,13 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
             <Button 
                 variant="outline" 
                 size="icon"
-                onClick={() => setAccumulateAllDialogOpen(true)} 
+                onClick={() => {
+                    const defaultWeek = (selectedWeek && availableCutoffWeeks.includes(selectedWeek))
+                        ? selectedWeek
+                        : (availableCutoffWeeks[0] || '');
+                    setSelectedCutoffWeek(defaultWeek);
+                    setAccumulateAllDialogOpen(true);
+                }} 
                 disabled={!selectedPromotora || allPromotoraActiveLoans.length === 0 || !hasAssumedPaymentsInPromotora || isAccumulatingAll}
                 className="text-emerald-700 dark:text-emerald-400 border-emerald-300 dark:border-emerald-800 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 shrink-0"
                 title={!selectedPromotora 
@@ -1715,36 +1784,78 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
     </AlertDialog>
 
     <AlertDialog open={accumulateAllDialogOpen} onOpenChange={setAccumulateAllDialogOpen}>
-        <AlertDialogContent>
+        <AlertDialogContent className="sm:max-w-md">
             <AlertDialogHeader>
-                <AlertDialogTitle className="sr-only">Acumular pagos de todas las semanas</AlertDialogTitle>
+                <AlertDialogTitle className="text-lg font-black tracking-tight text-foreground flex items-center gap-2">
+                    <Coins className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
+                    Acumular Abonos Asumidos
+                </AlertDialogTitle>
                 <AlertDialogDescription asChild>
-                    <div className="space-y-3 pt-1 text-left text-sm text-foreground/80">
+                    <div className="space-y-4 pt-1 text-left text-sm text-foreground/80">
                         <p>
-                            Esta acción formalizará todos los abonos asumidos de <strong>todas las semanas activas</strong> para la promotora <strong className="text-foreground font-black">{selectedPromotoraObj?.name || 'seleccionada'}</strong>.
+                            Formalizar abonos para la promotora <strong className="text-foreground font-black">{selectedPromotoraObj?.name || 'seleccionada'}</strong>.
                         </p>
-                        <div className="bg-muted/60 p-3 rounded-xl border space-y-1.5 text-xs text-muted-foreground">
+
+                        <div className="space-y-1.5">
+                            <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                                ¿Hasta qué fecha / semana deseas acumular?
+                            </label>
+                            <Select value={selectedCutoffWeek} onValueChange={setSelectedCutoffWeek}>
+                                <SelectTrigger className="w-full font-bold h-10 border-emerald-300 dark:border-emerald-800">
+                                    <SelectValue placeholder="Selecciona una semana..." />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {availableCutoffWeeks.map((weekIso, index) => {
+                                        const isCurrent = index === 0;
+                                        return (
+                                            <SelectItem key={weekIso} value={weekIso} className="font-semibold text-xs">
+                                                Sábado {formatDate(weekIso)} {isCurrent ? '(Semana en curso)' : ''}
+                                            </SelectItem>
+                                        );
+                                    })}
+                                </SelectContent>
+                            </Select>
+                            <p className="text-[11px] text-muted-foreground">
+                                Solo se acumularán préstamos y abonos hasta el sábado seleccionado. Las semanas posteriores permanecerán sin cambios.
+                            </p>
+                        </div>
+
+                        <div className="bg-muted/60 p-3 rounded-xl border space-y-2 text-xs text-muted-foreground">
                             <div className="flex justify-between">
-                                <span>Préstamos activos a revisar:</span>
-                                <strong className="text-foreground">{allPromotoraActiveLoans.length}</strong>
+                                <span>Préstamos que aplican (≤ corte):</span>
+                                <strong className="text-foreground">{accumulatePreview.totalEligibleLoans}</strong>
                             </div>
                             <div className="flex justify-between">
-                                <span>Semanas operativas involucradas:</span>
-                                <strong className="text-foreground">{loanWeeks.length}</strong>
+                                <span>Préstamos con nuevos abonos:</span>
+                                <strong className="text-foreground font-bold">{accumulatePreview.loansCount}</strong>
+                            </div>
+                            <div className="flex justify-between">
+                                <span>Total de abonos a formalizar:</span>
+                                <strong className="text-foreground font-bold">{accumulatePreview.paymentsCount}</strong>
+                            </div>
+                            <div className="flex justify-between border-t pt-1.5 text-sm font-black text-emerald-600 dark:text-emerald-400">
+                                <span>Monto a ingresar en cartera:</span>
+                                <span>{formatCurrency(accumulatePreview.totalAmount)}</span>
                             </div>
                         </div>
+
+                        {accumulatePreview.paymentsCount === 0 && (
+                            <div className="p-2.5 rounded-lg bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 text-[11px] text-amber-800 dark:text-amber-300 font-medium">
+                                No hay abonos asumidos pendientes para la semana seleccionada ({selectedCutoffWeek ? formatDate(selectedCutoffWeek) : 'N/A'}).
+                            </div>
+                        )}
                     </div>
                 </AlertDialogDescription>
             </AlertDialogHeader>
-            <AlertDialogFooter>
+            <AlertDialogFooter className="mt-2">
                 <AlertDialogCancel disabled={isAccumulatingAll}>Cancelar</AlertDialogCancel>
                 <AlertDialogAction 
                     onClick={handleAccumulateAllWeeksPayments} 
-                    disabled={isAccumulatingAll} 
+                    disabled={isAccumulatingAll || accumulatePreview.paymentsCount === 0} 
                     className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold"
                 >
                     {isAccumulatingAll ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CheckCircle2 className="mr-2 h-4 w-4" />}
-                    Confirmar y Acumular Todo
+                    {selectedCutoffWeek ? `Acumular hasta ${formatDate(selectedCutoffWeek)}` : 'Confirmar y Acumular'}
                 </AlertDialogAction>
             </AlertDialogFooter>
         </AlertDialogContent>

@@ -5,7 +5,7 @@ import { collection, doc, addDoc, serverTimestamp, updateDoc, runTransaction, in
 import { db } from '@/lib/firebase';
 import { revalidatePath } from 'next/cache';
 import { getLoanPlan, getClient, getLoan } from '@/lib/firestore-data';
-import { getSaturdayOfWeek, getMexicoNow } from '@/lib/utils';
+import { getSaturdayOfWeek, getMexicoNow, getCurrentLoanWeekNumber, parseLocalDate } from '@/lib/utils';
 
 // Helper to handle Firestore dates consistently in server actions
 const parseFirestoreDate = (date: any): Date => {
@@ -503,7 +503,7 @@ export async function payOffLoanAction(loanId: string, userId?: string) {
     }
 }
 
-export async function accumulateAssumedPaymentsAction(loanIds: string[], userId?: string) {
+export async function accumulateAssumedPaymentsAction(loanIds: string[], userId?: string, cutoffDateStr?: string) {
     try {
         const [plansSnap, clientsSnap] = await Promise.all([
             getDocs(collection(db, 'loanPlans')),
@@ -526,6 +526,7 @@ export async function accumulateAssumedPaymentsAction(loanIds: string[], userId?
             const txOps: any[] = [];
 
             const mexicoNow = getMexicoNow();
+            const referenceDate = cutoffDateStr ? getSaturdayOfWeek(parseLocalDate(cutoffDateStr)) : mexicoNow;
 
             for (const loanSnap of loanSnapshots) {
                 if (!loanSnap.exists()) continue;
@@ -537,12 +538,16 @@ export async function accumulateAssumedPaymentsAction(loanIds: string[], userId?
                 const client = clients.find(c => c.id === loan.clientId);
                 const weeklyPayment = (loan.amount / 1000) * plan.weeklyPaymentRate;
                 const loanStartDate = parseFirestoreDate(loan.startDate);
+                const loanStartSat = getSaturdayOfWeek(loanStartDate);
                 
-                const diffTime = Math.abs(mexicoNow.getTime() - loanStartDate.getTime());
-                const daysDiff = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-                const rawCurrentLoanWeek = Math.max(1, Math.floor((daysDiff - 1) / 7) + 1);
-                
-                const currentWeekToFill = Math.min(rawCurrentLoanWeek - 1, plan.termInWeeks);
+                // Si se especificó fecha de corte, ignorar préstamos con fecha de inicio posterior a esa fecha
+                if (cutoffDateStr && loanStartSat.getTime() > referenceDate.getTime()) {
+                    continue;
+                }
+
+                // La semana hasta la cual se debe llenar se calcula en base a la fecha de referencia elegida
+                const targetLoanWeek = getCurrentLoanWeekNumber(loanStartDate, referenceDate);
+                const currentWeekToFill = Math.min(targetLoanWeek, plan.termInWeeks);
                 
                 const currentPayments = loan.payments || [];
                 let hasChanges = false;
@@ -573,6 +578,7 @@ export async function accumulateAssumedPaymentsAction(loanIds: string[], userId?
                 }
 
                 // REGLA DINÁMICA DE CARTERA VENCIDA Y LIQUIDACIÓN AUTOMÁTICA
+                const realCurrentLoanWeek = getCurrentLoanWeekNumber(loanStartDate, mexicoNow);
                 const baseTerm = plan.termInWeeks;
                 let missedCount = 0;
                 let totalPaidInBaseTerm = 0;
@@ -581,12 +587,12 @@ export async function accumulateAssumedPaymentsAction(loanIds: string[], userId?
                     if (p) {
                         totalPaidInBaseTerm += p.amount;
                         if (p.amount < weeklyPayment) missedCount++;
-                    } else if (i < rawCurrentLoanWeek - 1) {
+                    } else if (i < realCurrentLoanWeek) {
                         missedCount++;
                     }
                 }
 
-                const isExpired = rawCurrentLoanWeek > baseTerm + 1;
+                const isExpired = realCurrentLoanWeek > baseTerm + 1;
                 const hasPenalty = (missedCount >= 2) || (isExpired && totalPaidInBaseTerm < (baseTerm * weeklyPayment));
                 
                 const totalTerm = baseTerm + (hasPenalty ? 1 : 0);
@@ -598,7 +604,7 @@ export async function accumulateAssumedPaymentsAction(loanIds: string[], userId?
                 if (balance <= 0) {
                     newStatus = (isExpired || hasPenalty) ? 'Pagado desde CV' : 'Paid Off';
                 } else {
-                    newStatus = (isExpired || rawCurrentLoanWeek > totalTerm + 1) ? 'Overdue' : 'Active';
+                    newStatus = (isExpired || realCurrentLoanWeek > totalTerm + 1) ? 'Overdue' : 'Active';
                 }
 
                 if (hasChanges || newStatus !== loan.status) {
