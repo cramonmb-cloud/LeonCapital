@@ -375,7 +375,7 @@ export function OverdueCard({
                                 )}
                             </div>
                             <div className="grid grid-cols-2 gap-x-2 gap-y-0.5 text-[9px]">
-                                <span className="text-zinc-400 font-bold uppercase text-[8px]">Cuota:</span>
+                                <span className="text-zinc-400 font-bold uppercase text-[8px]">Abono:</span>
                                 <span className="text-zinc-700 font-black text-right">{formatCurrency(metrics.weeklyPayment)}</span>
                                 <span className="text-zinc-400 font-bold uppercase text-[8px]">Fallos $:</span>
                                 <span className="text-zinc-700 font-black text-right">{formatCurrency(metrics.baseArrears)}</span>
