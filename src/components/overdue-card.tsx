@@ -103,14 +103,19 @@ export function OverdueCard({
         const isExpired = rawCurrentLoanWeek > baseTerm + 1;
 
         let missedCount = 0;
+        let sumMissedAmount = 0;
         let totalPaidInBaseTerm = 0;
         for (let i = 1; i <= baseTerm; i++) {
             const p = (loan.payments || []).find(pay => pay.weekNumber === i);
             if (p && !p.isReverted) {
                 totalPaidInBaseTerm += p.amount;
-                if (p.amount < weeklyPayment) missedCount++;
+                if (p.amount < weeklyPayment) {
+                    missedCount++;
+                    sumMissedAmount += (weeklyPayment - p.amount);
+                }
             } else if (i < rawCurrentLoanWeek - 1) {
                 missedCount++;
+                sumMissedAmount += weeklyPayment;
             }
         }
 
@@ -121,7 +126,11 @@ export function OverdueCard({
         const totalExpected = (baseTerm + (hasPenalty ? 1 : 0)) * weeklyPayment;
         const totalDue = Math.max(0, totalExpected - totalPaid);
 
-        const baseArrears = Math.max(0, (baseTerm * weeklyPayment) - totalPaidInBaseTerm);
+        // En Pagos Pendientes (préstamos vigentes), la suma de fallos debe ser estrictamente
+        // la suma de lo no cubierto en las semanas con fallo (ej. 2 fallos de $360 = $720)
+        const baseArrears = isOverduePortfolio 
+            ? (details.baseArrears ?? sumMissedAmount)
+            : Math.max(0, (baseTerm * weeklyPayment) - totalPaidInBaseTerm);
         const penaltyArrear = totalDue - baseArrears;
 
         // Fecha de Vencimiento (Fin del plazo base)
@@ -141,7 +150,7 @@ export function OverdueCard({
             missedCount,
             isExpired
         };
-    }, [loan, loanPlan]);
+    }, [loan, loanPlan, isOverduePortfolio, details.baseArrears]);
 
     const { avalName, avalAddress, avalPhone } = useMemo(() => {
         const parts = client.endorsement.split('(');
@@ -253,7 +262,7 @@ export function OverdueCard({
                 '{{domicilio_aval}}': avalAddress.toUpperCase(),
                 '{{telefono_aval}}': avalPhone,
                 '{{monto_prestamo}}': formatCurrency(loan.amount),
-                '{{saldo_pendiente}}': formatCurrency(metrics.totalDue),
+                '{{saldo_pendiente}}': formatCurrency(isOverduePortfolio ? metrics.baseArrears : metrics.totalDue),
                 '{{fallos_registrados}}': metrics.missedCount.toString(),
                 '{{plaza}}': hierarchy.plazaName.toUpperCase(),
                 '{{localidad}}': hierarchy.localidadName.toUpperCase(),
@@ -371,10 +380,12 @@ export function OverdueCard({
                                 <span className="text-zinc-400 font-bold uppercase text-[8px]">Fallos $:</span>
                                 <span className="text-zinc-700 font-black text-right">{formatCurrency(metrics.baseArrears)}</span>
                             </div>
-                            <div className="flex justify-between items-center border-t border-dashed border-zinc-200 pt-1 text-[10px] font-black">
-                                <span className="text-red-600 text-[8px] uppercase">A Deber:</span>
-                                <span className="text-red-700 text-xs font-black">{formatCurrency(metrics.totalDue)}</span>
-                            </div>
+                            {!isOverduePortfolio && (
+                                <div className="flex justify-between items-center border-t border-dashed border-zinc-200 pt-1 text-[10px] font-black">
+                                    <span className="text-red-600 text-[8px] uppercase">A Deber:</span>
+                                    <span className="text-red-700 text-xs font-black">{formatCurrency(metrics.totalDue)}</span>
+                                </div>
+                            )}
                         </div>
                     </TableCell>
 
@@ -496,19 +507,30 @@ export function OverdueCard({
                             <div className="text-right bg-red-50 px-3 py-2 rounded-md border border-red-100 min-w-[140px] shadow-inner">
                                 <div className="flex flex-col">
                                     <div className="flex justify-between items-center gap-4 text-[9px] font-bold text-zinc-500 uppercase">
-                                        <span>Saldo Fallos:</span>
-                                        <span>{formatCurrency(metrics.baseArrears)}</span>
+                                        <span>Suma Fallos:</span>
+                                        <span className="font-black text-red-700 text-sm">{formatCurrency(metrics.baseArrears)}</span>
                                     </div>
-                                    {metrics.hasPenalty && (
-                                        <div className="flex justify-between items-center gap-4 text-[9px] font-bold text-orange-600 uppercase border-b border-orange-200 pb-1 mb-1">
+                                    {!isOverduePortfolio ? (
+                                        <>
+                                            {metrics.hasPenalty && (
+                                                <div className="flex justify-between items-center gap-4 text-[9px] font-bold text-orange-600 uppercase border-b border-orange-200 pb-1 mb-1">
+                                                    <span>Semana Extra:</span>
+                                                    <span>+{formatCurrency(metrics.penaltyArrear)}</span>
+                                                </div>
+                                            )}
+                                            <span className="text-[7px] font-black text-red-600 uppercase leading-none mb-0.5 mt-1">Total a Deber</span>
+                                            <span className="text-lg font-black text-red-700 tracking-tighter leading-none">
+                                                {formatCurrency(metrics.totalDue)}
+                                            </span>
+                                        </>
+                                    ) : (
+                                        <div className="flex justify-between items-center gap-4 text-[9px] font-bold text-zinc-500 uppercase border-t border-red-200/60 pt-1 mt-1">
                                             <span>Semana Extra:</span>
-                                            <span>+{formatCurrency(metrics.penaltyArrear)}</span>
+                                            <span className={cn("font-black", metrics.hasPenalty ? "text-orange-600" : "text-zinc-500")}>
+                                                {metrics.hasPenalty ? "APLICA" : "NO APLICA"}
+                                            </span>
                                         </div>
                                     )}
-                                    <span className="text-[7px] font-black text-red-600 uppercase leading-none mb-0.5 mt-1">Total a Deber</span>
-                                    <span className="text-lg font-black text-red-700 tracking-tighter leading-none">
-                                        {formatCurrency(metrics.totalDue)}
-                                    </span>
                                 </div>
                             </div>
                         </div>
@@ -579,18 +601,28 @@ export function OverdueCard({
                                             <span className="font-bold text-muted-foreground uppercase text-[8px]">Suma de Fallos</span>
                                             <span className="font-black text-zinc-800">{formatCurrency(metrics.baseArrears)}</span>
                                         </div>
-                                        {metrics.hasPenalty && (
-                                            <div className="flex justify-between items-center text-xs border-b border-dashed border-zinc-200 pb-2">
-                                                <span className="font-bold text-orange-600 uppercase text-[8px]">Semana Extra</span>
-                                                <span className="font-black text-orange-600">+{formatCurrency(metrics.penaltyArrear)}</span>
-                                            </div>
-                                        )}
-                                        <div className="flex justify-between items-center pt-1">
-                                            <span className="font-black text-red-700 uppercase text-[9px]">Total a Liquidar</span>
-                                            <span className="text-xl font-black text-red-700 tracking-tighter">
-                                                {formatCurrency(metrics.totalDue)}
+                                        <div className="flex justify-between items-center text-xs">
+                                            <span className="font-bold text-muted-foreground uppercase text-[8px]">Semana Extra</span>
+                                            <span className={cn("font-black", metrics.hasPenalty ? "text-orange-600" : "text-zinc-500")}>
+                                                {metrics.hasPenalty ? "APLICA (+1 SEMANA)" : "NO APLICA"}
                                             </span>
                                         </div>
+                                        {!isOverduePortfolio && (
+                                            <>
+                                                {metrics.hasPenalty && (
+                                                    <div className="flex justify-between items-center text-xs border-b border-dashed border-zinc-200 pb-2">
+                                                        <span className="font-bold text-orange-600 uppercase text-[8px]">Monto Semana Extra</span>
+                                                        <span className="font-black text-orange-600">+{formatCurrency(metrics.penaltyArrear)}</span>
+                                                    </div>
+                                                )}
+                                                <div className="flex justify-between items-center pt-1 border-t">
+                                                    <span className="font-black text-red-700 uppercase text-[9px]">Total a Liquidar</span>
+                                                    <span className="text-xl font-black text-red-700 tracking-tighter">
+                                                        {formatCurrency(metrics.totalDue)}
+                                                    </span>
+                                                </div>
+                                            </>
+                                        )}
                                     </div>
 
                                     <div className="p-4 rounded-md border bg-white space-y-3 shadow-sm">
@@ -779,8 +811,8 @@ export function OverdueCard({
                 loanPlans={allLoanPlans}
                 weekNumber={metrics.currentProgressWeek}
                 weekDate={metrics.loanWeekDate}
-                initialAmount={metrics.totalDue}
-                expectedAmount={metrics.totalDue}
+                initialAmount={isOverduePortfolio ? metrics.baseArrears : metrics.totalDue}
+                expectedAmount={isOverduePortfolio ? metrics.baseArrears : metrics.totalDue}
                 onPaymentRegistered={() => {
                     if (typeof window !== 'undefined') window.location.reload();
                 }}

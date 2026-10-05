@@ -82,7 +82,7 @@ export function OverduePortfolioClientPage({
     const [isLocalidadDialogOpen, setIsLocalidadDialogOpen] = useState(false);
 
     const isOverduePortfolio = title === "Pagos Pendientes";
-    const globalDebtLabel = isOverduePortfolio ? "Cobro de Mora (Filtro)" : "Deuda Pendiente (Filtro)";
+    const globalDebtLabel = isOverduePortfolio ? "Suma de Fallos (Filtro)" : "Deuda Pendiente (Filtro)";
 
     const appConfig = data?.config;
 
@@ -197,7 +197,7 @@ export function OverduePortfolioClientPage({
         });
     }, [initialOverdueLoans, searchTerm, selectedPlaza, selectedLocalidad, selectedPromotora, selectedFailures, selectedStartDate, startFilterMode, selectedMaturityDate, maturityFilterMode]);
 
-    const totalDue = filteredLoans.reduce((acc, details) => acc + details.amountDue, 0);
+    const totalDue = filteredLoans.reduce((acc, details) => acc + (isOverduePortfolio ? details.baseArrears : details.amountDue), 0);
     const totalClients = new Set(filteredLoans.map(d => d.client.id)).size;
 
     // Sorting & Pagination States
