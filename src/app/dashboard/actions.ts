@@ -8,13 +8,7 @@ import { getLoanPlan, getClient, getLoan } from '@/lib/firestore-data';
 import { getSaturdayOfWeek, getMexicoNow, getCurrentLoanWeekNumber, parseLocalDate } from '@/lib/utils';
 
 // Helper to handle Firestore dates consistently in server actions
-const parseFirestoreDate = (date: any): Date => {
-    if (!date) return new Date();
-    if (date instanceof Timestamp) return date.toDate();
-    if (typeof date === 'string') return new Date(date);
-    if (date instanceof Date) return date;
-    return new Date();
-};
+const parseFirestoreDate = (date: any): Date => parseLocalDate(date);
 
 /**
  * Limpia recursivamente un objeto eliminando cualquier clave con valor undefined
@@ -261,16 +255,8 @@ export async function registerPaymentAction(loanId: string, paymentStartDate: Da
             let allPayments: Payment[] = [];
 
             if (amountPaid < 0) {
-                // Modo eliminación: marcar como revertido/eliminado
-                allPayments = [
-                    ...currentPayments.filter(p => p.weekNumber !== startingWeekNumber),
-                    {
-                        date: new Date().toISOString(),
-                        amount: 0,
-                        weekNumber: startingWeekNumber,
-                        isReverted: true
-                    }
-                ];
+                // Modo eliminación: eliminar el pago por completo
+                allPayments = currentPayments.filter(p => p.weekNumber !== startingWeekNumber);
             } else {
                 // Modo registro/ajuste: lógica existente de distribución
                 const missedWeeks: { weekNumber: number; paidSoFar: number }[] = [];
@@ -663,9 +649,11 @@ export async function accumulateAssumedPaymentsAction(
                     continue;
                 }
 
-                // La semana hasta la cual se debe llenar se calcula en base a la fecha de referencia elegida
+                // La semana hasta la cual se debe llenar se calcula en base a la fecha de referencia elegida,
+                // garantizando que NUNCA se adelanten pagos de semanas futuras a la semana en curso real
+                const realCurrentLoanWeek = getCurrentLoanWeekNumber(loanStartDate, mexicoNow);
                 const targetLoanWeek = getCurrentLoanWeekNumber(loanStartDate, referenceDate);
-                const currentWeekToFill = Math.min(targetLoanWeek, plan.termInWeeks);
+                const currentWeekToFill = Math.max(0, Math.min(targetLoanWeek, realCurrentLoanWeek, plan.termInWeeks));
                 
                 const currentPayments = loan.payments || [];
                 let hasChanges = false;
@@ -704,7 +692,6 @@ export async function accumulateAssumedPaymentsAction(
                 }
 
                 // REGLA DINÁMICA DE CARTERA VENCIDA Y LIQUIDACIÓN AUTOMÁTICA
-                const realCurrentLoanWeek = getCurrentLoanWeekNumber(loanStartDate, mexicoNow);
                 const baseTerm = plan.termInWeeks;
                 let missedCount = 0;
                 let totalPaidInBaseTerm = 0;

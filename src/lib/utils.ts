@@ -6,25 +6,46 @@ export function cn(...inputs: ClassValue[]) {
 }
 
 /**
- * Parsea una fecha en formato string o Date garantizando que no se desfase por zona horaria.
+ * Parsea una fecha en formato string, Date o Timestamp garantizando que no se desfase por zona horaria.
  */
 export function parseLocalDate(dateInput: any): Date {
   if (!dateInput) return getMexicoNow();
-  if (dateInput instanceof Date) return dateInput;
-  if (typeof dateInput.toDate === 'function') return dateInput.toDate();
-  if (dateInput.seconds !== undefined && typeof dateInput.seconds === 'number') {
-    return new Date(dateInput.seconds * 1000);
-  }
-  if (typeof dateInput === 'string') {
+  
+  let d: Date;
+  if (typeof dateInput?.toDate === 'function') {
+    d = dateInput.toDate();
+  } else if (dateInput?.seconds !== undefined && typeof dateInput.seconds === 'number') {
+    d = new Date(dateInput.seconds * 1000);
+  } else if (dateInput instanceof Date) {
+    d = dateInput;
+  } else if (typeof dateInput === 'string') {
     const match = dateInput.match(/^(\d{4})-(\d{2})-(\d{2})/);
     if (match) {
       const year = parseInt(match[1], 10);
       const month = parseInt(match[2], 10) - 1;
       const day = parseInt(match[3], 10);
-      return new Date(year, month, day);
+      return new Date(year, month, day, 12, 0, 0, 0);
     }
+    d = new Date(dateInput);
+  } else {
+    d = new Date(dateInput);
   }
-  return new Date(dateInput);
+
+  if (!isNaN(d.getTime())) {
+    const iso = d.toISOString();
+    // Si fue guardada como medianoche UTC (ej. 2026-07-04T00:00:00.000Z en Timestamps de Firestore)
+    // los primeros 10 caracteres representan la fecha original sin sesgo horario
+    if (iso.endsWith('T00:00:00.000Z') || iso.endsWith('T00:00:00Z')) {
+      const [y, m, day] = iso.slice(0, 10).split('-').map(Number);
+      return new Date(y, m - 1, day, 12, 0, 0, 0);
+    }
+
+    const mexicoString = d.toLocaleDateString('en-CA', { timeZone: 'America/Mexico_City' });
+    const [year, month, day] = mexicoString.split('-').map(Number);
+    return new Date(year, month - 1, day, 12, 0, 0, 0);
+  }
+
+  return new Date();
 }
 
 /**
@@ -38,19 +59,15 @@ export function getSaturdayOfWeek(dateInput: any = new Date()): Date {
   const mexicoString = parsed.toLocaleDateString('en-CA', { timeZone: 'America/Mexico_City' });
   const [year, month, day] = mexicoString.split('-').map(Number);
   
-  // 2. Crear una fecha base a medianoche
-  const d = new Date(year, month - 1, day);
-  d.setHours(0, 0, 0, 0);
+  // 2. Crear fecha a mediodía para cálculo seguro de día de semana
+  const d = new Date(year, month - 1, day, 12, 0, 0, 0);
   
   // 3. Lógica: Sábado es el día 0 de la nueva semana operativa
   // Sun(0) -> -1, Mon(1) -> -2, ..., Fri(5) -> -6, Sat(6) -> -0
   const dayOfWeek = d.getDay(); 
   const diff = (dayOfWeek + 1) % 7;
   
-  const saturday = new Date(d);
-  saturday.setDate(d.getDate() - diff);
-  saturday.setHours(0, 0, 0, 0);
-  
+  const saturday = new Date(year, month - 1, day - diff, 0, 0, 0, 0);
   return saturday;
 }
 

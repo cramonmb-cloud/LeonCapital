@@ -4,16 +4,10 @@ import { db } from '@/lib/firebase';
 import { collection, getDocs, writeBatch, doc, getDoc, addDoc, deleteDoc, setDoc, increment, Timestamp, updateDoc } from 'firebase/firestore';
 import { revalidatePath } from 'next/cache';
 import type { Plaza, Localidad, Promotora, AppUser, AppConfig, Loan, LoanPlan, Client, WalletTransaction, WhatsAppTemplates } from '@/lib/types';
-import { getCurrentLoanWeekNumber } from '@/lib/utils';
+import { getCurrentLoanWeekNumber, parseLocalDate } from '@/lib/utils';
 
 // Helper to handle Firestore dates consistently in server actions
-const parseFirestoreDate = (date: any): Date => {
-    if (!date) return new Date();
-    if (date instanceof Timestamp) return date.toDate();
-    if (typeof date === 'string') return new Date(date);
-    if (date instanceof Date) return date;
-    return new Date();
-};
+const parseFirestoreDate = (date: any): Date => parseLocalDate(date);
 
 async function deleteCollection(collectionPath: string) {
     const collectionRef = collection(db, collectionPath);

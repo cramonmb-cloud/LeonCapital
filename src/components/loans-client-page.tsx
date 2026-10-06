@@ -216,7 +216,7 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
     let missedWeeksCount = 0;
     for (let i = 1; i < currentLoanWeek; i++) {
         const p = loan.payments?.find(pay => pay.weekNumber === i);
-        if (p && p.amount < weeklyPayment) missedWeeksCount++;
+        if (p && !p.isReverted && p.amount < weeklyPayment) missedWeeksCount++;
     }
 
     const term = plan.termInWeeks + (missedWeeksCount >= 2 ? 1 : 0);
@@ -574,7 +574,7 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
             let missedWeeksCount = 0;
             for (let i = 1; i < currentLoanWeek; i++) {
                 const paymentForWeek = loan.payments.find(p => p.weekNumber === i);
-                if (!paymentForWeek) continue;
+                if (!paymentForWeek || paymentForWeek.isReverted) continue;
 
                 const weeklyPayment = getWeeklyPaymentAmount(loan);
                 if (paymentForWeek.amount < weeklyPayment) {
@@ -604,7 +604,7 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
 
                     if (type === 'failures') {
                         const paymentForWeek = loan.payments.find(p => p.weekNumber === weekNumber);
-                        if (paymentForWeek && paymentForWeek.amount < weeklyPayment) {
+                        if (paymentForWeek && !paymentForWeek.isReverted && paymentForWeek.amount < weeklyPayment) {
                             return total + (weeklyPayment - paymentForWeek.amount);
                         }
                     } else { // collected
@@ -1101,7 +1101,7 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
             return filteredLoans.reduce((total, loan) => {
                 const weeklyPayment = getWeeklyPaymentAmount(loan);
                 const paymentForWeek = loan.payments.find(p => p.weekNumber === weekNumber);
-                if (paymentForWeek && paymentForWeek.amount < weeklyPayment) {
+                if (paymentForWeek && !paymentForWeek.isReverted && paymentForWeek.amount < weeklyPayment) {
                     return total + (weeklyPayment - paymentForWeek.amount);
                 }
                 return total;
