@@ -174,27 +174,9 @@ export function DebesClientPage({
 
       const loanSaturday = getSaturdayOfWeek(parseLocalDate(loan.startDate));
       const loanSaturdayTime = loanSaturday.getTime();
-      const firstPaymentTime = loanSaturdayTime + (7 * 24 * 3600 * 1000);
 
       // Check if active on target week
-      let isActive = true;
-      if (targetWeekTime < firstPaymentTime) {
-        isActive = false;
-      }
-
-      if (loan.status === 'Paid Off' || loan.status === 'Pagado desde CV') {
-        const lastPayment = loan.payments.length > 0
-          ? loan.payments.reduce((latest, p) => parseLocalDate(p.date) > parseLocalDate(latest.date) ? p : latest)
-          : null;
-        if (lastPayment) {
-          const payoffSaturday = getSaturdayOfWeek(parseLocalDate(lastPayment.date));
-          if (payoffSaturday.getTime() < targetWeekTime) {
-            isActive = false;
-          }
-        }
-      }
-
-      if (!isActive) return;
+      if (targetWeekTime < loanSaturdayTime) return;
 
       const elapsedWeeks = Math.round((targetWeekTime - loanSaturdayTime) / (7 * 24 * 3600 * 1000));
       if (elapsedWeeks > plan.termInWeeks) {
@@ -236,11 +218,10 @@ export function DebesClientPage({
       const pId = promotora.id;
       const pLoans = loans.filter(l => 
         l.promotoraId === pId && 
-        (l.status === 'Active' || l.status === 'Overdue') &&
         parseLocalDate(l.startDate) >= new Date('2026-03-01T00:00:00')
       );
       if (promotora.name.toLowerCase().includes('alicia')) {
-        console.log("ALICIA pLoans (Active/Overdue after 2026-03-01):", pLoans.map(l => ({ id: l.id, status: l.status, startDate: l.startDate, amount: l.amount })));
+        console.log("ALICIA pLoans (after 2026-03-01):", pLoans.map(l => ({ id: l.id, status: l.status, startDate: l.startDate, amount: l.amount })));
       }
       
       if (pLoans.length === 0) {
@@ -325,6 +306,7 @@ export function DebesClientPage({
         let realFalla = 0;
         let realEfectivo = 0;
         let realRecuperado = 0;
+        let realAdelEnt = 0;
 
         pLoans.forEach(loan => {
           const plan = loanPlans.find(lp => lp.id === loan.loanPlanId);
@@ -332,24 +314,12 @@ export function DebesClientPage({
 
           const loanSaturday = getSaturdayOfWeek(parseLocalDate(loan.startDate));
           const loanSaturdayTime = loanSaturday.getTime();
-          const firstPaymentTime = loanSaturdayTime + (7 * 24 * 3600 * 1000);
 
           const endSaturdayTime = loanSaturdayTime + (plan.termInWeeks * 7 * 24 * 3600 * 1000);
           let isActive = true;
-          if (weekTime < firstPaymentTime || weekTime > endSaturdayTime) {
+          // Un préstamo está activo desde su sábado de inicio hasta que concluya su plazo en semanas
+          if (weekTime < loanSaturdayTime || weekTime > endSaturdayTime) {
             isActive = false;
-          }
-
-          if (loan.status === 'Paid Off' || loan.status === 'Pagado desde CV') {
-            const lastPayment = loan.payments.length > 0
-              ? loan.payments.reduce((latest, p) => parseLocalDate(p.date) > parseLocalDate(latest.date) ? p : latest)
-              : null;
-            if (lastPayment) {
-              const payoffSaturday = getSaturdayOfWeek(parseLocalDate(lastPayment.date));
-              if (payoffSaturday.getTime() < weekTime) {
-                isActive = false;
-              }
-            }
           }
 
           const weeklyPayment = (loan.amount / 1000) * plan.weeklyPaymentRate;
@@ -376,6 +346,35 @@ export function DebesClientPage({
           realFalla += loanFalla;
           realEfectivo += loanEfectivo;
           realRecuperado += loanRecuperado;
+
+          // Cálculo automático de Adelantos Entrantes desde los abonos de los préstamos
+          const advPayments = (loan.payments || []).filter(p => !p.isReverted && (p.isAdvance || p.paymentType === 'adelanto_entrante'));
+          if (loanSaturdayTime === weekTime) {
+            if (advPayments.length > 0) {
+              if (loan.status === 'Paid Off' || loan.status === 'Pagado desde CV') {
+                const totalPaid = (loan.payments || []).filter(p => !p.isReverted).reduce((sum, p) => sum + p.amount, 0);
+                realAdelEnt += totalPaid;
+              } else {
+                realAdelEnt += advPayments.reduce((sum, p) => sum + p.amount, 0);
+              }
+            }
+          } else {
+            (loan.payments || []).forEach(p => {
+              if (p.isReverted) return;
+              if (!p.isAdvance && p.paymentType !== 'adelanto_entrante') return;
+
+              let matchesWeek = false;
+              if (p.registeredWeekDate) {
+                matchesWeek = getSaturdayOfWeek(parseLocalDate(p.registeredWeekDate)).getTime() === weekTime;
+              } else if (p.date) {
+                matchesWeek = getSaturdayOfWeek(parseLocalDate(p.date)).getTime() === weekTime;
+              }
+
+              if (matchesWeek) {
+                realAdelEnt += p.amount;
+              }
+            });
+          }
         });
 
         const getVenta = (weekDate: Date) => {
@@ -391,16 +390,12 @@ export function DebesClientPage({
         if (index === 0) {
           if (local.debeEntregar !== undefined) {
             debeEntregar = local.debeEntregar;
-          } else if (saved?.debeEntregar !== undefined) {
-            debeEntregar = saved.debeEntregar;
           } else {
             debeEntregar = abonoSemanalVal;
           }
         } else {
           if (local.debeEntregar !== undefined) {
             debeEntregar = local.debeEntregar;
-          } else if (saved?.debeEntregar !== undefined) {
-            debeEntregar = saved.debeEntregar;
           } else {
             const prevRow = computedChronoRows[index - 1];
             debeEntregar = prevRow.deuda + abonoSemanalVal + prevRow.adelEnt - prevRow.adelSal;
@@ -410,18 +405,26 @@ export function DebesClientPage({
         const savedComicionPercent = saved?.comicionPercent !== undefined ? saved.comicionPercent : 8;
         const comicionPercent = local.comicionPercent !== undefined ? local.comicionPercent : savedComicionPercent;
 
+        const savedSupervisionPercent = saved?.supervisionPercent !== undefined ? saved.supervisionPercent : 0;
+        const supervisionPercent = local.supervisionPercent !== undefined ? local.supervisionPercent : savedSupervisionPercent;
+
         const defaultFalla = realFalla;
         const defaultRecuperado = realRecuperado;
+        const defaultAdelEnt = realAdelEnt;
 
         const falla = local.falla !== undefined ? local.falla : (saved?.falla !== undefined ? saved.falla : defaultFalla);
         const recuperado = local.recuperado !== undefined ? local.recuperado : (saved?.recuperado !== undefined ? saved.recuperado : defaultRecuperado);
-        const adelEnt = local.adelEnt !== undefined ? local.adelEnt : (saved?.adelEnt !== undefined ? saved.adelEnt : 0);
+        const adelEnt = local.adelEnt !== undefined 
+          ? local.adelEnt 
+          : (saved?.adelEnt !== undefined && saved.adelEnt > 0 
+              ? saved.adelEnt 
+              : defaultAdelEnt);
         const adelSal = local.adelSal !== undefined ? local.adelSal : (saved?.adelSal !== undefined ? saved.adelSal : 0);
 
         let efectivo = debeEntregar - falla;
         if (local.efectivo !== undefined) {
           efectivo = local.efectivo;
-        } else if (saved?.efectivo !== undefined) {
+        } else if (saved?.efectivo !== undefined && saved?.debeEntregar === debeEntregar) {
           efectivo = saved.efectivo;
         } else {
           efectivo = Math.max(0, debeEntregar - falla);
@@ -432,8 +435,11 @@ export function DebesClientPage({
         const defaultDeudaCalc = Math.max(0, debeEntregar - efectivo);
         const deuda = local.deuda !== undefined ? local.deuda : (saved?.deuda !== undefined ? saved.deuda : defaultDeudaCalc);
 
-        const defaultComicion = ventaVal * (comicionPercent / 100);
+        const defaultComicion = Math.round(ventaVal * (comicionPercent / 100));
         const comicion = local.comicion !== undefined ? local.comicion : (saved?.comicion !== undefined ? saved.comicion : defaultComicion);
+
+        const defaultSupervision = Math.round(ventaVal * (supervisionPercent / 100));
+        const supervision = local.supervision !== undefined ? local.supervision : (saved?.supervision !== undefined ? saved.supervision : defaultSupervision);
 
         const rowObj = {
           id,
@@ -450,6 +456,8 @@ export function DebesClientPage({
           venta: ventaVal,
           comicion,
           comicionPercent,
+          supervision,
+          supervisionPercent,
           abonoSemanal: abonoSemanalVal,
           adelEnt,
           adelSal,
@@ -480,6 +488,8 @@ export function DebesClientPage({
         venta: 0,
         comicion: 0,
         comicionPercent: 8,
+        supervision: 0,
+        supervisionPercent: 0,
         abonoSemanal: 0,
         adelEnt: 0,
         adelSal: 0,
@@ -499,6 +509,9 @@ export function DebesClientPage({
     let diferencia = 0;
     let venta = 0;
     let comicion = 0;
+    let supervision = 0;
+    let adelEnt = 0;
+    let adelSal = 0;
     let semExt = 0;
 
     rows.forEach(r => {
@@ -510,6 +523,9 @@ export function DebesClientPage({
       diferencia += r.diferencia || 0;
       venta += r.venta || 0;
       comicion += r.comicion || 0;
+      supervision += r.supervision || 0;
+      adelEnt += r.adelEnt || 0;
+      adelSal += r.adelSal || 0;
       semExt += r.semExt || 0;
     });
 
@@ -525,6 +541,9 @@ export function DebesClientPage({
       percentFalla,
       venta,
       comicion,
+      supervision,
+      adelEnt,
+      adelSal,
       semExt
     };
   }, [rows]);
@@ -560,6 +579,20 @@ export function DebesClientPage({
         }
       }
 
+      if (field === 'supervisionPercent') {
+        const rowData = rows.find(r => r.promotoraId === pId);
+        const venta = rowData ? rowData.venta : 0;
+        updatedOverrides.supervision = Math.round(venta * (value / 100));
+      }
+
+      if (field === 'supervision') {
+        const rowData = rows.find(r => r.promotoraId === pId);
+        const venta = rowData ? rowData.venta : 0;
+        if (venta > 0) {
+          updatedOverrides.supervisionPercent = Number(((value / venta) * 100).toFixed(1));
+        }
+      }
+
       return {
         ...prev,
         [pId]: updatedOverrides,
@@ -584,6 +617,8 @@ export function DebesClientPage({
         venta: row.venta,
         comicion: row.comicion,
         comicionPercent: row.comicionPercent,
+        supervision: row.supervision || 0,
+        supervisionPercent: row.supervisionPercent !== undefined ? row.supervisionPercent : 0,
         abonoSemanal: row.abonoSemanal,
         adelEnt: row.adelEnt,
         adelSal: row.adelSal,
@@ -719,20 +754,27 @@ export function DebesClientPage({
     // Columns matching request
     const tableHeaders = [[
       'GRUPO',
+      '% COM',
+      '% SUP',
       'DEBE ENTREGAR',
       'FALLA',
       'EFECTIVO',
       'RECUPERADO',
-      'TOTAL',
+      'TOTAL A ENTREGAR',
       'DIFERENCIA',
       '% FALLA',
       'VENTA',
       'COMISIÓN',
+      'SUPERVISIÓN',
+      'ADEL. ENT',
+      'ADEL. SAL',
       'SEM EXT.'
     ]];
 
     const pdfDataRows = rows.map(r => [
       r.promotoraName.toUpperCase(),
+      `${r.comicionPercent || 8}%`,
+      `${r.supervisionPercent || 0}%`,
       formatCurrency(r.debeEntregar),
       formatCurrency(r.falla),
       formatCurrency(r.efectivo),
@@ -741,13 +783,18 @@ export function DebesClientPage({
       formatCurrency(r.diferencia),
       `${r.debeEntregar > 0 ? ((r.falla / r.debeEntregar) * 100).toFixed(1) : '0.0'}%`,
       formatCurrency(r.venta),
-      `${formatCurrency(r.comicion)} (${r.comicionPercent}%)`,
+      formatCurrency(r.comicion),
+      formatCurrency(r.supervision || 0),
+      formatCurrency(r.adelEnt || 0),
+      formatCurrency(r.adelSal || 0),
       r.semExt.toString()
     ]);
 
     // Add consolidated totals row
     pdfDataRows.push([
       'TOTAL GENERAL',
+      '-',
+      '-',
       formatCurrency(totals.debeEntregar),
       formatCurrency(totals.falla),
       formatCurrency(totals.efectivo),
@@ -757,6 +804,9 @@ export function DebesClientPage({
       `${totals.percentFalla.toFixed(1)}%`,
       formatCurrency(totals.venta),
       formatCurrency(totals.comicion),
+      formatCurrency(totals.supervision),
+      formatCurrency(totals.adelEnt),
+      formatCurrency(totals.adelSal),
       totals.semExt.toString()
     ]);
 
@@ -918,18 +968,23 @@ export function DebesClientPage({
               <Table>
                 <TableHeader className="bg-slate-100">
                   <TableRow className="border-b">
-                    <TableHead className="font-black text-left text-[9px] md:text-[10px] uppercase text-slate-700 py-2 px-3 h-9 min-w-[120px]">Grupo (Promotora)</TableHead>
+                    <TableHead className="font-black text-left text-[9px] md:text-[10px] uppercase text-slate-700 py-2 px-3 h-9 min-w-[130px]">Grupo (Promotora)</TableHead>
+                    <TableHead className="font-black text-center text-[9px] md:text-[10px] uppercase text-slate-700 py-2 px-1 h-9 min-w-[55px]">% Com</TableHead>
+                    <TableHead className="font-black text-center text-[9px] md:text-[10px] uppercase text-slate-700 py-2 px-1 h-9 min-w-[55px]">% Sup</TableHead>
                     <TableHead className="font-black text-center text-[9px] md:text-[10px] uppercase text-slate-700 py-2 px-1 h-9 min-w-[85px]">Debe Entregar</TableHead>
-                    <TableHead className="font-black text-center text-[9px] md:text-[10px] uppercase text-slate-700 py-2 px-1 h-9 min-w-[75px]">Falla</TableHead>
-                    <TableHead className="font-black text-center text-[9px] md:text-[10px] uppercase text-slate-700 py-2 px-1 h-9 min-w-[85px]">Efectivo</TableHead>
-                    <TableHead className="font-black text-center text-[9px] md:text-[10px] uppercase text-slate-700 py-2 px-1 h-9 min-w-[75px]">Recuperado</TableHead>
-                    <TableHead className="font-black text-center text-[9px] md:text-[10px] uppercase text-slate-700 py-2 px-1 h-9 min-w-[75px]">Total</TableHead>
+                    <TableHead className="font-black text-center text-[9px] md:text-[10px] uppercase text-slate-700 py-2 px-1 h-9 min-w-[70px]">Falla</TableHead>
+                    <TableHead className="font-black text-center text-[9px] md:text-[10px] uppercase text-slate-700 py-2 px-1 h-9 min-w-[75px]">Efectivo</TableHead>
+                    <TableHead className="font-black text-center text-[9px] md:text-[10px] uppercase text-slate-700 py-2 px-1 h-9 min-w-[70px]">Recuperado</TableHead>
+                    <TableHead className="font-black text-center text-[9px] md:text-[10px] uppercase text-slate-700 py-2 px-1 h-9 min-w-[85px]">Total a Entregar</TableHead>
                     <TableHead className="font-black text-center text-[9px] md:text-[10px] uppercase text-slate-700 py-2 px-1 h-9 min-w-[75px]">Diferencia</TableHead>
                     <TableHead className="font-black text-center text-[9px] md:text-[10px] uppercase text-slate-700 py-2 px-1 h-9 min-w-[65px]">% Falla</TableHead>
                     <TableHead className="font-black text-center text-[9px] md:text-[10px] uppercase text-slate-700 py-2 px-1 h-9 min-w-[75px]">Venta</TableHead>
-                    <TableHead className="font-black text-center text-[9px] md:text-[10px] uppercase text-slate-700 py-2 px-1 h-9 min-w-[120px]">Comisión</TableHead>
-                    <TableHead className="font-black text-center text-[9px] md:text-[10px] uppercase text-slate-700 py-2 px-1 h-9 min-w-[65px]">Sem Ext.</TableHead>
-                    <TableHead className="font-black text-center text-[9px] md:text-[10px] uppercase text-slate-700 py-2 px-1 h-9 min-w-[75px]">Acciones</TableHead>
+                    <TableHead className="font-black text-center text-[9px] md:text-[10px] uppercase text-slate-700 py-2 px-1 h-9 min-w-[75px]">Comisión</TableHead>
+                    <TableHead className="font-black text-center text-[9px] md:text-[10px] uppercase text-slate-700 py-2 px-1 h-9 min-w-[75px]">Supervisión</TableHead>
+                    <TableHead className="font-black text-center text-[9px] md:text-[10px] uppercase text-slate-700 py-2 px-1 h-9 min-w-[80px]">Adel. Entrante</TableHead>
+                    <TableHead className="font-black text-center text-[9px] md:text-[10px] uppercase text-slate-700 py-2 px-1 h-9 min-w-[80px]">Adel. Saliente</TableHead>
+                    <TableHead className="font-black text-center text-[9px] md:text-[10px] uppercase text-slate-700 py-2 px-1 h-9 min-w-[60px]">Sem Ext.</TableHead>
+                    <TableHead className="font-black text-center text-[9px] md:text-[10px] uppercase text-slate-700 py-2 px-1 h-9 min-w-[80px]">Acciones</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -940,6 +995,30 @@ export function DebesClientPage({
                         {/* Grupo */}
                         <TableCell className="font-bold text-left text-[11px] py-2 px-3 uppercase text-slate-700">
                           {row.promotoraName}
+                        </TableCell>
+
+                        {/* % Com */}
+                        <TableCell className="text-center py-2 px-1">
+                          <Input
+                            type="number"
+                            value={row.comicionPercent === undefined ? 8 : row.comicionPercent}
+                            onChange={(e) => handleCellChange(row.promotoraId, 'comicionPercent', Number(e.target.value), row.debeEntregar)}
+                            disabled={isRowDisabled(row)}
+                            placeholder="8"
+                            className="h-7 w-[46px] px-0.5 text-xs text-center mx-auto rounded-lg font-semibold tracking-tighter border disabled:opacity-85"
+                          />
+                        </TableCell>
+
+                        {/* % Sup */}
+                        <TableCell className="text-center py-2 px-1">
+                          <Input
+                            type="number"
+                            value={row.supervisionPercent === undefined ? 0 : row.supervisionPercent}
+                            onChange={(e) => handleCellChange(row.promotoraId, 'supervisionPercent', Number(e.target.value), row.debeEntregar)}
+                            disabled={isRowDisabled(row)}
+                            placeholder="0"
+                            className="h-7 w-[46px] px-0.5 text-xs text-center mx-auto rounded-lg font-semibold tracking-tighter border disabled:opacity-85"
+                          />
                         </TableCell>
 
                         {/* Debe Entregar */}
@@ -967,7 +1046,7 @@ export function DebesClientPage({
                             onChange={(e) => handleCellChange(row.promotoraId, 'efectivo', Number(e.target.value), row.debeEntregar)}
                             placeholder="0"
                             disabled={isRowDisabled(row)}
-                            className="h-7 w-[75px] px-0.5 text-xs text-center mx-auto rounded-lg font-semibold tracking-tighter border focus-visible:ring-emerald-500 disabled:opacity-85"
+                            className="h-7 w-[70px] px-0.5 text-xs text-center mx-auto rounded-lg font-semibold tracking-tighter border focus-visible:ring-emerald-500 disabled:opacity-85"
                           />
                         </TableCell>
 
@@ -983,7 +1062,7 @@ export function DebesClientPage({
                           />
                         </TableCell>
 
-                        {/* Total */}
+                        {/* Total a Entregar */}
                         <TableCell className="font-extrabold text-center text-[11px] py-2 px-1 bg-slate-50/50">
                           {formatCurrency(row.total)}
                         </TableCell>
@@ -1009,27 +1088,50 @@ export function DebesClientPage({
 
                         {/* Comisión */}
                         <TableCell className="text-center py-2 px-1">
-                          <div className="flex items-center gap-1 justify-center">
-                            <Input
-                              type="number"
-                              value={row.comicion === 0 ? '' : row.comicion}
-                              onChange={(e) => handleCellChange(row.promotoraId, 'comicion', Number(e.target.value), row.debeEntregar)}
-                              placeholder="0"
-                              disabled={isRowDisabled(row)}
-                              className="h-7 w-[60px] px-0.5 text-xs text-center rounded-lg font-semibold tracking-tighter border disabled:opacity-85"
-                            />
-                            <div className="flex items-center gap-0.5 bg-slate-50 border rounded-lg px-0.5 h-7">
-                              <Input
-                                type="number"
-                                value={row.comicionPercent === undefined ? 8 : row.comicionPercent}
-                                onChange={(e) => handleCellChange(row.promotoraId, 'comicionPercent', Number(e.target.value), row.debeEntregar)}
-                                disabled={isRowDisabled(row)}
-                                className="h-5 w-9 text-center p-0 font-semibold tracking-tighter border-0 bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0 text-xs disabled:opacity-85"
-                                placeholder="8"
-                              />
-                              <span className="text-[9px] font-black text-slate-500 pr-0.5">%</span>
-                            </div>
-                          </div>
+                          <Input
+                            type="number"
+                            value={row.comicion === 0 ? '' : row.comicion}
+                            onChange={(e) => handleCellChange(row.promotoraId, 'comicion', Number(e.target.value), row.debeEntregar)}
+                            placeholder="0"
+                            disabled={isRowDisabled(row)}
+                            className="h-7 w-[65px] px-0.5 text-xs text-center mx-auto rounded-lg font-semibold tracking-tighter border disabled:opacity-85"
+                          />
+                        </TableCell>
+
+                        {/* Supervisión */}
+                        <TableCell className="text-center py-2 px-1">
+                          <Input
+                            type="number"
+                            value={row.supervision === 0 ? '' : row.supervision}
+                            onChange={(e) => handleCellChange(row.promotoraId, 'supervision', Number(e.target.value), row.debeEntregar)}
+                            placeholder="0"
+                            disabled={isRowDisabled(row)}
+                            className="h-7 w-[65px] px-0.5 text-xs text-center mx-auto rounded-lg font-semibold tracking-tighter border disabled:opacity-85"
+                          />
+                        </TableCell>
+
+                        {/* Adelanto Entrante */}
+                        <TableCell className="text-center py-2 px-1">
+                          <Input
+                            type="number"
+                            value={row.adelEnt === 0 ? '' : row.adelEnt}
+                            onChange={(e) => handleCellChange(row.promotoraId, 'adelEnt', Number(e.target.value), row.debeEntregar)}
+                            placeholder="0"
+                            disabled={isRowDisabled(row)}
+                            className="h-7 w-[65px] px-0.5 text-xs text-center mx-auto rounded-lg font-semibold tracking-tighter border focus-visible:ring-indigo-500 disabled:opacity-85"
+                          />
+                        </TableCell>
+
+                        {/* Adelanto Saliente */}
+                        <TableCell className="text-center py-2 px-1">
+                          <Input
+                            type="number"
+                            value={row.adelSal === 0 ? '' : row.adelSal}
+                            onChange={(e) => handleCellChange(row.promotoraId, 'adelSal', Number(e.target.value), row.debeEntregar)}
+                            placeholder="0"
+                            disabled={isRowDisabled(row)}
+                            className="h-7 w-[65px] px-0.5 text-xs text-center mx-auto rounded-lg font-semibold tracking-tighter border focus-visible:ring-amber-500 disabled:opacity-85"
+                          />
                         </TableCell>
 
                         {/* Sem Ext */}
@@ -1113,6 +1215,12 @@ export function DebesClientPage({
                     <TableCell className="font-bold text-left text-[11px] py-3 px-3 uppercase text-slate-700">
                       Total General
                     </TableCell>
+                    <TableCell className="text-center text-[10px] text-slate-500 py-3 px-1">
+                      -
+                    </TableCell>
+                    <TableCell className="text-center text-[10px] text-slate-500 py-3 px-1">
+                      -
+                    </TableCell>
                     <TableCell className="text-center text-[11px] text-slate-800 py-3 px-1">
                       {formatCurrency(totals.debeEntregar)}
                     </TableCell>
@@ -1143,6 +1251,15 @@ export function DebesClientPage({
                     </TableCell>
                     <TableCell className="text-center text-[11px] text-slate-700 py-3 px-1">
                       {formatCurrency(totals.comicion)}
+                    </TableCell>
+                    <TableCell className="text-center text-[11px] text-purple-700 py-3 px-1">
+                      {formatCurrency(totals.supervision)}
+                    </TableCell>
+                    <TableCell className="text-center text-[11px] text-indigo-700 py-3 px-1">
+                      {formatCurrency(totals.adelEnt)}
+                    </TableCell>
+                    <TableCell className="text-center text-[11px] text-amber-700 py-3 px-1">
+                      {formatCurrency(totals.adelSal)}
                     </TableCell>
                     <TableCell className="text-center text-[11px] text-orange-600 py-3 px-1">
                       {totals.semExt}

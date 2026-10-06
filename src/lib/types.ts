@@ -28,6 +28,10 @@ export type Payment = {
   weekNumber: number;
   isRecovered?: boolean;
   isReverted?: boolean;
+  isAdvance?: boolean;
+  isAccumulated?: boolean;
+  paymentType?: 'regular' | 'recovered' | 'adelanto_entrante' | 'assumed';
+  registeredWeekDate?: string;
 };
 
 export type Loan = {
@@ -40,6 +44,7 @@ export type Loan = {
   status: 'Active' | 'Overdue' | 'Paid Off' | 'Pagado desde CV';
   payments: Payment[];
   createdAt?: string;
+  gestor?: string;
 };
 
 export type Wallet = {
@@ -92,6 +97,8 @@ export type PromotoraSettlement = {
     venta: number;
     comicion: number;
     comicionPercent?: number;
+    supervision?: number;
+    supervisionPercent?: number;
     abonoSemanal: number;
     adelEnt: number;
     adelSal: number;

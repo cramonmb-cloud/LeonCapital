@@ -78,16 +78,7 @@ export async function createLoanAction(input: CreateLoanInput) {
             await updateDoc(clientRef, updateData);
         }
 
-        // Check if the client already has an active or overdue loan
-        const loansQuery = query(
-            collection(db, 'loans'),
-            where('clientId', '==', clientId),
-            where('status', 'in', ['Active', 'Overdue'])
-        );
-        const activeLoansSnap = await getDocs(loansQuery);
-        if (!activeLoansSnap.empty) {
-            return { success: false, message: 'El cliente ya tiene un préstamo activo o vencido en el sistema.' };
-        }
+        // Se permite la renovación de crédito aunque el cliente cuente con préstamos activos o vencidos.
 
         // Sincronizar datos del aval con otros clientes que compartan el mismo aval
         if (input.client.endorsement) {
@@ -270,23 +261,44 @@ export async function registerPaymentAction(loanId: string, paymentStartDate: Da
                     }
                 }
 
+                const loanStartDate = parseFirestoreDate(loan.startDate);
+                const currentLoanWeek = Math.max(1, getCurrentLoanWeekNumber(loanStartDate));
+
                 let remaining = amountPaid;
-                const updatedPaymentsMap = new Map<number, { amount: number; isRecovered?: boolean; isReverted?: boolean }>();
+                const updatedPaymentsMap = new Map<number, { amount: number; isRecovered?: boolean; isReverted?: boolean; isAdvance?: boolean; isAccumulated?: boolean; paymentType?: 'regular' | 'recovered' | 'adelanto_entrante' | 'assumed' }>();
 
                 // Inicializar el mapa con los pagos existentes excluyendo la semana de inicio
                 currentPayments.forEach(p => {
                     if (p.weekNumber !== startingWeekNumber) {
-                        updatedPaymentsMap.set(p.weekNumber, { amount: p.amount, isRecovered: p.isRecovered, isReverted: p.isReverted });
+                        updatedPaymentsMap.set(p.weekNumber, { 
+                            amount: p.amount, 
+                            isRecovered: p.isRecovered, 
+                            isReverted: p.isReverted,
+                            isAdvance: p.isAdvance,
+                            isAccumulated: p.isAccumulated,
+                            paymentType: p.paymentType
+                        });
                     }
                 });
 
                 // 1. Cubrir la semana en curso (startingWeekNumber)
+                const isStartAdvance = startingWeekNumber > currentLoanWeek;
                 const neededStart = weeklyPayment;
                 if (remaining <= neededStart) {
-                    updatedPaymentsMap.set(startingWeekNumber, { amount: remaining, isRecovered: false });
+                    updatedPaymentsMap.set(startingWeekNumber, { 
+                        amount: remaining, 
+                        isRecovered: false,
+                        isAdvance: isStartAdvance,
+                        paymentType: isStartAdvance ? 'adelanto_entrante' : 'regular'
+                    });
                     remaining = 0;
                 } else {
-                    updatedPaymentsMap.set(startingWeekNumber, { amount: weeklyPayment, isRecovered: false });
+                    updatedPaymentsMap.set(startingWeekNumber, { 
+                        amount: weeklyPayment, 
+                        isRecovered: false,
+                        isAdvance: isStartAdvance,
+                        paymentType: isStartAdvance ? 'adelanto_entrante' : 'regular'
+                    });
                     remaining -= neededStart;
 
                     // 2. Cubrir semanas de fallo anteriores (la más antigua primero)
@@ -294,39 +306,63 @@ export async function registerPaymentAction(loanId: string, paymentStartDate: Da
                         if (remaining <= 0) break;
                         const needed = weeklyPayment - mw.paidSoFar;
                         if (remaining >= needed) {
-                            updatedPaymentsMap.set(mw.weekNumber, { amount: weeklyPayment, isRecovered: true });
+                            updatedPaymentsMap.set(mw.weekNumber, { 
+                                amount: weeklyPayment, 
+                                isRecovered: true,
+                                paymentType: 'recovered'
+                            });
                             remaining -= needed;
                         } else {
-                            updatedPaymentsMap.set(mw.weekNumber, { amount: mw.paidSoFar + remaining, isRecovered: true });
+                            updatedPaymentsMap.set(mw.weekNumber, { 
+                                amount: mw.paidSoFar + remaining, 
+                                isRecovered: true,
+                                paymentType: 'recovered'
+                            });
                             remaining = 0;
                         }
                     }
 
-                    // 3. Adelantar saldo sobrante a semanas futuras
+                    // 3. Adelantar saldo sobrante a semanas futuras (Adelantos Entrantes)
                     let nextWeek = startingWeekNumber + 1;
                     while (remaining > 0) {
                         const existingNext = updatedPaymentsMap.get(nextWeek)?.amount || 0;
                         const neededNext = Math.max(0, weeklyPayment - existingNext);
                         if (remaining >= neededNext) {
-                            updatedPaymentsMap.set(nextWeek, { amount: weeklyPayment, isRecovered: false });
+                            updatedPaymentsMap.set(nextWeek, { 
+                                amount: weeklyPayment, 
+                                isRecovered: false,
+                                isAdvance: true,
+                                paymentType: 'adelanto_entrante'
+                            });
                             remaining -= neededNext;
                             nextWeek++;
                         } else {
-                            updatedPaymentsMap.set(nextWeek, { amount: existingNext + remaining, isRecovered: false });
+                            updatedPaymentsMap.set(nextWeek, { 
+                                amount: existingNext + remaining, 
+                                isRecovered: false,
+                                isAdvance: true,
+                                paymentType: 'adelanto_entrante'
+                            });
                             remaining = 0;
                         }
                     }
                 }
 
                 // Convertir el mapa de regreso al arreglo de pagos
+                const paymentWeekDateStr = paymentStartDate ? getSaturdayOfWeek(paymentStartDate).toISOString().split('T')[0] : undefined;
                 updatedPaymentsMap.forEach((val, wk) => {
                     const existingDate = currentPayments.find(p => p.weekNumber === wk)?.date || new Date().toISOString();
+                    const isAdv = val.isAdvance ?? (wk > currentLoanWeek);
                     allPayments.push({
                         date: existingDate,
                         amount: val.amount,
                         weekNumber: wk,
                         isRecovered: val.isRecovered || false,
-                        isReverted: val.isReverted || false
+                        isReverted: val.isReverted || false,
+                        isAdvance: isAdv,
+                        isAccumulated: val.isAccumulated || false,
+                        paymentType: val.paymentType || (val.isRecovered ? 'recovered' : isAdv ? 'adelanto_entrante' : 'regular'),
+                        registeredWeekDate: isAdv ? paymentWeekDateStr : undefined
                     });
                 });
             }
@@ -456,12 +492,58 @@ export async function payOffLoanAction(loanId: string, userId?: string) {
                 return { success: true, message: "Este préstamo ya estaba liquidado." };
             }
 
-            // Registrar el pago de liquidación final
-            const newPayments = [...currentPayments, {
-                date: new Date().toISOString(),
-                amount: settlementAmount,
-                weekNumber: -1, 
-            }];
+            // Registrar los pagos de las semanas restantes como Adelantos Entrantes
+            const newPayments = [...currentPayments];
+            let remainingToDistribute = settlementAmount;
+
+            const liquidationWeekStr = getSaturdayOfWeek(getMexicoNow()).toISOString().split('T')[0];
+            for (let w = 1; w <= totalTerm; w++) {
+                const existingIndex = newPayments.findIndex(p => p.weekNumber === w);
+                const currentPaid = existingIndex >= 0 ? newPayments[existingIndex].amount : 0;
+                const needed = Math.max(0, weeklyPayment - currentPaid);
+                if (needed > 0 && remainingToDistribute > 0) {
+                    const payAmount = Math.min(needed, remainingToDistribute);
+                    remainingToDistribute -= payAmount;
+                    const isAdv = w >= currentLoanWeek;
+                    if (existingIndex >= 0) {
+                        newPayments[existingIndex] = {
+                            ...newPayments[existingIndex],
+                            amount: currentPaid + payAmount,
+                            isAdvance: isAdv,
+                            isAccumulated: true,
+                            paymentType: isAdv ? 'adelanto_entrante' : (newPayments[existingIndex].paymentType || 'regular'),
+                            registeredWeekDate: isAdv ? liquidationWeekStr : newPayments[existingIndex].registeredWeekDate
+                        };
+                    } else {
+                        newPayments.push({
+                            date: new Date().toISOString(),
+                            amount: payAmount,
+                            weekNumber: w,
+                            isAdvance: isAdv,
+                            isAccumulated: true,
+                            paymentType: isAdv ? 'adelanto_entrante' : 'regular',
+                            registeredWeekDate: isAdv ? liquidationWeekStr : undefined
+                        });
+                    }
+                } else if (existingIndex >= 0) {
+                    newPayments[existingIndex] = {
+                        ...newPayments[existingIndex],
+                        isAccumulated: true
+                    };
+                }
+            }
+
+            if (remainingToDistribute > 0) {
+                newPayments.push({
+                    date: new Date().toISOString(),
+                    amount: remainingToDistribute,
+                    weekNumber: -1,
+                    isAdvance: true,
+                    isAccumulated: true,
+                    paymentType: 'adelanto_entrante',
+                    registeredWeekDate: liquidationWeekStr
+                });
+            }
             
             const walletRef = doc(db, 'wallet', 'main');
             const walletTransactionRef = doc(collection(db, 'walletTransactions'));
@@ -494,7 +576,12 @@ export async function payOffLoanAction(loanId: string, userId?: string) {
     }
 }
 
-export async function accumulateAssumedPaymentsAction(loanIds: string[], userId?: string, cutoffDateStr?: string) {
+export async function accumulateAssumedPaymentsAction(
+    loanIds: string[], 
+    userId?: string, 
+    cutoffDateStr?: string,
+    overdueAbonos?: { loanId: string; amount: number; gestor?: string }[]
+) {
     try {
         const [plansSnap, clientsSnap] = await Promise.all([
             getDocs(collection(db, 'loanPlans')),
@@ -505,6 +592,7 @@ export async function accumulateAssumedPaymentsAction(loanIds: string[], userId?
 
         let totalAccumulated = 0;
         let count = 0;
+        let overdueCount = 0;
 
         await runTransaction(db, async (transaction) => {
             const walletRef = doc(db, 'wallet', 'main');
@@ -542,15 +630,23 @@ export async function accumulateAssumedPaymentsAction(loanIds: string[], userId?
                 
                 const currentPayments = loan.payments || [];
                 let hasChanges = false;
-                const newPayments = [...currentPayments];
+                const newPayments = currentPayments.map(p => {
+                    if (p.weekNumber <= currentWeekToFill && !p.isAccumulated) {
+                        hasChanges = true;
+                        return { ...p, isAccumulated: true };
+                    }
+                    return p;
+                });
 
                 for (let w = 1; w <= currentWeekToFill; w++) {
-                    const exists = currentPayments.some(p => p.weekNumber === w);
+                    const exists = newPayments.some(p => p.weekNumber === w);
                     if (!exists) {
                         newPayments.push({
                             date: new Date().toISOString(),
                             amount: weeklyPayment,
-                            weekNumber: w
+                            weekNumber: w,
+                            isAccumulated: true,
+                            paymentType: 'assumed'
                         });
                         totalAccumulated += weeklyPayment;
                         count++;
@@ -608,6 +704,119 @@ export async function accumulateAssumedPaymentsAction(loanIds: string[], userId?
                     });
                 }
             }
+
+            // PROCESAR ABONOS DE CARTERA VENCIDA (Si fueron ingresados en la parte inferior de la hoja)
+            const validOverdueAbonos = (overdueAbonos || []).filter(a => a.amount > 0);
+            if (validOverdueAbonos.length > 0) {
+                const overdueSnaps = await Promise.all(
+                    validOverdueAbonos.map(a => transaction.get(doc(db, 'loans', a.loanId)))
+                );
+
+                for (let i = 0; i < validOverdueAbonos.length; i++) {
+                    const abonoItem = validOverdueAbonos[i];
+                    const oSnap = overdueSnaps[i];
+                    if (!oSnap.exists()) continue;
+
+                    const oLoan = oSnap.data() as Loan;
+                    const oPlan = loanPlans.find(p => p.id === oLoan.loanPlanId);
+                    if (!oPlan) continue;
+                    const oClient = clients.find(c => c.id === oLoan.clientId);
+
+                    const wp = (oLoan.amount / 1000) * oPlan.weeklyPaymentRate;
+                    const baseTerm = oPlan.termInWeeks;
+                    let remaining = abonoItem.amount;
+                    const updatedPayments = [...(oLoan.payments || [])];
+
+                    // 1. Cubrir semanas atrasadas/fallos
+                    for (let w = 1; w <= baseTerm; w++) {
+                        if (remaining <= 0) break;
+                        const idx = updatedPayments.findIndex(p => p.weekNumber === w);
+                        if (idx >= 0) {
+                            const p = updatedPayments[idx];
+                            if (!p.isReverted && p.amount < wp) {
+                                const needed = wp - p.amount;
+                                const toAdd = Math.min(needed, remaining);
+                                updatedPayments[idx] = {
+                                    ...p,
+                                    amount: p.amount + toAdd,
+                                    isRecovered: true,
+                                    isAccumulated: true,
+                                    paymentType: 'recovered'
+                                };
+                                remaining -= toAdd;
+                            }
+                        } else {
+                            const toPay = Math.min(wp, remaining);
+                            updatedPayments.push({
+                                date: new Date().toISOString(),
+                                amount: toPay,
+                                weekNumber: w,
+                                isRecovered: true,
+                                isAccumulated: true,
+                                paymentType: 'recovered'
+                            });
+                            remaining -= toPay;
+                        }
+                    }
+
+                    // 2. Si aún sobra, cubrir semanas de penalización
+                    while (remaining > 0) {
+                        const maxW = Math.max(0, ...updatedPayments.map(p => p.weekNumber));
+                        const nextW = Math.max(baseTerm + 1, maxW + 1);
+                        const toPay = Math.min(wp, remaining);
+                        updatedPayments.push({
+                            date: new Date().toISOString(),
+                            amount: toPay,
+                            weekNumber: nextW,
+                            isRecovered: true,
+                            isAccumulated: true,
+                            paymentType: 'recovered'
+                        });
+                        remaining -= toPay;
+                    }
+
+                    // 3. Recalcular saldo y status
+                    const newTotalPaid = updatedPayments.filter(p => !p.isReverted).reduce((sum, p) => sum + p.amount, 0);
+                    let missedCount = 0;
+                    let totalPaidInBaseTerm = 0;
+                    for (let w = 1; w <= baseTerm; w++) {
+                        const p = updatedPayments.find(pay => pay.weekNumber === w);
+                        if (p && !p.isReverted) {
+                            totalPaidInBaseTerm += p.amount;
+                            if (p.amount < wp) missedCount++;
+                        } else {
+                            missedCount++;
+                        }
+                    }
+                    const hasPenalty = (missedCount >= 2) || (totalPaidInBaseTerm < (baseTerm * wp));
+                    const totalExpected = (baseTerm + (hasPenalty ? 1 : 0)) * wp;
+                    const newBalance = Math.max(0, totalExpected - newTotalPaid);
+                    const newStatus: Loan['status'] = newBalance <= 0 ? 'Pagado desde CV' : 'Overdue';
+
+                    const updateData: any = {
+                        payments: updatedPayments,
+                        status: newStatus
+                    };
+                    if (abonoItem.gestor) {
+                        updateData.gestor = abonoItem.gestor;
+                    }
+
+                    updateOps.push({ ref: oSnap.ref, data: updateData });
+
+                    txOps.push({
+                        type: 'credit',
+                        amount: abonoItem.amount,
+                        date: new Date(),
+                        description: `Abono Cartera Vencida (Hoja) de ${oClient?.name || 'Cliente'} ($${abonoItem.amount})`,
+                        loanId: oSnap.id,
+                        clientId: oLoan.clientId,
+                        userId: userId || null
+                    });
+
+                    totalAccumulated += abonoItem.amount;
+                    overdueCount++;
+                }
+            }
             
             updateOps.forEach(op => transaction.update(op.ref, op.data));
             txOps.forEach(op => {
@@ -621,11 +830,26 @@ export async function accumulateAssumedPaymentsAction(loanIds: string[], userId?
         });
 
         revalidatePath('/dashboard', 'layout');
-        return { success: true, message: `Se formalizaron ${count} abonos por un total de ${new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(totalAccumulated)}.` };
+        let message = `Se formalizaron ${count} abonos asumidos`;
+        if (overdueCount > 0) {
+            message += ` y se descontaron ${overdueCount} abonos de Cartera Vencida`;
+        }
+        message += ` por un total de ${new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(totalAccumulated)}.`;
+        
+        return { success: true, message };
     } catch (error: any) {
         console.error('Error accumulating payments:', error);
         return { success: false, message: `Error: ${error.message}` };
     }
+}
+
+export async function applyCarteraVencidaAbonoAction(
+    loanId: string, 
+    amount: number, 
+    gestor?: string, 
+    userId?: string
+) {
+    return await accumulateAssumedPaymentsAction([], userId, undefined, [{ loanId, amount, gestor }]);
 }
 
 export async function revertPaymentsForWeekAction(loanIds: string[], weekNumber: number, userId?: string) {

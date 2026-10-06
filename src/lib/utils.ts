@@ -11,6 +11,10 @@ export function cn(...inputs: ClassValue[]) {
 export function parseLocalDate(dateInput: any): Date {
   if (!dateInput) return getMexicoNow();
   if (dateInput instanceof Date) return dateInput;
+  if (typeof dateInput.toDate === 'function') return dateInput.toDate();
+  if (dateInput.seconds !== undefined && typeof dateInput.seconds === 'number') {
+    return new Date(dateInput.seconds * 1000);
+  }
   if (typeof dateInput === 'string') {
     const match = dateInput.match(/^(\d{4})-(\d{2})-(\d{2})/);
     if (match) {
@@ -28,8 +32,8 @@ export function parseLocalDate(dateInput: any): Date {
  * forzando el cálculo al horario de la Ciudad de México.
  * La semana cambia a las 00:00 del sábado (hora CDMX).
  */
-export function getSaturdayOfWeek(dateInput: Date | string = new Date()): Date {
-  const parsed = typeof dateInput === 'string' ? parseLocalDate(dateInput) : (dateInput || new Date());
+export function getSaturdayOfWeek(dateInput: any = new Date()): Date {
+  const parsed = parseLocalDate(dateInput);
   // 1. Obtener la fecha en formato YYYY-MM-DD en la zona horaria de México
   const mexicoString = parsed.toLocaleDateString('en-CA', { timeZone: 'America/Mexico_City' });
   const [year, month, day] = mexicoString.split('-').map(Number);
@@ -56,7 +60,7 @@ export function getSaturdayOfWeek(dateInput: Date | string = new Date()): Date {
  * Cambia exactamente a las 00:00:00 del sábado (hora CDMX).
  * La Semana 1 (S1) corresponde al primer sábado de abono (+7 días del sábado de registro).
  */
-export function getCurrentLoanWeekNumber(startDateInput: Date | string, referenceDate: Date = getMexicoNow()): number {
+export function getCurrentLoanWeekNumber(startDateInput: any, referenceDate: Date = getMexicoNow()): number {
   const startSat = getSaturdayOfWeek(startDateInput);
   const currentSat = getSaturdayOfWeek(referenceDate);
   const diffMs = currentSat.getTime() - startSat.getTime();

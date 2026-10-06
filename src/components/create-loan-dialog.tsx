@@ -763,13 +763,11 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
   const handleNextStep = async () => {
     const isValid = await form.trigger(['promotoraId', 'loanPlanId', 'amount', 'clientName']);
     if (isValid) {
-        if(activeLoanDetails) {
+        if (activeLoanDetails) {
             toast({
-                variant: 'destructive',
-                title: 'Cliente con préstamo activo',
-                description: 'Este cliente ya tiene un préstamo activo o vencido. Debe liquidarlo antes de solicitar uno nuevo.',
+                title: 'Renovación de Préstamo',
+                description: `El cliente tiene un préstamo activo (${activeLoanDetails.planName}). Saldo por liquidar: ${formatCurrency(activeLoanDetails.settlementAmount)}. Avanzando al siguiente paso...`,
             });
-            return;
         }
         setStep(2);
         setTimeout(() => {
@@ -1170,61 +1168,46 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
                        )}
 
                         {activeLoanDetails && (
-                            <Card className="mt-4 bg-red-50 border-2 border-red-200 animate-in fade-in zoom-in-95 duration-300">
+                            <Card className="mt-4 bg-amber-50/90 dark:bg-amber-950/20 border-2 border-amber-300 dark:border-amber-700 animate-in fade-in zoom-in-95 duration-300">
                                 <CardContent className="p-4">
                                     <div className="flex items-start gap-4">
-                                        <AlertTriangle className="h-8 w-8 text-red-600 flex-shrink-0 mt-1" />
+                                        <AlertTriangle className="h-8 w-8 text-amber-600 flex-shrink-0 mt-1" />
                                         <div className="flex-grow space-y-3">
                                             <div>
-                                                <h3 className="font-black text-red-700 uppercase text-sm tracking-tight">¡Atención! Cliente con Préstamo Activo</h3>
-                                                <p className="text-[10px] font-bold text-red-600 uppercase">
-                                                    No se puede crear un nuevo crédito mientras el actual no esté liquidado.
-                                                </p>
+                                                <h3 className="font-black text-amber-800 dark:text-amber-300 uppercase text-sm tracking-tight">Cliente con Préstamo Activo</h3>
                                             </div>
 
-                                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-white/60 p-3 rounded-lg border border-red-100 shadow-inner">
+                                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-white/80 dark:bg-zinc-900/80 p-3 rounded-lg border border-amber-200 dark:border-amber-800 shadow-inner">
                                                 <div className="space-y-1.5">
                                                     <div className="flex justify-between text-[9px] font-black uppercase text-zinc-500">
                                                         <span>Plan:</span>
-                                                        <span className="text-zinc-800">{activeLoanDetails.planName}</span>
+                                                        <span className="text-zinc-800 dark:text-zinc-200">{activeLoanDetails.planName}</span>
                                                     </div>
                                                     <div className="flex justify-between text-[9px] font-black uppercase text-zinc-500">
                                                         <span>Monto Orig:</span>
-                                                        <span className="text-zinc-800">{formatCurrency(activeLoanDetails.loan.amount)}</span>
+                                                        <span className="text-zinc-800 dark:text-zinc-200">{formatCurrency(activeLoanDetails.loan.amount)}</span>
                                                     </div>
                                                     <div className="flex justify-between text-[9px] font-black uppercase text-zinc-500">
                                                         <span>Semanas Pend:</span>
-                                                        <span className="text-zinc-800">{activeLoanDetails.weeksRemaining}</span>
+                                                        <span className="text-zinc-800 dark:text-zinc-200">{activeLoanDetails.weeksRemaining}</span>
                                                     </div>
-                                                    <div className="flex justify-between items-center pt-1 border-t border-red-100">
-                                                        <span className="text-[10px] font-black text-red-700 uppercase">Saldo Liquidar:</span>
-                                                        <span className="text-sm font-black text-red-700">{formatCurrency(activeLoanDetails.settlementAmount)}</span>
+                                                    <div className="flex justify-between items-center pt-1 border-t border-amber-200 dark:border-amber-800">
+                                                        <span className="text-[10px] font-black text-amber-800 dark:text-amber-300 uppercase">Saldo por Liquidar:</span>
+                                                        <span className="text-sm font-black text-amber-800 dark:text-amber-300">{formatCurrency(activeLoanDetails.settlementAmount)}</span>
                                                     </div>
                                                 </div>
-                                                <div className='border-l border-red-100 pl-4 space-y-1'>
+                                                <div className='border-l border-amber-200 dark:border-amber-800 pl-4 space-y-1'>
                                                   <div className="flex items-center gap-1.5 text-[9px] font-black uppercase text-zinc-500">
-                                                    <PlusCircle className="h-3 w-3 text-red-400" /> Plaza: <span className="text-zinc-800">{activeLoanDetails.hierarchy.plazaName}</span>
+                                                    <PlusCircle className="h-3 w-3 text-amber-500" /> Plaza: <span className="text-zinc-800 dark:text-zinc-200">{activeLoanDetails.hierarchy.plazaName}</span>
                                                   </div>
                                                   <div className="flex items-center gap-1.5 text-[9px] font-black uppercase text-zinc-500">
-                                                    <PlusCircle className="h-3 w-3 text-red-400" /> Localidad: <span className="text-zinc-800">{activeLoanDetails.hierarchy.localidadName}</span>
+                                                    <PlusCircle className="h-3 w-3 text-amber-500" /> Localidad: <span className="text-zinc-800 dark:text-zinc-200">{activeLoanDetails.hierarchy.localidadName}</span>
                                                   </div>
                                                   <div className="flex items-center gap-1.5 text-[9px] font-black uppercase text-zinc-500">
-                                                    <PlusCircle className="h-3 w-3 text-red-400" /> Promotora: <span className="text-zinc-800">{activeLoanDetails.hierarchy.promotoraName}</span>
+                                                    <PlusCircle className="h-3 w-3 text-amber-500" /> Promotora: <span className="text-zinc-800 dark:text-zinc-200">{activeLoanDetails.hierarchy.promotoraName}</span>
                                                   </div>
                                                 </div>
                                             </div>
-
-                                             <Button 
-                                                 type="button" 
-                                                 variant="destructive" 
-                                                 size="sm" 
-                                                 className="w-full h-10 font-black uppercase text-xs shadow-lg"
-                                                 onClick={handlePayOffLoan}
-                                                 disabled={isPayingOff}
-                                             >
-                                                 {isPayingOff ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <BadgeDollarSign className="mr-2 h-4 w-4" />}
-                                                 {isPayingOff ? 'Liquidando...' : 'Liquidar Préstamo Ahora'}
-                                             </Button>
                                          </div>
                                      </div>
                                 </CardContent>
@@ -1737,7 +1720,6 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
                         <Button 
                           type="button" 
                           onClick={handleNextStep} 
-                          disabled={!!activeLoanDetails} 
                           className="font-black uppercase h-11 px-8"
                         >
                           Siguiente Paso

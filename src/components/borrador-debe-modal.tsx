@@ -97,27 +97,18 @@ export function calculatePromotoraDraftDebe(
   let totalDebe = 0;
 
   promotoraLoans.forEach((loan) => {
-    // Excluir préstamos en vencido (Overdue)
-    if (loan.status === 'Overdue') return;
-
     const loanStartSaturday = getSaturdayOfWeek(parseLocalDate(loan.startDate));
     const loanStartSaturdayTime = loanStartSaturday.getTime();
 
-    // El sábado de la semana consultada debe ser >= al sábado del startDate del préstamo
+    // El sábado de la semana consultada debe ser >= al sábado de inicio del préstamo
     if (selectedWeekTime < loanStartSaturdayTime) return;
-
-    // Si está en 'Paid Off' o 'Pagado desde CV', el sábado de la semana consultada debe ser <= al sábado del último pago
-    if (loan.status === 'Paid Off' || loan.status === 'Pagado desde CV') {
-      if (!loan.payments || loan.payments.length === 0) return;
-      const lastPayment = loan.payments.reduce((latest, p) =>
-        parseLocalDate(p.date) > parseLocalDate(latest.date) ? p : latest
-      );
-      const payoffSaturday = getSaturdayOfWeek(parseLocalDate(lastPayment.date));
-      if (selectedWeekTime > payoffSaturday.getTime()) return;
-    }
 
     const plan = allLoanPlans.find((lp) => lp.id === loan.loanPlanId);
     if (!plan) return;
+
+    const endSaturdayTime = loanStartSaturdayTime + (plan.termInWeeks * 7 * 24 * 3600 * 1000);
+    // Solo los préstamos cuyo plazo ya venció no se toman en cuenta para el debe
+    if (selectedWeekTime > endSaturdayTime) return;
 
     const weeklyPaymentRate = plan.weeklyPaymentRate || 0;
     const weeklyQuota = (loan.amount / 1000) * weeklyPaymentRate;

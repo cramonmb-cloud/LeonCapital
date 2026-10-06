@@ -267,11 +267,11 @@ export function RegisterPaymentDialog({
 
                   {paymentDistribution.advancedAmount > 0 && (
                     <p className="text-blue-600 dark:text-blue-400 pl-2 border-l border-blue-200 dark:border-blue-800">
-                      • Se adelantará{' '}
+                      • Se registrará como <strong className="font-extrabold uppercase">Adelanto Entrante</strong> por{' '}
                       <strong>
                         {new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(paymentDistribution.advancedAmount)}
                       </strong>{' '}
-                      a la siguiente semana (S{weekNumber + 1}).
+                      a las semanas siguientes (a partir de S{weekNumber + 1}).
                     </p>
                   )}
                 </div>

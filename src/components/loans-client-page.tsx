@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useMemo } from 'react';
-import { MoreHorizontal, CheckCircle2, XCircle, Circle, AlertCircle, FileDown, Loader2, CalendarCog, BadgeDollarSign, Filter, ChevronDown, ChevronUp, RotateCcw, Search, Coins } from 'lucide-react';
+import { MoreHorizontal, CheckCircle2, XCircle, Circle, AlertCircle, FileDown, Loader2, CalendarCog, BadgeDollarSign, Filter, ChevronDown, ChevronUp, RotateCcw, Search, Coins, ArrowUpRight, Check, History, ShieldAlert } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   Card,
@@ -75,7 +75,7 @@ import 'jspdf-autotable';
 import type { UserOptions } from 'jspdf-autotable';
 import { useAuth } from '@/hooks/use-auth';
 import { useToast } from '@/hooks/use-toast';
-import { accumulateAssumedPaymentsAction, changeLoansDateAction, payOffLoanAction, revertPaymentsForWeekAction } from '@/app/dashboard/actions';
+import { accumulateAssumedPaymentsAction, changeLoansDateAction, payOffLoanAction, revertPaymentsForWeekAction, applyCarteraVencidaAbonoAction } from '@/app/dashboard/actions';
 import { format as formatDateFns } from 'date-fns';
 import { useRealtimeData } from '@/hooks/use-realtime-data';
 import { query, where, collection } from 'firebase/firestore';
@@ -100,7 +100,7 @@ interface LoansClientPageProps {
 export function LoansClientPage({ initialClients, initialLoanPlans, initialPlazas, initialLocalidades, initialPromotoras }: LoansClientPageProps) {
   const activeLoansQuery = useMemo(() => query(
     collection(db, 'loans'),
-    where('status', 'in', ['Active', 'Overdue'])
+    where('status', 'in', ['Active', 'Overdue', 'Paid Off', 'Pagado desde CV'])
   ), []);
 
   const { data, loading: dataLoading } = useRealtimeData({
@@ -156,6 +156,11 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
   } | null>(null);
   const router = useRouter();
 
+  // Cartera Vencida Abonos state
+  const [overdueAbonos, setOverdueAbonos] = useState<Record<string, number>>({});
+  const [overdueGestores, setOverdueGestores] = useState<Record<string, string>>({});
+  const [applyingAbonoLoanId, setApplyingAbonoLoanId] = useState<string | null>(null);
+
   const sortedPlazas = useMemo(() => [...plazas].sort((a, b) => (a?.name || '').localeCompare(b?.name || '')), [plazas]);
   const filteredLocalidades = useMemo(() => localidades.filter(l => l.plazaId === selectedPlaza).sort((a, b) => (a?.name || '').localeCompare(b?.name || '', 'es', { sensitivity: 'base' })), [localidades, selectedPlaza]);
   const filteredPromotoras = useMemo(() => promotoras.filter(p => p.localidadId === selectedLocalidad).sort((a, b) => (a?.name || '').localeCompare(b?.name || '')), [promotoras, selectedLocalidad]);
@@ -199,10 +204,9 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
     return (loan.amount / 1000) * plan.weeklyPaymentRate;
   };
   
-  // Logic to determine if a loan is ACTIVE (Not expired and not paid)
+  // Lógica para determinar si un préstamo debe mostrarse en la hoja de semana activa:
+  // Continúa mostrándose mientras su plazo en semanas no haya vencido, incluso si adelantó pagos o fue liquidado.
   const isLoanActive = (loan: Loan) => {
-    if (loan.status === 'Paid Off' || loan.status === 'Pagado desde CV') return false;
-    
     const plan = loanPlans.find(p => p.id === loan.loanPlanId);
     if (!plan) return false;
 
@@ -211,12 +215,12 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
     const weeklyPayment = (loan.amount / 1000) * plan.weeklyPaymentRate;
     let missedWeeksCount = 0;
     for (let i = 1; i < currentLoanWeek; i++) {
-        const p = loan.payments.find(pay => pay.weekNumber === i);
+        const p = loan.payments?.find(pay => pay.weekNumber === i);
         if (p && p.amount < weeklyPayment) missedWeeksCount++;
     }
 
     const term = plan.termInWeeks + (missedWeeksCount >= 2 ? 1 : 0);
-    return currentLoanWeek <= term + 1;
+    return currentLoanWeek <= term;
   };
 
   const loanWeeks = useMemo(() => 
@@ -293,6 +297,10 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
     });
   }, [allPromotoraActiveLoans, loanPlans]);
 
+  const totalEnteredOverdueAbonos = useMemo(() => {
+    return Object.values(overdueAbonos).reduce((sum, val) => sum + (Number(val) || 0), 0);
+  }, [overdueAbonos]);
+
   const accumulatePreview = useMemo(() => {
     if (!selectedCutoffWeek || !selectedPromotora || allPromotoraActiveLoans.length === 0) {
       return { loansCount: 0, totalEligibleLoans: 0, paymentsCount: 0, totalAmount: 0 };
@@ -336,13 +344,87 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
       }
     });
 
+    const overdueCount = Object.values(overdueAbonos).filter(amt => amt > 0).length;
+    const overdueAmt = totalEnteredOverdueAbonos;
+
     return {
-      loansCount: affectedLoansCount,
+      loansCount: affectedLoansCount + overdueCount,
       totalEligibleLoans: eligibleLoans.length,
-      paymentsCount,
-      totalAmount
+      paymentsCount: paymentsCount + overdueCount,
+      totalAmount: totalAmount + overdueAmt
     };
-  }, [selectedCutoffWeek, selectedPromotora, allPromotoraActiveLoans, loanPlans]);
+  }, [selectedCutoffWeek, selectedPromotora, allPromotoraActiveLoans, loanPlans, overdueAbonos, totalEnteredOverdueAbonos]);
+
+  const overdueLoansForPromotora = useMemo(() => {
+    if (!selectedPromotora) return [];
+    return loans.filter(loan => {
+      if (loan.promotoraId !== selectedPromotora) return false;
+      if (loan.status === 'Paid Off' || loan.status === 'Pagado desde CV') return false;
+      const plan = loanPlans.find(p => p.id === loan.loanPlanId);
+      if (!plan) return false;
+      const baseTerm = plan.termInWeeks;
+      const currentLoanWeek = Math.max(1, getCurrentLoanWeekNumber(loan.startDate));
+      const isExpired = currentLoanWeek > baseTerm;
+      if (!isExpired && loan.status !== 'Overdue') return false;
+
+      const weeklyPayment = (loan.amount / 1000) * plan.weeklyPaymentRate;
+      const currentPayments = loan.payments || [];
+      const actualTotalPaid = currentPayments.filter(p => !p.isReverted).reduce((acc, p) => acc + p.amount, 0);
+
+      let missedCount = 0;
+      let totalPaidInBaseTerm = 0;
+      for (let i = 1; i <= baseTerm; i++) {
+        const p = currentPayments.find(pay => pay.weekNumber === i);
+        if (p && !p.isReverted) {
+          totalPaidInBaseTerm += p.amount;
+          if (p.amount < weeklyPayment) missedCount++;
+        } else {
+          missedCount++;
+        }
+      }
+
+      const hasPenalty = (missedCount >= 2) || (isExpired && totalPaidInBaseTerm < (baseTerm * weeklyPayment));
+      const totalExpected = (baseTerm + (hasPenalty ? 1 : 0)) * weeklyPayment;
+      const balance = Math.max(0, totalExpected - actualTotalPaid);
+
+      return balance > 0;
+    }).map(loan => {
+      const client = clients.find(c => c.id === loan.clientId);
+      const plan = loanPlans.find(p => p.id === loan.loanPlanId);
+      const weeklyPayment = plan ? (loan.amount / 1000) * plan.weeklyPaymentRate : 0;
+      const baseTerm = plan?.termInWeeks || 14;
+      const currentLoanWeek = Math.max(1, getCurrentLoanWeekNumber(loan.startDate));
+      const isExpired = currentLoanWeek > baseTerm;
+      const currentPayments = loan.payments || [];
+      const actualTotalPaid = currentPayments.filter(p => !p.isReverted).reduce((acc, p) => acc + p.amount, 0);
+
+      let missedCount = 0;
+      let totalPaidInBaseTerm = 0;
+      for (let i = 1; i <= baseTerm; i++) {
+        const p = currentPayments.find(pay => pay.weekNumber === i);
+        if (p && !p.isReverted) {
+          totalPaidInBaseTerm += p.amount;
+          if (p.amount < weeklyPayment) missedCount++;
+        } else {
+          missedCount++;
+        }
+      }
+
+      const hasPenalty = (missedCount >= 2) || (isExpired && totalPaidInBaseTerm < (baseTerm * weeklyPayment));
+      const totalExpected = (baseTerm + (hasPenalty ? 1 : 0)) * weeklyPayment;
+      const saldo = Math.max(0, totalExpected - actualTotalPaid);
+
+      return {
+        loan,
+        client,
+        clientName: client?.name || 'Cliente sin nombre',
+        startDate: loan.startDate,
+        saldo,
+        weeklyPayment,
+        defaultGestor: loan.gestor || selectedPromotoraObj?.name || ''
+      };
+    }).sort((a, b) => a.clientName.localeCompare(b.clientName));
+  }, [loans, selectedPromotora, loanPlans, clients, selectedPromotoraObj]);
 
   useEffect(() => {
     setSelectedLoanIds(new Set());
@@ -572,7 +654,15 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
     }, [dataLoading, filteredLoans, loanPlans, clients]);
 
 
-    const getWeekPaymentStatus = (loan: Loan, weekNumber: number, currentLoanWeek: number): { status: 'paid' | 'partial' | 'missed' | 'pending'; date: Date; amountPaid: number; isAssumedPaid: boolean; isRecovered?: boolean; } => {
+    const getWeekPaymentStatus = (loan: Loan, weekNumber: number, currentLoanWeek: number): { 
+        status: 'paid' | 'partial' | 'missed' | 'pending'; 
+        date: Date; 
+        amountPaid: number; 
+        isAssumedPaid: boolean; 
+        isRecovered?: boolean; 
+        isAdvance?: boolean; 
+        isAccumulated?: boolean; 
+    } => {
         const loanPlan = loanPlans.find(p => p.id === loan.loanPlanId);
         if (!loanPlan) return { status: 'pending' as const, date: new Date(), amountPaid: 0, isAssumedPaid: false };
         
@@ -584,7 +674,7 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
         const hasPenalty = loansWithPenalty[loan.id] || false;
         const termInWeeks = loanPlan.termInWeeks + (hasPenalty ? 1 : 0);
         
-        const paymentForWeek = loan.payments.find(p => p.weekNumber === weekNumber);
+        const paymentForWeek = loan.payments?.find(p => p.weekNumber === weekNumber);
         
         if (paymentForWeek && paymentForWeek.isReverted) {
             return { status: 'pending' as const, date: weekDate, amountPaid: 0, isAssumedPaid: false, isRecovered: false };
@@ -592,17 +682,53 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
         
         if (paymentForWeek) {
             const totalPaidForWeek = paymentForWeek.amount;
+            const isAdvance = paymentForWeek.isAdvance || paymentForWeek.paymentType === 'adelanto_entrante' || (weekNumber > currentLoanWeek && totalPaidForWeek > 0);
+            const isAccumulated = paymentForWeek.isAccumulated || false;
+
             if(totalPaidForWeek >= weeklyPaymentAmount) {
-                return { status: 'paid' as const, date: weekDate, amountPaid: totalPaidForWeek, isAssumedPaid: false, isRecovered: paymentForWeek.isRecovered };
+                return { 
+                    status: 'paid' as const, 
+                    date: weekDate, 
+                    amountPaid: totalPaidForWeek, 
+                    isAssumedPaid: false, 
+                    isRecovered: paymentForWeek.isRecovered,
+                    isAdvance,
+                    isAccumulated
+                };
             } else if (totalPaidForWeek > 0) {
-                return { status: 'partial' as const, date: weekDate, amountPaid: totalPaidForWeek, isAssumedPaid: false, isRecovered: paymentForWeek.isRecovered };
+                return { 
+                    status: 'partial' as const, 
+                    date: weekDate, 
+                    amountPaid: totalPaidForWeek, 
+                    isAssumedPaid: false, 
+                    isRecovered: paymentForWeek.isRecovered,
+                    isAdvance,
+                    isAccumulated
+                };
             } else { // amount is 0
-                return { status: 'missed' as const, date: weekDate, amountPaid: 0, isAssumedPaid: false, isRecovered: paymentForWeek.isRecovered };
+                return { 
+                    status: 'missed' as const, 
+                    date: weekDate, 
+                    amountPaid: 0, 
+                    isAssumedPaid: false, 
+                    isRecovered: paymentForWeek.isRecovered,
+                    isAdvance,
+                    isAccumulated
+                };
             }
         }
 
         if ((loan.status === 'Paid Off' || loan.status === 'Pagado desde CV') && weekNumber <= termInWeeks) {
-            return { status: 'paid' as const, date: weekDate, amountPaid: weeklyPaymentAmount, isAssumedPaid: false, isRecovered: false };
+            const isAdvance = weekNumber >= currentLoanWeek;
+            return { 
+                status: 'paid' as const, 
+                date: weekDate, 
+                amountPaid: weeklyPaymentAmount, 
+                isAssumedPaid: false, 
+                isRecovered: false,
+                isAdvance,
+                isAccumulated: true
+            };
         }
 
         const isFuture = getMexicoNow() < weekDate;
@@ -641,13 +767,22 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
     };
 
     const handleAccumulatePayments = async () => {
-        if (filteredLoans.length === 0) return;
+        if (filteredLoans.length === 0 && totalEnteredOverdueAbonos === 0) return;
         
         setIsAccumulating(true);
         try {
             const loanIds = filteredLoans.map(l => l.id);
-            const result = await accumulateAssumedPaymentsAction(loanIds, appUser?.id);
+            const overdueList = Object.entries(overdueAbonos)
+              .filter(([_, amt]) => amt > 0)
+              .map(([loanId, amt]) => ({
+                loanId,
+                amount: amt,
+                gestor: overdueGestores[loanId]
+              }));
+
+            const result = await accumulateAssumedPaymentsAction(loanIds, appUser?.id, undefined, overdueList);
             if (result && result.success) {
+                setOverdueAbonos({});
                 toast({
                     title: 'Proceso Completado',
                     description: result.message,
@@ -666,6 +801,45 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
         }
     };
 
+    const handleApplySingleOverdueAbono = async (loanId: string) => {
+        const amount = overdueAbonos[loanId] || 0;
+        if (amount <= 0) {
+            toast({
+                variant: 'destructive',
+                title: 'Monto Inválido',
+                description: 'Ingresa un monto de abono mayor a 0 para aplicar.',
+            });
+            return;
+        }
+
+        setApplyingAbonoLoanId(loanId);
+        try {
+            const gestor = overdueGestores[loanId];
+            const result = await applyCarteraVencidaAbonoAction(loanId, amount, gestor, appUser?.id);
+            if (result && result.success) {
+                toast({
+                    title: 'Abono Aplicado',
+                    description: result.message,
+                });
+                setOverdueAbonos(prev => {
+                    const next = { ...prev };
+                    delete next[loanId];
+                    return next;
+                });
+            } else {
+                throw new Error(result?.message || 'Error al aplicar abono.');
+            }
+        } catch (error: any) {
+            toast({
+                variant: 'destructive',
+                title: 'Error al aplicar abono',
+                description: error.message,
+            });
+        } finally {
+            setApplyingAbonoLoanId(null);
+        }
+    };
+
     const handleAccumulateAllWeeksPayments = async () => {
         if (!selectedPromotora || allPromotoraActiveLoans.length === 0 || !selectedCutoffWeek) return;
         
@@ -677,8 +851,17 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
                 return loanSat.getTime() <= cutoffSat.getTime();
             });
             const loanIds = eligibleLoans.map(l => l.id);
-            const result = await accumulateAssumedPaymentsAction(loanIds, appUser?.id, selectedCutoffWeek);
+            const overdueList = Object.entries(overdueAbonos)
+              .filter(([_, amt]) => amt > 0)
+              .map(([loanId, amt]) => ({
+                loanId,
+                amount: amt,
+                gestor: overdueGestores[loanId]
+              }));
+
+            const result = await accumulateAssumedPaymentsAction(loanIds, appUser?.id, selectedCutoffWeek, overdueList);
             if (result && result.success) {
+                setOverdueAbonos({});
                 toast({
                     title: 'Proceso Completado',
                     description: `Se formalizaron los pagos hasta la semana del ${formatDate(selectedCutoffWeek)}. ${result.message}`,
@@ -1067,7 +1250,12 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
 
                     let text = '';
                     let subtext = '';
-                    if (status.status === 'paid' && !status.isAssumedPaid) {
+                    if (status.isAdvance) {
+                        text = 'Adelanto';
+                        subtext = formatCurrencySimplePDF(status.amountPaid);
+                        doc.setFillColor(224, 242, 254);
+                        doc.rect(data.cell.x, data.cell.y, data.cell.width, data.cell.height, 'F');
+                    } else if (status.status === 'paid' && !status.isAssumedPaid) {
                         text = status.isRecovered ? 'Recuperado' : 'Abono';
                         subtext = formatCurrencySimplePDF(status.amountPaid);
                         if (status.isRecovered) {
@@ -1354,7 +1542,7 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
         </div>
       </div>
       
-      <div className="grid gap-4 md:grid-cols-[200px_1fr]">
+      <div className="grid gap-4 md:grid-cols-[200px_1fr] items-start">
         <Card>
             <CardHeader className="p-2 pt-4">
                 <CardTitle className="text-base uppercase font-black text-zinc-500 text-[10px] tracking-widest px-2">Semanas Activas</CardTitle>
@@ -1400,7 +1588,8 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
             </CardContent>
         </Card>
 
-        <Card>
+        <div className="flex flex-col gap-6 min-w-0">
+          <Card>
           <CardHeader className="flex flex-col sm:flex-row justify-between items-start sm:items-center p-4 gap-2">
             <div>
                 <CardTitle>Préstamos de la Semana</CardTitle>
@@ -1522,27 +1711,49 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
                                 }
                                 
                                 const weekStatus = getWeekPaymentStatus(loan, weekNumber, currentLoanWeek);
-                                const canRegisterPayment = (loan.status !== 'Paid Off' && loan.status !== 'Pagado desde CV');
+                                const isAdvance = weekStatus.isAdvance || false;
+                                const isAccumulated = weekStatus.isAccumulated || false;
+                                const isLoanPaid = (loan.status === 'Paid Off' || loan.status === 'Pagado desde CV');
+
+                                // Los campos de semanas adelantadas, semanas ya acumuladas o préstamos liquidados quedan bloqueados
+                                const isFieldBlocked = isAdvance || isAccumulated || isLoanPaid;
+                                const canRegisterPayment = !isFieldBlocked;
  
                                 let statusInfo;
                                  switch(weekStatus.status) {
                                      case 'paid':
                                          const paidAmountText = weekStatus.isAssumedPaid ? `Asumido` : `Abono: ${formatCurrency(weekStatus.amountPaid)}`;
+                                         let paidIcon = <CheckCircle2 className="h-3.5 w-3.5 text-green-500 mx-auto" />;
+                                         let paidText = 'Pagado';
+                                         if (isAdvance) {
+                                             paidIcon = <ArrowUpRight className="h-3.5 w-3.5 text-blue-600 dark:text-blue-400 mx-auto font-black" />;
+                                             paidText = 'Adelanto Entrante';
+                                         } else if (weekStatus.isRecovered) {
+                                             paidIcon = <CheckCircle2 className="h-3.5 w-3.5 text-purple-600 dark:text-purple-400 mx-auto" />;
+                                             paidText = 'Recuperado';
+                                         } else if (weekStatus.isAssumedPaid) {
+                                             paidText = 'Asumido';
+                                         }
                                          statusInfo = { 
-                                             icon: weekStatus.isRecovered ? 
-                                                 <CheckCircle2 className="h-3.5 w-3.5 text-purple-600 dark:text-purple-400 mx-auto" /> : 
-                                                 <CheckCircle2 className="h-3.5 w-3.5 text-green-500 mx-auto" />, 
-                                             text: weekStatus.isRecovered ? `Recuperado` : `Pagado`, 
+                                             icon: paidIcon, 
+                                             text: paidText, 
                                              paid: paidAmountText 
                                          };
                                          break;
                                      case 'partial':
                                          const fallo = weeklyPayment - weekStatus.amountPaid;
+                                         let partialIcon = <AlertCircle className="h-3.5 w-3.5 text-yellow-500 mx-auto" />;
+                                         let partialText = 'Pago Parcial';
+                                         if (isAdvance) {
+                                             partialIcon = <ArrowUpRight className="h-3.5 w-3.5 text-blue-500 mx-auto font-black" />;
+                                             partialText = 'Adelanto Entrante Parcial';
+                                         } else if (weekStatus.isRecovered) {
+                                             partialIcon = <AlertCircle className="h-3.5 w-3.5 text-purple-600 dark:text-purple-400 mx-auto" />;
+                                             partialText = 'Recuperado Parcial';
+                                         }
                                          statusInfo = { 
-                                             icon: weekStatus.isRecovered ? 
-                                                 <AlertCircle className="h-3.5 w-3.5 text-purple-600 dark:text-purple-400 mx-auto" /> : 
-                                                 <AlertCircle className="h-3.5 w-3.5 text-yellow-500 mx-auto" />, 
-                                             text: weekStatus.isRecovered ? 'Recuperado Parcial' : 'Pago Parcial', 
+                                             icon: partialIcon, 
+                                             text: partialText, 
                                              paid: `Abono: ${formatCurrency(weekStatus.amountPaid)}`,
                                              pending: `Fallo: ${formatCurrency(fallo)}`
                                          };
@@ -1555,12 +1766,12 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
                                  }
                                 
                                 return (
-                                    <TableCell key={i} className={cn("text-center py-1 px-0.5 border-r", isCurrentWeek && "bg-blue-100 dark:bg-blue-900/30", isPenaltyWeek && "bg-orange-100 dark:bg-orange-900/30")}>
+                                    <TableCell key={i} className={cn("text-center py-1 px-0.5 border-r", isCurrentWeek && "bg-blue-100 dark:bg-blue-900/30", isPenaltyWeek && "bg-orange-100 dark:bg-orange-900/30", isAdvance && "bg-blue-50/80 dark:bg-blue-950/20")}>
                                         <Tooltip>
                                             <TooltipTrigger asChild>
                                                 <button 
-                                                    className="w-full disabled:cursor-not-allowed flex items-center justify-center"
-                                                    disabled={!canRegisterPayment}
+                                                    className={cn("w-full flex items-center justify-center transition-opacity", isFieldBlocked ? "cursor-not-allowed opacity-90" : "cursor-pointer hover:opacity-80")}
+                                                    disabled={isFieldBlocked}
                                                     onClick={(e) => {
                                                     if(canRegisterPayment) {
                                                         e.stopPropagation();
@@ -1577,7 +1788,17 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
                                                 <p>Estado: {statusInfo.text}</p>
                                                 {statusInfo.paid && <p>{statusInfo.paid}</p>}
                                                 {statusInfo.pending && <p className="text-destructive">{statusInfo.pending}</p>}
-                                                {canRegisterPayment ? <p className="text-xs text-primary">Clic para registrar o editar abono</p> : loan.status === 'Paid Off' || loan.status === 'Pagado desde CV' ? <p className="text-xs text-muted-foreground">Préstamo liquidado</p> : <p className="text-xs text-muted-foreground">No se puede registrar pago.</p>}
+                                                {isAdvance ? (
+                                                    <p className="text-xs text-blue-600 dark:text-blue-400 font-bold">Adelanto Entrante (Bloqueado)</p>
+                                                ) : isAccumulated ? (
+                                                    <p className="text-xs text-amber-600 dark:text-amber-400 font-bold">Abono Acumulado (Definitivo - Bloqueado)</p>
+                                                ) : isLoanPaid ? (
+                                                    <p className="text-xs text-muted-foreground font-bold">Préstamo liquidado (Bloqueado)</p>
+                                                ) : canRegisterPayment ? (
+                                                    <p className="text-xs text-primary">Clic para registrar o editar abono</p>
+                                                ) : (
+                                                    <p className="text-xs text-muted-foreground">No se puede registrar pago.</p>
+                                                )}
                                             </TooltipContent>
                                         </Tooltip>
                                     </TableCell>
@@ -1684,7 +1905,7 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
                     )}
                     <Button 
                         onClick={handleAccumulatePayments} 
-                        disabled={!hasAssumedPayments || isAccumulating}
+                        disabled={(!hasAssumedPayments && totalEnteredOverdueAbonos === 0) || isAccumulating}
                     >
                         {isAccumulating ? (
                             <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -1694,6 +1915,178 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
                 </CardFooter>
             )}
         </Card>
+
+        {/* TABLA DE CARTERA VENCIDA */}
+        {Boolean(selectedPromotora) && (
+        <Card>
+          <CardHeader className="flex flex-col sm:flex-row justify-between items-start sm:items-center py-2.5 px-4 gap-2">
+            <div>
+              <CardTitle className="text-sm font-black uppercase flex items-center gap-2">
+                CLIENTES EN CARTERA VENCIDA
+                {selectedPromotoraObj && (
+                  <span className="text-xs font-semibold text-muted-foreground uppercase">
+                    — {selectedPromotoraObj.name}
+                  </span>
+                )}
+                <Badge variant="outline" className="ml-1 text-[10px] font-bold h-5 px-1.5">
+                  {overdueLoansForPromotora.length} {overdueLoansForPromotora.length === 1 ? 'crédito' : 'créditos'}
+                </Badge>
+              </CardTitle>
+            </div>
+
+            {totalEnteredOverdueAbonos > 0 && (
+              <div className="flex items-center gap-2">
+                <div className="flex flex-col items-start sm:items-end">
+                  <span className="text-[9px] font-bold text-muted-foreground uppercase leading-none mb-0.5">Abonos Ingresados</span>
+                  <span className="text-sm font-black text-blue-600 bg-blue-50 dark:bg-blue-900/20 dark:text-blue-400 px-2 py-0.5 rounded leading-none">
+                    {formatCurrency(totalEnteredOverdueAbonos)}
+                  </span>
+                </div>
+                <Button
+                  size="sm"
+                  onClick={handleAccumulatePayments}
+                  disabled={isAccumulating}
+                  className="h-8 text-xs font-bold"
+                >
+                  {isAccumulating ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : null}
+                  Acumular Abonos
+                </Button>
+              </div>
+            )}
+          </CardHeader>
+          <CardContent className="p-0">
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow className="h-7">
+                    <TableHead className="py-1 px-2 h-7 text-left font-black text-[10px] uppercase text-slate-700">NOMBRE DEL CLIENTE</TableHead>
+                    <TableHead className="py-1 px-2 h-7 text-center font-black text-[10px] uppercase text-slate-700 w-[140px]">FECHA DEL PRESTAMO</TableHead>
+                    <TableHead className="py-1 px-2 h-7 text-right font-black text-[10px] uppercase text-slate-700 w-[120px]">SALDO</TableHead>
+                    <TableHead className="py-1 px-2 h-7 text-center font-black text-[10px] uppercase text-slate-700 w-[140px]">ABONO</TableHead>
+                    <TableHead className="py-1 px-2 h-7 text-left font-black text-[10px] uppercase text-slate-700 min-w-[140px]">GESTOR</TableHead>
+                    <TableHead className="py-1 px-2 h-7 text-center font-black text-[10px] uppercase text-slate-700 w-[80px]">ACCIÓN</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {overdueLoansForPromotora.length > 0 ? (
+                    overdueLoansForPromotora.map((item) => {
+                      const loanId = item.loan.id;
+                      const currentAbono = overdueAbonos[loanId] !== undefined ? overdueAbonos[loanId] : '';
+                      const currentGestor = overdueGestores[loanId] !== undefined ? overdueGestores[loanId] : item.defaultGestor;
+                      const isApplying = applyingAbonoLoanId === loanId;
+
+                      return (
+                        <TableRow key={loanId} className="h-9 hover:bg-muted/30 transition-colors">
+                          <TableCell className="py-1 px-2 font-bold text-xs truncate max-w-[200px]">
+                            <Link 
+                              href={`/dashboard/clientes/${item.loan.clientId}`}
+                              className="text-foreground hover:text-primary hover:underline uppercase tracking-wide font-black truncate block"
+                              title={item.clientName}
+                            >
+                              {item.clientName}
+                            </Link>
+                          </TableCell>
+                          <TableCell className="py-1 px-2 text-center text-xs font-semibold text-muted-foreground">
+                            {formatDate(item.startDate)}
+                          </TableCell>
+                          <TableCell className="py-1 px-2 text-right">
+                            <span className="font-bold text-xs text-foreground">
+                              {formatCurrency(item.saldo)}
+                            </span>
+                          </TableCell>
+                          <TableCell className="py-1 px-2">
+                            <div className="relative">
+                              <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[10px] font-bold text-muted-foreground">
+                                $
+                              </span>
+                              <Input
+                                type="number"
+                                min={0}
+                                max={item.saldo}
+                                placeholder="0.00"
+                                value={currentAbono}
+                                onChange={(e) => {
+                                  const val = parseFloat(e.target.value);
+                                  setOverdueAbonos(prev => ({
+                                    ...prev,
+                                    [loanId]: isNaN(val) ? 0 : val
+                                  }));
+                                }}
+                                className="pl-5 h-7 text-xs font-bold text-right"
+                              />
+                            </div>
+                          </TableCell>
+                          <TableCell className="py-1 px-2">
+                            <Input
+                              type="text"
+                              placeholder="Nombre del gestor"
+                              value={currentGestor}
+                              onChange={(e) => {
+                                setOverdueGestores(prev => ({
+                                  ...prev,
+                                  [loanId]: e.target.value
+                                }));
+                              }}
+                              className="h-7 text-xs font-medium"
+                            />
+                          </TableCell>
+                          <TableCell className="py-1 px-2 text-center">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => handleApplySingleOverdueAbono(loanId)}
+                              disabled={isApplying || !overdueAbonos[loanId] || overdueAbonos[loanId] <= 0}
+                              className="h-7 text-xs px-2 font-bold"
+                              title="Descontar y aplicar este abono directamente"
+                            >
+                              {isApplying ? (
+                                <Loader2 className="h-3 w-3 animate-spin" />
+                              ) : (
+                                'Aplicar'
+                              )}
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })
+                  ) : (
+                    <TableRow>
+                      <TableCell colSpan={6} className="h-16 text-center text-xs text-muted-foreground">
+                        No hay clientes en cartera vencida con saldo pendiente para esta promotora.
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </TableBody>
+                {overdueLoansForPromotora.length > 0 && (
+                  <TableFooter className="bg-muted/20">
+                    <TableRow className="font-black text-xs h-8">
+                      <TableCell colSpan={2} className="py-1 px-2 text-right uppercase text-[10px] font-black text-slate-700">
+                        Totales Cartera Vencida:
+                      </TableCell>
+                      <TableCell className="py-1 px-2 text-right font-bold text-xs text-slate-700">
+                        {formatCurrency(overdueLoansForPromotora.reduce((sum, item) => sum + item.saldo, 0))}
+                      </TableCell>
+                      <TableCell className="py-1 px-2 text-center font-bold text-xs text-blue-600">
+                        {totalEnteredOverdueAbonos > 0 ? formatCurrency(totalEnteredOverdueAbonos) : '—'}
+                      </TableCell>
+                      <TableCell colSpan={2} className="py-1 px-2 text-[11px] text-muted-foreground">
+                        {totalEnteredOverdueAbonos > 0 ? (
+                          <span className="font-semibold text-blue-600 dark:text-blue-400">
+                            Listo para acumular en cualquier semana o aplicar individualmente
+                          </span>
+                        ) : (
+                          "Ingresa los abonos de los clientes que pagaron"
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  </TableFooter>
+                )}
+              </Table>
+            </div>
+          </CardContent>
+        </Card>
+        )}
+        </div>
       </div>
     </div>
     {selectedLoanForPayment && paymentDialogData &&
@@ -1841,7 +2234,7 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
 
                         {accumulatePreview.paymentsCount === 0 && (
                             <div className="p-2.5 rounded-lg bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 text-[11px] text-amber-800 dark:text-amber-300 font-medium">
-                                No hay abonos asumidos pendientes para la semana seleccionada ({selectedCutoffWeek ? formatDate(selectedCutoffWeek) : 'N/A'}).
+                                No hay abonos pendientes para la semana seleccionada ({selectedCutoffWeek ? formatDate(selectedCutoffWeek) : 'N/A'}).
                             </div>
                         )}
                     </div>
