@@ -16,6 +16,27 @@ const parseFirestoreDate = (date: any): Date => {
     return new Date();
 };
 
+/**
+ * Limpia recursivamente un objeto eliminando cualquier clave con valor undefined
+ * para evitar el error 'Unsupported field value: undefined' de Firestore.
+ */
+function cleanFirestoreData<T>(obj: T): T {
+    if (obj === null || obj === undefined) return obj;
+    if (Array.isArray(obj)) {
+        return obj.map(item => cleanFirestoreData(item)) as unknown as T;
+    }
+    if (typeof obj === 'object' && !(obj instanceof Date) && !(obj instanceof Timestamp)) {
+        const clean: any = {};
+        for (const [key, value] of Object.entries(obj)) {
+            if (value !== undefined) {
+                clean[key] = cleanFirestoreData(value);
+            }
+        }
+        return clean as T;
+    }
+    return obj;
+}
+
 export type CreateLoanInput = {
     promotoraId: string;
     loanPlanId: string;
@@ -351,9 +372,11 @@ export async function registerPaymentAction(loanId: string, paymentStartDate: Da
                 // Convertir el mapa de regreso al arreglo de pagos
                 const paymentWeekDateStr = paymentStartDate ? getSaturdayOfWeek(paymentStartDate).toISOString().split('T')[0] : undefined;
                 updatedPaymentsMap.forEach((val, wk) => {
-                    const existingDate = currentPayments.find(p => p.weekNumber === wk)?.date || new Date().toISOString();
+                    const existingP = currentPayments.find(p => p.weekNumber === wk);
+                    const existingDate = existingP?.date || new Date().toISOString();
                     const isAdv = val.isAdvance ?? (wk > currentLoanWeek);
-                    allPayments.push({
+                    
+                    const paymentObj: Payment = {
                         date: existingDate,
                         amount: val.amount,
                         weekNumber: wk,
@@ -362,8 +385,14 @@ export async function registerPaymentAction(loanId: string, paymentStartDate: Da
                         isAdvance: isAdv,
                         isAccumulated: val.isAccumulated || false,
                         paymentType: val.paymentType || (val.isRecovered ? 'recovered' : isAdv ? 'adelanto_entrante' : 'regular'),
-                        registeredWeekDate: isAdv ? paymentWeekDateStr : undefined
-                    });
+                    };
+
+                    const regDate = isAdv ? (paymentWeekDateStr || existingP?.registeredWeekDate) : existingP?.registeredWeekDate;
+                    if (isAdv && regDate) {
+                        paymentObj.registeredWeekDate = regDate;
+                    }
+
+                    allPayments.push(paymentObj);
                 });
             }
             
@@ -420,10 +449,10 @@ export async function registerPaymentAction(loanId: string, paymentStartDate: Da
                 newStatus = (isExpired || currentLoanWeek > totalTerm) ? 'Overdue' : 'Active';
             }
 
-            transaction.update(loanRef, {
+            transaction.update(loanRef, cleanFirestoreData({
                 payments: allPayments,
                 status: newStatus
-            });
+            }));
         });
 
         revalidatePath('/dashboard', 'layout');
@@ -506,24 +535,34 @@ export async function payOffLoanAction(loanId: string, userId?: string) {
                     remainingToDistribute -= payAmount;
                     const isAdv = w >= currentLoanWeek;
                     if (existingIndex >= 0) {
-                        newPayments[existingIndex] = {
-                            ...newPayments[existingIndex],
+                        const existingP = newPayments[existingIndex];
+                        const updatedP: Payment = {
+                            ...existingP,
                             amount: currentPaid + payAmount,
                             isAdvance: isAdv,
                             isAccumulated: true,
-                            paymentType: isAdv ? 'adelanto_entrante' : (newPayments[existingIndex].paymentType || 'regular'),
-                            registeredWeekDate: isAdv ? liquidationWeekStr : newPayments[existingIndex].registeredWeekDate
+                            paymentType: isAdv ? 'adelanto_entrante' : (existingP.paymentType || 'regular'),
                         };
+                        const regDate = isAdv ? (liquidationWeekStr || existingP.registeredWeekDate) : existingP.registeredWeekDate;
+                        if (isAdv && regDate) {
+                            updatedP.registeredWeekDate = regDate;
+                        } else {
+                            delete updatedP.registeredWeekDate;
+                        }
+                        newPayments[existingIndex] = updatedP;
                     } else {
-                        newPayments.push({
+                        const newP: Payment = {
                             date: new Date().toISOString(),
                             amount: payAmount,
                             weekNumber: w,
                             isAdvance: isAdv,
                             isAccumulated: true,
                             paymentType: isAdv ? 'adelanto_entrante' : 'regular',
-                            registeredWeekDate: isAdv ? liquidationWeekStr : undefined
-                        });
+                        };
+                        if (isAdv && liquidationWeekStr) {
+                            newP.registeredWeekDate = liquidationWeekStr;
+                        }
+                        newPayments.push(newP);
                     }
                 } else if (existingIndex >= 0) {
                     newPayments[existingIndex] = {
@@ -558,10 +597,10 @@ export async function payOffLoanAction(loanId: string, userId?: string) {
             });
             transaction.update(walletRef, { balance: increment(settlementAmount) });
 
-            transaction.update(loanRef, {
+            transaction.update(loanRef, cleanFirestoreData({
                 payments: newPayments,
                 status: finalStatus,
-            });
+            }));
             
             return { success: true, message: "Préstamo liquidado con éxito." };
         });
@@ -818,7 +857,7 @@ export async function accumulateAssumedPaymentsAction(
                 }
             }
             
-            updateOps.forEach(op => transaction.update(op.ref, op.data));
+            updateOps.forEach(op => transaction.update(op.ref, cleanFirestoreData(op.data)));
             txOps.forEach(op => {
                 const txRef = doc(collection(db, 'walletTransactions'));
                 transaction.set(txRef, op);
@@ -891,10 +930,10 @@ export async function revertPaymentsForWeekAction(loanIds: string[], weekNumber:
                         newStatus = 'Active'; 
                     }
 
-                    transaction.update(loanSnap.ref, { 
+                    transaction.update(loanSnap.ref, cleanFirestoreData({ 
                         payments: updatedPayments,
                         status: newStatus
-                    });
+                    }));
                 }
             }
 
