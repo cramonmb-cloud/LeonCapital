@@ -45,6 +45,7 @@ export type Loan = {
   payments: Payment[];
   createdAt?: string;
   gestor?: string;
+  hasPenalty?: boolean;
 };
 
 export type Wallet = {
@@ -178,6 +179,7 @@ export type AppConfig = {
   maxGuarantorClients?: number;
   guarantorAuthCode?: string;
   guarantorAuthCodeUpdatedAt?: string;
+  extraWeekMissedThreshold?: number;
 };
 
 export type Aviso = {

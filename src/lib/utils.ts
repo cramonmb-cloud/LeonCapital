@@ -231,3 +231,75 @@ export function parseEndorsement(endorsementStr: string): ParsedEndorsement {
 
   return { name, street, neighborhood, postalCode, city, phone, guarantees };
 }
+
+/**
+ * Obtiene el número mínimo de fallos requeridos para activar la semana extra de penalización.
+ * Si no está configurado o es menor a 1, el valor predeterminado es 2.
+ */
+export function getExtraWeekThreshold(config?: { extraWeekMissedThreshold?: number } | null): number {
+  if (config && typeof config.extraWeekMissedThreshold === 'number' && config.extraWeekMissedThreshold >= 1) {
+    return Math.floor(config.extraWeekMissedThreshold);
+  }
+  return 2;
+}
+
+/**
+ * Determina si una semana específica contó como fallo u omisión en el historial del préstamo:
+ * 1. Tuvo pago pero fue parcial (< weeklyPayment).
+ * 2. Tuvo pago pero fue registrado como Recuperado (isRecovered o paymentType === 'recovered').
+ *    Incluso si el cliente regularizó el abono después, la falta queda asentada para efectos
+ *    de la regla de penalización de semana extra.
+ * 3. No tiene pago registrado y la semana ya transcurrió (i < currentLoanWeek).
+ */
+export function isWeekMissedOrRecovered(
+  payment: { amount?: number; isReverted?: boolean; isRecovered?: boolean; paymentType?: string } | undefined | null,
+  weekNumber: number,
+  currentLoanWeek: number,
+  weeklyPayment: number
+): boolean {
+  if (payment && !payment.isReverted) {
+    const pAmount = (payment.amount === null || payment.amount === undefined || isNaN(payment.amount)) ? 0 : payment.amount;
+    if (pAmount < weeklyPayment || payment.isRecovered || payment.paymentType === 'recovered') {
+      return true;
+    }
+    return false;
+  }
+  return weekNumber < currentLoanWeek;
+}
+
+/**
+ * Determina si a un préstamo le aplica la semana extra de penalización (+1 semana).
+ * Una vez alcanzado el umbral de fallos (omisiones, parciales o recuperados), la semana extra
+ * se activa de manera definitiva e irrevocable.
+ */
+export function doesLoanHavePenalty(
+  loan: { startDate: any; payments?: any[]; hasPenalty?: boolean; amount?: number },
+  baseTerm: number,
+  weeklyPayment: number,
+  threshold: number = 2,
+  referenceDate: Date = getMexicoNow()
+): boolean {
+  if (loan.hasPenalty) return true;
+
+  const currentLoanWeek = Math.max(1, getCurrentLoanWeekNumber(loan.startDate, referenceDate));
+  const isExpired = currentLoanWeek > baseTerm;
+
+  const payments = loan.payments || [];
+  let missedCount = 0;
+  let totalPaidInBaseTerm = 0;
+
+  for (let i = 1; i <= baseTerm; i++) {
+    const p = payments.find(pay => pay.weekNumber === i);
+    if (p && !p.isReverted) {
+      const pAmount = (p.amount === null || p.amount === undefined || isNaN(p.amount)) ? 0 : p.amount;
+      totalPaidInBaseTerm += pAmount;
+      if (pAmount < weeklyPayment || p.isRecovered || p.paymentType === 'recovered') {
+        missedCount++;
+      }
+    } else if (i < currentLoanWeek) {
+      missedCount++;
+    }
+  }
+
+  return (missedCount >= threshold) || (isExpired && totalPaidInBaseTerm < (baseTerm * weeklyPayment));
+}

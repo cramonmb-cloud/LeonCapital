@@ -23,12 +23,13 @@ import {
   FormMessage,
 } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
-import type { Loan } from '@/lib/types';
+import type { Loan, AppConfig } from '@/lib/types';
 import { Loader2, ShieldCheck, AlertCircle } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { registerPaymentAction } from '@/app/dashboard/actions';
 import { useAuth } from '@/hooks/use-auth';
 import { Alert, AlertDescription, AlertTitle } from './ui/alert';
+import { getExtraWeekThreshold } from '@/lib/utils';
 
 const formSchema = z.object({
   amountPaid: z.string()
@@ -51,6 +52,7 @@ interface ManualPaymentAdjustmentDialogProps {
   loan: Loan;
   weekNumber: number;
   currentAmount: number;
+  appConfig?: AppConfig | null;
   onSuccess?: () => void;
 }
 
@@ -62,6 +64,7 @@ export function ManualPaymentAdjustmentDialog({
   loan,
   weekNumber,
   currentAmount,
+  appConfig,
   onSuccess,
 }: ManualPaymentAdjustmentDialogProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -180,9 +183,9 @@ export function ManualPaymentAdjustmentDialog({
 
             <Alert className="bg-amber-50 border-amber-200">
                 <AlertCircle className="h-4 w-4 text-amber-600" />
-                <AlertTitle className="text-amber-800 font-bold text-xs">Aviso de Recálculo</AlertTitle>
+                <AlertTitle className="text-amber-800 font-bold text-xs">Aviso de Semana Extra</AlertTitle>
                 <AlertDescription className="text-[10px] text-amber-700">
-                    Registrar un pago completo en una semana de "Fallo" puede eliminar la semana extra si los fallos restantes son menores a 2.
+                    Si el préstamo ya alcanzó el umbral de {getExtraWeekThreshold(appConfig)} fallo(s) (o cuenta con pagos recuperados), la semana extra se mantendrá de forma permanente como penalización y deberá ser liquidada.
                 </AlertDescription>
             </Alert>
 

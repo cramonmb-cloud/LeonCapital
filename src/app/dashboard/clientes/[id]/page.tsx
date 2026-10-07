@@ -1,6 +1,6 @@
 
 import { notFound } from 'next/navigation';
-import { getClient, getLoans, getLoanPlans, getUsers, getPlazas, getLocalidades, getPromotoras } from '@/lib/firestore-data';
+import { getClient, getLoans, getLoanPlans, getUsers, getPlazas, getLocalidades, getPromotoras, getAppConfig } from '@/lib/firestore-data';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Mail, Phone, Home, Shield, UserCheck } from 'lucide-react';
@@ -16,7 +16,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
     notFound();
   }
 
-  const [clientLoans, loanPlans, allLoans, users, plazas, localidades, promotoras] = await Promise.all([
+  const [clientLoans, loanPlans, allLoans, users, plazas, localidades, promotoras, appConfig] = await Promise.all([
       getLoans(id),
       getLoanPlans(),
       getLoans(),
@@ -24,6 +24,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
       getPlazas(),
       getLocalidades(),
       getPromotoras(),
+      getAppConfig(),
   ]);
 
   const fullAddress = `${client.street}, ${client.neighborhood}, C.P. ${client.postalCode}, ${client.city}`;
@@ -97,6 +98,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
                 plazas={plazas}
                 localidades={localidades}
                 promotoras={promotoras}
+                appConfig={appConfig}
               />
             </CardContent>
           </Card>

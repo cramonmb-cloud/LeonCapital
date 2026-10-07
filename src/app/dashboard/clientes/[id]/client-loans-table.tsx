@@ -23,8 +23,9 @@ import {
     DialogTitle,
 } from '@/components/ui/dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { cn, getSaturdayOfWeek, getCurrentLoanWeekNumber } from '@/lib/utils';
+import { cn, getSaturdayOfWeek, getCurrentLoanWeekNumber, getExtraWeekThreshold } from '@/lib/utils';
 import { ManualPaymentAdjustmentDialog } from '@/components/manual-payment-adjustment-dialog';
+import type { AppConfig } from '@/lib/types';
 
 
 interface ClientLoansTableProps {
@@ -35,9 +36,10 @@ interface ClientLoansTableProps {
   plazas: Plaza[];
   localidades: Localidad[];
   promotoras: Promotora[];
+  appConfig?: AppConfig | null;
 }
 
-export function ClientLoansTable({ clientLoans, loanPlans, allLoans, users, plazas, localidades, promotoras }: ClientLoansTableProps) {
+export function ClientLoansTable({ clientLoans, loanPlans, allLoans, users, plazas, localidades, promotoras, appConfig }: ClientLoansTableProps) {
   const { appUser } = useAuth();
   const [selectedLoan, setSelectedLoan] = useState<Loan | null>(null);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
@@ -136,13 +138,14 @@ export function ClientLoansTable({ clientLoans, loanPlans, allLoans, users, plaz
           const p = loanForDetails.payments.find(pay => pay.weekNumber === i);
           if (p && !p.isReverted) {
               totalPaidInBaseTerm += p.amount;
-              if (p.amount < weeklyPayment) missedCount++;
+              if (p.amount < weeklyPayment || p.isRecovered || p.paymentType === 'recovered') missedCount++;
           } else if (i < currentLoanWeek) {
               missedCount++;
           }
       }
       
-      const hasPenalty = (missedCount >= 2) || (isExpired && totalPaidInBaseTerm < (baseTerm * weeklyPayment));
+      const penaltyThreshold = getExtraWeekThreshold(appConfig);
+      const hasPenalty = loanForDetails.hasPenalty || (missedCount >= penaltyThreshold) || (isExpired && totalPaidInBaseTerm < (baseTerm * weeklyPayment));
       const termInWeeks = baseTerm + (hasPenalty ? 1 : 0);
       const isLiquidated = loanForDetails.status === 'Paid Off' || loanForDetails.status === 'Pagado desde CV';
       
@@ -342,6 +345,7 @@ export function ClientLoansTable({ clientLoans, loanPlans, allLoans, users, plaz
           loan={loanForDetails}
           weekNumber={adjustData.weekNumber}
           currentAmount={adjustData.amount}
+          appConfig={appConfig}
           onSuccess={() => {
               // No es ideal, pero fuerza el refresco de los datos tras el ajuste manual
               if (typeof window !== 'undefined') window.location.reload();

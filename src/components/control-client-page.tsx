@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useMemo } from 'react';
-import type { Loan, LoanPlan, Client, Plaza, Localidad, Promotora } from '@/lib/types';
+import type { Loan, LoanPlan, Client, Plaza, Localidad, Promotora, AppConfig } from '@/lib/types';
 import {
   Card,
   CardContent,
@@ -23,7 +23,7 @@ import { useRealtimeData } from '@/hooks/use-realtime-data';
 import { query, where, collection } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import Loading from '@/app/dashboard/loading';
-import { generateColorPalette, cn, getCurrentLoanWeekNumber } from '@/lib/utils';
+import { generateColorPalette, cn, getCurrentLoanWeekNumber, getExtraWeekThreshold } from '@/lib/utils';
 
 interface ControlClientPageProps {
     initialClients: Client[];
@@ -31,10 +31,11 @@ interface ControlClientPageProps {
     initialPlazas: Plaza[];
     initialLocalidades: Localidad[];
     initialPromotoras: Promotora[];
+    initialConfig?: AppConfig | null;
 }
 
 // Centralized helper to check dynamic penalty
-const checkPenalty = (loan: Loan, loanPlan: LoanPlan) => {
+const checkPenalty = (loan: Loan, loanPlan: LoanPlan, threshold: number = 2) => {
     const weeklyPayment = (loan.amount / 1000) * loanPlan.weeklyPaymentRate;
     let missedWeeksCount = 0;
     let totalPaidInBaseTerm = 0;
@@ -43,20 +44,20 @@ const checkPenalty = (loan: Loan, loanPlan: LoanPlan) => {
     const baseTerm = loanPlan.termInWeeks;
     for (let i = 1; i <= baseTerm; i++) {
         const p = loan.payments.find(pay => pay.weekNumber === i);
-        if (p) {
+        if (p && !p.isReverted) {
             const pAmount = (p.amount === null || p.amount === undefined || isNaN(p.amount)) ? 0 : p.amount;
             totalPaidInBaseTerm += pAmount;
-            if (pAmount < weeklyPayment) missedWeeksCount++;
+            if (pAmount < weeklyPayment || p.isRecovered || p.paymentType === 'recovered') missedWeeksCount++;
         } else if (i < currentLoanWeek) {
             missedWeeksCount++;
         }
     }
     
     const isExpired = currentLoanWeek > baseTerm;
-    return (missedWeeksCount >= 2) || (isExpired && totalPaidInBaseTerm < (baseTerm * weeklyPayment));
+    return loan.hasPenalty || (missedWeeksCount >= threshold) || (isExpired && totalPaidInBaseTerm < (baseTerm * weeklyPayment));
 };
 
-export function ControlClientPage({ initialClients, initialLoanPlans, initialPlazas, initialLocalidades, initialPromotoras }: ControlClientPageProps) {
+export function ControlClientPage({ initialClients, initialLoanPlans, initialPlazas, initialLocalidades, initialPromotoras, initialConfig }: ControlClientPageProps) {
     const [dateRange, setDateRange] = useState<DateRange | undefined>(undefined);
     const [activeTab, setActiveTab] = useState<'resumen' | 'plazas' | 'informes'>('resumen');
     const activeLoansQuery = useMemo(() => query(
@@ -71,7 +72,7 @@ export function ControlClientPage({ initialClients, initialLoanPlans, initialPla
         localidades: initialLocalidades,
         promotoras: initialPromotoras,
     }, {
-        enabledCollections: ['loans', 'clients', 'loanPlans', 'plazas', 'localidades', 'promotoras'],
+        enabledCollections: ['loans', 'clients', 'loanPlans', 'plazas', 'localidades', 'promotoras', 'config'],
         queries: {
             loans: activeLoansQuery
         }
@@ -85,6 +86,8 @@ export function ControlClientPage({ initialClients, initialLoanPlans, initialPla
         localidades: initialLocalidades,
         promotoras: initialPromotoras,
     };
+
+    const penaltyThreshold = getExtraWeekThreshold(data?.config || initialConfig);
 
     const filteredLoans = useMemo(() => {
         if (!dateRange || !dateRange.from) {
@@ -153,17 +156,17 @@ export function ControlClientPage({ initialClients, initialLoanPlans, initialPla
                 let missedCount = 0;
                 for (let i = 1; i <= baseTerm; i++) {
                     const p = loan.payments.find(pay => pay.weekNumber === i);
-                    if (p) {
+                    if (p && !p.isReverted) {
                         const pAmount = (p.amount === null || p.amount === undefined || isNaN(p.amount)) ? 0 : p.amount;
-                        totalPaidInBase += pAmount;
-                        if (pAmount < weeklyPayment) missedCount++;
+                        totalPaidInBase = pAmount;
+                        if (pAmount < weeklyPayment || p.isRecovered || p.paymentType === 'recovered') missedCount++;
                     } else {
                         missedCount++;
                     }
                 }
                 
                 const isExpired = true;
-                const hasPenalty = (missedCount >= 2) || (isExpired && totalPaidInBase < (baseTerm * weeklyPayment));
+                const hasPenalty = loan.hasPenalty || (missedCount >= penaltyThreshold) || (isExpired && totalPaidInBase < (baseTerm * weeklyPayment));
                 
                 const totalExpectedWithPenalty = weeklyPayment * (baseTerm + (hasPenalty ? 1 : 0));
                 const balanceRemainingAbsolute = Math.max(0, totalExpectedWithPenalty - actualTotalPaid);
@@ -178,7 +181,7 @@ export function ControlClientPage({ initialClients, initialLoanPlans, initialPla
             }
 
             // CAPITAL PENDIENTE (VIGENTE)
-            const hasPenalty = checkPenalty(loan, loanPlan);
+            const hasPenalty = checkPenalty(loan, loanPlan, penaltyThreshold);
             const termInWeeks = baseTerm + (hasPenalty ? 1 : 0);
             const totalExpected = weeklyPayment * termInWeeks;
 
@@ -523,6 +526,7 @@ export function ControlClientPage({ initialClients, initialLoanPlans, initialPla
                         plazas={plazas} 
                         localidades={localidades} 
                         promotoras={promotoras} 
+                        appConfig={data?.config || initialConfig}
                     />
                 </div>
             )}

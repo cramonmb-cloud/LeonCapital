@@ -1,11 +1,11 @@
 'use server';
 
-import type { Client, Loan, LoanPlan, AppUser, Payment } from '@/lib/types';
+import type { Client, Loan, LoanPlan, AppUser, Payment, AppConfig } from '@/lib/types';
 import { collection, doc, addDoc, serverTimestamp, updateDoc, runTransaction, increment, writeBatch, getDoc, getDocs, query, where, deleteDoc, Timestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { revalidatePath } from 'next/cache';
 import { getLoanPlan, getClient, getLoan } from '@/lib/firestore-data';
-import { getSaturdayOfWeek, getMexicoNow, getCurrentLoanWeekNumber, parseLocalDate } from '@/lib/utils';
+import { getSaturdayOfWeek, getMexicoNow, getCurrentLoanWeekNumber, parseLocalDate, getExtraWeekThreshold } from '@/lib/utils';
 
 // Helper to handle Firestore dates consistently in server actions
 const parseFirestoreDate = (date: any): Date => parseLocalDate(date);
@@ -231,6 +231,10 @@ export async function registerPaymentAction(loanId: string, paymentStartDate: Da
         await runTransaction(db, async (transaction) => {
             const loanRef = doc(db, 'loans', loanId);
             const loanSnap = await transaction.get(loanRef);
+            const configRef = doc(db, 'config', 'main');
+            const configSnap = await transaction.get(configRef);
+            const configData = configSnap.data() as AppConfig | undefined;
+            const penaltyThreshold = getExtraWeekThreshold(configData);
 
             if (!loanSnap.exists()) {
                 throw new Error('Préstamo no encontrado');
@@ -290,21 +294,23 @@ export async function registerPaymentAction(loanId: string, paymentStartDate: Da
 
                 // 1. Cubrir la semana en curso (startingWeekNumber)
                 const isStartAdvance = startingWeekNumber > currentLoanWeek;
+                const isPastWeek = startingWeekNumber < currentLoanWeek;
+                const isRecoveredStart = isPastWeek || (currentPayments.find(p => p.weekNumber === startingWeekNumber)?.isRecovered ?? false);
                 const neededStart = weeklyPayment;
                 if (remaining <= neededStart) {
                     updatedPaymentsMap.set(startingWeekNumber, { 
                         amount: remaining, 
-                        isRecovered: false,
+                        isRecovered: isRecoveredStart,
                         isAdvance: isStartAdvance,
-                        paymentType: isStartAdvance ? 'adelanto_entrante' : 'regular'
+                        paymentType: isStartAdvance ? 'adelanto_entrante' : isRecoveredStart ? 'recovered' : 'regular'
                     });
                     remaining = 0;
                 } else {
                     updatedPaymentsMap.set(startingWeekNumber, { 
                         amount: weeklyPayment, 
-                        isRecovered: false,
+                        isRecovered: isRecoveredStart,
                         isAdvance: isStartAdvance,
-                        paymentType: isStartAdvance ? 'adelanto_entrante' : 'regular'
+                        paymentType: isStartAdvance ? 'adelanto_entrante' : isRecoveredStart ? 'recovered' : 'regular'
                     });
                     remaining -= neededStart;
 
@@ -413,16 +419,16 @@ export async function registerPaymentAction(loanId: string, paymentStartDate: Da
             let totalPaidInBaseTerm = 0;
             for (let i = 1; i <= baseTerm; i++) {
                 const p = allPayments.find(pay => pay.weekNumber === i);
-                if (p) {
+                if (p && !p.isReverted) {
                     totalPaidInBaseTerm += p.amount;
-                    if (p.amount < weeklyPayment) missedCount++;
+                    if (p.amount < weeklyPayment || p.isRecovered || p.paymentType === 'recovered') missedCount++;
                 } else if (i < currentLoanWeek) {
                     missedCount++;
                 }
             }
 
             const isExpired = currentLoanWeek > baseTerm;
-            const hasPenalty = (missedCount >= 2) || (isExpired && totalPaidInBaseTerm < (baseTerm * weeklyPayment));
+            const hasPenalty = loan.hasPenalty || (missedCount >= penaltyThreshold) || (isExpired && totalPaidInBaseTerm < (baseTerm * weeklyPayment));
             
             const totalTerm = baseTerm + (hasPenalty ? 1 : 0);
             const totalExpected = totalTerm * weeklyPayment;
@@ -437,7 +443,8 @@ export async function registerPaymentAction(loanId: string, paymentStartDate: Da
 
             transaction.update(loanRef, cleanFirestoreData({
                 payments: allPayments,
-                status: newStatus
+                status: newStatus,
+                ...(hasPenalty ? { hasPenalty: true } : {})
             }));
         });
 
@@ -456,6 +463,10 @@ export async function payOffLoanAction(loanId: string, userId?: string) {
         const result = await runTransaction(db, async (transaction) => {
             const loanRef = doc(db, "loans", loanId);
             const loanDoc = await transaction.get(loanRef);
+            const configRef = doc(db, 'config', 'main');
+            const configSnap = await transaction.get(configRef);
+            const configData = configSnap.data() as AppConfig | undefined;
+            const penaltyThreshold = getExtraWeekThreshold(configData);
             
             if (!loanDoc.exists()) {
                 throw new Error("Préstamo no encontrado.");
@@ -485,15 +496,15 @@ export async function payOffLoanAction(loanId: string, userId?: string) {
             let totalPaidInBaseTerm = 0;
             for (let i = 1; i <= baseTerm; i++) {
                 const p = currentPayments.find(pay => pay.weekNumber === i);
-                if (p) {
+                if (p && !p.isReverted) {
                     totalPaidInBaseTerm += p.amount;
-                    if (p.amount < weeklyPayment) missedCount++;
+                    if (p.amount < weeklyPayment || p.isRecovered || p.paymentType === 'recovered') missedCount++;
                 } else if (i < currentLoanWeek) {
                     missedCount++;
                 }
             }
 
-            const hasPenalty = (missedCount >= 2) || (isExpired && totalPaidInBaseTerm < (baseTerm * weeklyPayment));
+            const hasPenalty = loan.hasPenalty || (missedCount >= penaltyThreshold) || (isExpired && totalPaidInBaseTerm < (baseTerm * weeklyPayment));
             const totalTerm = baseTerm + (hasPenalty ? 1 : 0);
             
             const totalExpected = totalTerm * weeklyPayment;
@@ -625,6 +636,8 @@ export async function accumulateAssumedPaymentsAction(
             const loanSnapshots = await Promise.all(
                 loanIds.map(id => transaction.get(doc(db, 'loans', id)))
             );
+            const configSnap = await transaction.get(doc(db, 'config', 'main'));
+            const penaltyThreshold = getExtraWeekThreshold(configSnap.data() as AppConfig | undefined);
 
             const updateOps: { ref: any, data: any }[] = [];
             const txOps: any[] = [];
@@ -697,16 +710,16 @@ export async function accumulateAssumedPaymentsAction(
                 let totalPaidInBaseTerm = 0;
                 for (let i = 1; i <= baseTerm; i++) {
                     const p = newPayments.find(pay => pay.weekNumber === i);
-                    if (p) {
+                    if (p && !p.isReverted) {
                         totalPaidInBaseTerm += p.amount;
-                        if (p.amount < weeklyPayment) missedCount++;
+                        if (p.amount < weeklyPayment || p.isRecovered || p.paymentType === 'recovered') missedCount++;
                     } else if (i < realCurrentLoanWeek) {
                         missedCount++;
                     }
                 }
 
                 const isExpired = realCurrentLoanWeek > baseTerm + 1;
-                const hasPenalty = (missedCount >= 2) || (isExpired && totalPaidInBaseTerm < (baseTerm * weeklyPayment));
+                const hasPenalty = loan.hasPenalty || (missedCount >= penaltyThreshold) || (isExpired && totalPaidInBaseTerm < (baseTerm * weeklyPayment));
                 
                 const totalTerm = baseTerm + (hasPenalty ? 1 : 0);
                 const totalExpected = totalTerm * weeklyPayment;
@@ -720,12 +733,14 @@ export async function accumulateAssumedPaymentsAction(
                     newStatus = (isExpired || realCurrentLoanWeek > totalTerm + 1) ? 'Overdue' : 'Active';
                 }
 
-                if (hasChanges || newStatus !== loan.status) {
+                const penaltyChanged = hasPenalty && !loan.hasPenalty;
+                if (hasChanges || newStatus !== loan.status || penaltyChanged) {
                     updateOps.push({ 
                         ref: loanSnap.ref, 
                         data: { 
                             payments: newPayments, 
-                            status: newStatus 
+                            status: newStatus,
+                            ...(hasPenalty ? { hasPenalty: true } : {})
                         } 
                     });
                 }
@@ -809,19 +824,20 @@ export async function accumulateAssumedPaymentsAction(
                         const p = updatedPayments.find(pay => pay.weekNumber === w);
                         if (p && !p.isReverted) {
                             totalPaidInBaseTerm += p.amount;
-                            if (p.amount < wp) missedCount++;
+                            if (p.amount < wp || p.isRecovered || p.paymentType === 'recovered') missedCount++;
                         } else {
                             missedCount++;
                         }
                     }
-                    const hasPenalty = (missedCount >= 2) || (totalPaidInBaseTerm < (baseTerm * wp));
+                    const hasPenalty = oLoan.hasPenalty || (missedCount >= penaltyThreshold) || (totalPaidInBaseTerm < (baseTerm * wp));
                     const totalExpected = (baseTerm + (hasPenalty ? 1 : 0)) * wp;
                     const newBalance = Math.max(0, totalExpected - newTotalPaid);
                     const newStatus: Loan['status'] = newBalance <= 0 ? 'Pagado desde CV' : 'Overdue';
 
                     const updateData: any = {
                         payments: updatedPayments,
-                        status: newStatus
+                        status: newStatus,
+                        ...(hasPenalty ? { hasPenalty: true } : {})
                     };
                     if (abonoItem.gestor) {
                         updateData.gestor = abonoItem.gestor;

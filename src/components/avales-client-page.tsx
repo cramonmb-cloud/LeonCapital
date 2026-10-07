@@ -74,7 +74,7 @@ import {
   Home
 } from 'lucide-react';
 import Link from 'next/link';
-import { cn, getCurrentLoanWeekNumber } from '@/lib/utils';
+import { cn, getCurrentLoanWeekNumber, getExtraWeekThreshold } from '@/lib/utils';
 
 interface jsPDFWithAutoTable extends jsPDF {
   autoTable: (options: UserOptions) => jsPDF;
@@ -188,7 +188,7 @@ export function AvalesClientPage({
     localidades: initialLocalidades,
     promotoras: initialPromotoras
   }, {
-    enabledCollections: ['clients', 'loans', 'loanPlans', 'plazas', 'localidades', 'promotoras']
+    enabledCollections: ['clients', 'loans', 'loanPlans', 'plazas', 'localidades', 'promotoras', 'config']
   });
   
   const { clients, loans, loanPlans: plans, plazas, localidades, promotoras } = realtimeData;
@@ -1215,10 +1215,12 @@ export function AvalesClientPage({
             
             for (let i = 1; i <= baseTerm; i++) {
               const p = (currentSelectedLoan.payments || []).find(pay => pay.weekNumber === i);
-              if (p) {
+              if (p && !p.isReverted) {
                 totalPaidInBaseTerm += p.amount;
-                if (p.amount < weeklyPayment) {
+                if (p.amount < weeklyPayment || p.isRecovered || p.paymentType === 'recovered') {
                   missedCount++;
+                }
+                if (p.amount < weeklyPayment) {
                   baseArrears += (weeklyPayment - p.amount);
                 }
               } else if (i < currentLoanWeek) {
@@ -1227,7 +1229,8 @@ export function AvalesClientPage({
               }
             }
 
-            const hasPenalty = (missedCount >= 2) || (isExpired && totalPaidInBaseTerm < (baseTerm * weeklyPayment));
+            const penaltyThreshold = getExtraWeekThreshold(realtimeData?.config);
+            const hasPenalty = currentSelectedLoan.hasPenalty || (missedCount >= penaltyThreshold) || (isExpired && totalPaidInBaseTerm < (baseTerm * weeklyPayment));
             const totalTerm = baseTerm + (hasPenalty ? 1 : 0);
 
             const actualTotalPaid = (currentSelectedLoan.payments || []).reduce((acc, p) => acc + p.amount, 0);

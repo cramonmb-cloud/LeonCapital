@@ -6,14 +6,14 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Button } from '@/components/ui/button';
 import { DatePicker } from '@/components/ui/date-picker';
 import { FileDown, FileSpreadsheet, Loader2, Info, Landmark, AlertCircle, FileText, CheckCircle, FileBarChart2, X } from 'lucide-react';
-import type { Loan, Client, LoanPlan, Plaza, Localidad, Promotora } from '@/lib/types';
+import type { Loan, Client, LoanPlan, Plaza, Localidad, Promotora, AppConfig } from '@/lib/types';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
 import 'jspdf-autotable';
 import type { UserOptions } from 'jspdf-autotable';
 import { useToast } from '@/hooks/use-toast';
 import type { DateRange } from 'react-day-picker';
-import { getCurrentLoanWeekNumber } from '@/lib/utils';
+import { getCurrentLoanWeekNumber, getExtraWeekThreshold } from '@/lib/utils';
 
 interface jsPDFWithAutoTable extends jsPDF {
   autoTable: (options: UserOptions) => jsPDF;
@@ -26,6 +26,7 @@ interface ReportsSectionProps {
   plazas: Plaza[];
   localidades: Localidad[];
   promotoras: Promotora[];
+  appConfig?: AppConfig | null;
 }
 
 type ReportType = 'loans_active' | 'loans_overdue' | 'loans_pending' | 'clients_list';
@@ -37,7 +38,8 @@ const parseDate = (d: any): Date => {
   return new Date(d);
 };
 
-export function ReportsSection({ loans, clients, loanPlans, plazas, localidades, promotoras }: ReportsSectionProps) {
+export function ReportsSection({ loans, clients, loanPlans, plazas, localidades, promotoras, appConfig }: ReportsSectionProps) {
+  const penaltyThreshold = getExtraWeekThreshold(appConfig);
   const [reportType, setReportType] = useState<ReportType>('loans_active');
   const [selectedPlaza, setSelectedPlaza] = useState('all');
   const [selectedLocalidad, setSelectedLocalidad] = useState('all');
@@ -122,10 +124,12 @@ export function ReportsSection({ loans, clients, loanPlans, plazas, localidades,
           
           for (let i = 1; i <= baseTerm; i++) {
             const p = currentPayments.find(pay => pay.weekNumber === i);
-            if (p) {
+            if (p && !p.isReverted) {
               totalPaidInBaseTerm += p.amount;
-              if (p.amount < weeklyPayment) {
+              if (p.amount < weeklyPayment || p.isRecovered || p.paymentType === 'recovered') {
                 missedCount++;
+              }
+              if (p.amount < weeklyPayment) {
                 baseArrears += (weeklyPayment - p.amount);
               }
             } else if (i < currentLoanWeek) {
@@ -134,7 +138,7 @@ export function ReportsSection({ loans, clients, loanPlans, plazas, localidades,
             }
           }
 
-          const hasPenalty = (missedCount >= 2) || (isExpired && totalPaidInBaseTerm < (baseTerm * weeklyPayment));
+          const hasPenalty = loan.hasPenalty || (missedCount >= penaltyThreshold) || (isExpired && totalPaidInBaseTerm < (baseTerm * weeklyPayment));
           let penaltyArrear = 0;
           if (hasPenalty) {
               const penaltyWeekNum = baseTerm + 1;
@@ -153,8 +157,8 @@ export function ReportsSection({ loans, clients, loanPlans, plazas, localidades,
             // Cartera Vencida: expired with debt
             return isExpired && loanBalance > 0;
           } else if (reportType === 'loans_pending') {
-            // Pendientes: active, with 2+ missed payments and failure amount > 0
-            return !isExpired && missedCount >= 2 && calculatedTotalDue > 0;
+            // Pendientes: active, with threshold+ missed payments and failure amount > 0
+            return !isExpired && missedCount >= penaltyThreshold && calculatedTotalDue > 0;
           }
           return false;
         })
@@ -179,10 +183,12 @@ export function ReportsSection({ loans, clients, loanPlans, plazas, localidades,
 
           for (let i = 1; i <= baseTerm; i++) {
             const p = currentPayments.find(pay => pay.weekNumber === i);
-            if (p) {
+            if (p && !p.isReverted) {
               totalPaidInBaseTerm += p.amount;
-              if (p.amount < weeklyPayment) {
+              if (p.amount < weeklyPayment || p.isRecovered || p.paymentType === 'recovered') {
                 missedCount++;
+              }
+              if (p.amount < weeklyPayment) {
                 baseArrears += (weeklyPayment - p.amount);
               }
             } else if (i < currentLoanWeek) {
@@ -191,7 +197,7 @@ export function ReportsSection({ loans, clients, loanPlans, plazas, localidades,
             }
           }
 
-          const hasPenalty = (missedCount >= 2) || (currentLoanWeek > baseTerm && totalPaidInBaseTerm < (baseTerm * weeklyPayment));
+          const hasPenalty = loan.hasPenalty || (missedCount >= penaltyThreshold) || (currentLoanWeek > baseTerm && totalPaidInBaseTerm < (baseTerm * weeklyPayment));
           let penaltyArrear = 0;
           if (hasPenalty) {
               const penaltyWeekNum = baseTerm + 1;
@@ -278,7 +284,7 @@ export function ReportsSection({ loans, clients, loanPlans, plazas, localidades,
                 missedCount++;
               }
             }
-            return missedCount >= 2;
+            return missedCount >= penaltyThreshold;
           });
           return !hasAdeudos;
         }
@@ -303,11 +309,15 @@ export function ReportsSection({ loans, clients, loanPlans, plazas, localidades,
 
           for (let i = 1; i <= baseTerm; i++) {
             const p = currentPayments.find(pay => pay.weekNumber === i);
-            if (!p && i < currentLoanWeek) {
+            if (p && !p.isReverted) {
+              if (p.amount < weeklyPayment || p.isRecovered || p.paymentType === 'recovered') {
+                missedCount++;
+              }
+            } else if (i < currentLoanWeek) {
               missedCount++;
             }
           }
-          const hasPenalty = (missedCount >= 2) || (currentLoanWeek > baseTerm && (actualTotalPaid < baseTerm * weeklyPayment));
+          const hasPenalty = loan.hasPenalty || (missedCount >= penaltyThreshold) || (currentLoanWeek > baseTerm && (actualTotalPaid < baseTerm * weeklyPayment));
           const totalTerm = baseTerm + (hasPenalty ? 1 : 0);
           totalDebt += Math.max(0, (totalTerm * weeklyPayment) - actualTotalPaid);
         });

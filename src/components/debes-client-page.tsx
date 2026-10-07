@@ -10,7 +10,7 @@ import { useToast } from '@/hooks/use-toast';
 import { useRealtimeData } from '@/hooks/use-realtime-data';
 import { collection, query, where } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-import { cn, getSaturdayOfWeek, getMexicoNow } from '@/lib/utils';
+import { cn, getSaturdayOfWeek, getMexicoNow, getExtraWeekThreshold } from '@/lib/utils';
 import type { Client, LoanPlan, Loan, Plaza, Localidad, Promotora, PromotoraSettlement } from '@/lib/types';
 import { saveSettlementAction, deleteSettlementAction, deleteGroupSettlementsAction } from '@/app/dashboard/debes/actions';
 import { useAuth } from '@/hooks/use-auth';
@@ -123,7 +123,7 @@ export function DebesClientPage({
     localidades: initialLocalidades,
     promotoras: initialPromotoras
   }, {
-    enabledCollections: ['loans', 'loanPlans', 'plazas', 'localidades', 'promotoras', 'promotoraSettlements'],
+    enabledCollections: ['loans', 'loanPlans', 'plazas', 'localidades', 'promotoras', 'promotoraSettlements', 'config'],
     queries: {
       loans: dynamicLoansQuery,
       promotoraSettlements: dynamicSettlementsQuery
@@ -196,13 +196,15 @@ export function DebesClientPage({
             return paymentSaturday.getTime() === weekSaturdayTime;
           });
           const actualPaidInWeek = paymentsInWeek.reduce((sum, p) => sum + p.amount, 0);
+          const hasRecoveredInWeek = paymentsInWeek.some(p => p.isRecovered || p.paymentType === 'recovered');
 
-          if (actualPaidInWeek < weeklyPayment - 1) {
+          if (actualPaidInWeek < weeklyPayment - 1 || hasRecoveredInWeek) {
             fallosCount++;
           }
         }
 
-        if (fallosCount >= 2) {
+        const penaltyThreshold = getExtraWeekThreshold(realtime?.config);
+        if (loan.hasPenalty || fallosCount >= penaltyThreshold) {
           count++;
         }
       }

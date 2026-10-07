@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useMemo, useEffect } from 'react';
-import type { Client, Loan, LoanPlan, Plaza, Localidad, Promotora } from '@/lib/types';
+import type { Client, Loan, LoanPlan, Plaza, Localidad, Promotora, AppConfig } from '@/lib/types';
 import { Input } from '@/components/ui/input';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -9,7 +9,7 @@ import { Search, Wallet, Calendar, Shield, Phone, Home, X, CircleDollarSign, Bui
 import { Separator } from './ui/separator';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
-import { cn, getCurrentLoanWeekNumber } from '@/lib/utils';
+import { cn, getCurrentLoanWeekNumber, getExtraWeekThreshold } from '@/lib/utils';
 import { useAuth } from '@/hooks/use-auth';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { ScrollArea } from './ui/scroll-area';
@@ -24,9 +24,11 @@ interface ConsultarClientePageProps {
   plazas: Plaza[];
   localidades: Localidad[];
   promotoras: Promotora[];
+  appConfig?: AppConfig | null;
 }
 
-export function ConsultarClientePage({ clients: allClients, loans: allLoans, loanPlans, plazas: allPlazas, localidades: allLocalidades, promotoras: allPromotoras }: ConsultarClientePageProps) {
+export function ConsultarClientePage({ clients: allClients, loans: allLoans, loanPlans, plazas: allPlazas, localidades: allLocalidades, promotoras: allPromotoras, appConfig }: ConsultarClientePageProps) {
+  const penaltyThreshold = getExtraWeekThreshold(appConfig);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -214,8 +216,10 @@ export function ConsultarClientePage({ clients: allClients, loans: allLoans, loa
         const p = (activeLoan.payments || []).find(pay => pay.weekNumber === i);
         if (p && !p.isReverted) {
             totalPaidInBaseTerm += p.amount;
-            if (p.amount < weeklyPayment) {
+            if (p.amount < weeklyPayment || p.isRecovered || p.paymentType === 'recovered') {
                 missedCount++;
+            }
+            if (p.amount < weeklyPayment) {
                 baseArrears += (weeklyPayment - p.amount);
             }
         } else if (i < currentLoanWeek) {
@@ -224,8 +228,8 @@ export function ConsultarClientePage({ clients: allClients, loans: allLoans, loa
         }
     }
 
-    // REGLA DINÁMICA: Penalización solo si tiene 2+ fallos o venció debiendo del base
-    const hasPenalty = (missedCount >= 2) || (isExpired && totalPaidInBaseTerm < (baseTerm * weeklyPayment));
+    // REGLA DINÁMICA: Penalización según umbral de fallos configurado o venció debiendo del base
+    const hasPenalty = activeLoan.hasPenalty || (missedCount >= penaltyThreshold) || (isExpired && totalPaidInBaseTerm < (baseTerm * weeklyPayment));
     const totalTerm = baseTerm + (hasPenalty ? 1 : 0);
 
     const actualTotalPaid = (activeLoan.payments || []).reduce((acc, p) => acc + p.amount, 0);
@@ -808,6 +812,7 @@ export function ConsultarClientePage({ clients: allClients, loans: allLoans, loa
                 loan={activeLoanDetails.loan}
                 weekNumber={adjustData.weekNumber}
                 currentAmount={adjustData.amount}
+                appConfig={appConfig}
                 onSuccess={() => {
                     if (typeof window !== 'undefined') window.location.reload();
                 }}

@@ -348,6 +348,26 @@ export async function saveGuarantorLimitAction(limit: number, authCode: string) 
     }
 }
 
+export async function saveExtraWeekThresholdAction(threshold: number) {
+    try {
+        const val = Number(threshold);
+        if (isNaN(val) || val < 1) {
+            return { success: false, message: 'El umbral de fallos debe ser un número entero mayor o igual a 1.' };
+        }
+        const configRef = doc(db, 'config', 'main');
+        await setDoc(configRef, { 
+            extraWeekMissedThreshold: Math.floor(val)
+        }, { merge: true });
+        revalidatePath('/dashboard', 'layout');
+        return { 
+            success: true, 
+            message: `Regla actualizada: La semana extra se habilitará a partir de ${Math.floor(val)} fallo${Math.floor(val) === 1 ? '' : 's'}.` 
+        };
+    } catch (error: any) {
+        return { success: false, message: `Error al guardar la regla de semana extra: ${error.message}` };
+    }
+}
+
 export async function getOrRotateGuarantorAuthCodeAction(): Promise<{ code: string; updatedAt: string; rotated: boolean }> {
     try {
         const configRef = doc(db, 'config', 'main');

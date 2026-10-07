@@ -42,10 +42,10 @@ import {
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Trash2, Loader2, Image as ImageIcon, Pencil, History, ShieldAlert, Building2, MessageSquare, Sparkles, RefreshCcw, AlertTriangle, Download, Upload, FileJson, User, UserCheck, MapPin, Route, Building, ChevronUp, ChevronDown, Key, Printer, Users } from "lucide-react";
+import { Trash2, Loader2, Image as ImageIcon, Pencil, History, ShieldAlert, Building2, MessageSquare, Sparkles, RefreshCcw, AlertTriangle, AlertCircle, CalendarClock, Download, Upload, FileJson, User, UserCheck, MapPin, Route, Building, ChevronUp, ChevronDown, Key, Printer, Users } from "lucide-react";
 import { ImageUploadButton } from "./image-upload-button";
 import { useToast } from "@/hooks/use-toast";
-import { deleteAllDataAction, saveLogoAction, saveAppNameAction, saveGuarantorLimitAction, rotateGuarantorAuthCodeNowAction, accumulateAllSystemPaymentsAction, saveWhatsAppTemplateAction, revertExtraWeekPaymentsAction, importBackupAction, savePlazaWhatsAppTemplatesAction, saveMenuConfigAction, saveMenuColorsAction, saveStaffTypesAction, saveImprentaUrlAction, mergeDuplicateClientsAction } from "@/app/dashboard/ajustes/actions";
+import { deleteAllDataAction, saveLogoAction, saveAppNameAction, saveGuarantorLimitAction, saveExtraWeekThresholdAction, rotateGuarantorAuthCodeNowAction, accumulateAllSystemPaymentsAction, saveWhatsAppTemplateAction, revertExtraWeekPaymentsAction, importBackupAction, savePlazaWhatsAppTemplatesAction, saveMenuConfigAction, saveMenuColorsAction, saveStaffTypesAction, saveImprentaUrlAction, mergeDuplicateClientsAction } from "@/app/dashboard/ajustes/actions";
 import { useRouter } from "next/navigation";
 import type { AppConfig, WhatsAppTemplates } from "@/lib/types";
 import { Separator } from "./ui/separator";
@@ -268,12 +268,41 @@ export function SettingsClientPage({ initialConfig, mode = 'system' }: SettingsC
     const [imprentaUrlState, setImprentaUrlState] = useState<string>('');
     const [maxGuarantorClientsState, setMaxGuarantorClientsState] = useState<number | string>('');
     const [guarantorAuthCodeState, setGuarantorAuthCodeState] = useState<string>('');
+    const [extraWeekThresholdState, setExtraWeekThresholdState] = useState<number | string>(initialConfig?.extraWeekMissedThreshold ?? 2);
 
     useEffect(() => {
         setImprentaUrlState(initialConfig?.imprentaIframeUrl || 'https://ais-dev-gigbsa3huhlib2awffzpiu-361305856613.us-west2.run.app/?portal=token-xivg8-5268');
         setMaxGuarantorClientsState(initialConfig?.maxGuarantorClients !== undefined ? initialConfig.maxGuarantorClients : '');
         setGuarantorAuthCodeState(initialConfig?.guarantorAuthCode || '');
+        if (initialConfig?.extraWeekMissedThreshold !== undefined) {
+            setExtraWeekThresholdState(initialConfig.extraWeekMissedThreshold);
+        }
     }, [initialConfig]);
+
+    useEffect(() => {
+        if (systemData?.config?.extraWeekMissedThreshold !== undefined) {
+            setExtraWeekThresholdState(systemData.config.extraWeekMissedThreshold);
+        }
+    }, [systemData?.config?.extraWeekMissedThreshold]);
+
+    const onSaveExtraWeekThreshold = async () => {
+        setIsSaving(true);
+        try {
+            const val = Number(extraWeekThresholdState);
+            if (!val || val < 1) {
+                throw new Error('El número de fallos debe ser un número entero mayor o igual a 1.');
+            }
+            const result = await saveExtraWeekThresholdAction(val);
+            if (result.success) {
+                toast({ title: 'Configuración Guardada', description: result.message });
+                router.refresh();
+            } else throw new Error(result.message);
+        } catch (error: any) {
+            toast({ variant: 'destructive', title: 'Error', description: error.message });
+        } finally {
+            setIsSaving(false);
+        }
+    };
 
     const onSaveImprentaUrl = async () => {
         setIsSaving(true);
@@ -934,6 +963,55 @@ export function SettingsClientPage({ initialConfig, mode = 'system' }: SettingsC
                                         </div>
                                     </form>
                                 </Form>
+                            </CardContent>
+                        </Card>
+
+                        <Card className="shadow-lg border-primary/10">
+                            <CardHeader className="bg-primary/5 border-b mb-6">
+                                <CardTitle className="flex items-center gap-2 text-xl">
+                                    <CalendarClock className="h-5 w-5 text-primary" /> Reglas de Préstamos y Semana Extra
+                                </CardTitle>
+                                <CardDescription>Configura a partir de cuántos fallos u omisiones se habilita automáticamente la semana extra de penalización.</CardDescription>
+                            </CardHeader>
+                            <CardContent className="space-y-6">
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-start">
+                                    <div className="space-y-3">
+                                        <label className="text-sm font-bold block">Fallos para habilitar Semana Extra</label>
+                                        <div className="flex items-center gap-3">
+                                            <Input 
+                                                type="number" 
+                                                value={extraWeekThresholdState} 
+                                                onChange={(e) => setExtraWeekThresholdState(e.target.value)}
+                                                placeholder="Ej: 2"
+                                                min="1"
+                                                step="1"
+                                                className="bg-white dark:bg-zinc-950 font-bold max-w-[120px] text-lg text-center"
+                                            />
+                                            <span className="text-sm font-semibold text-muted-foreground">
+                                                fallo{Number(extraWeekThresholdState) === 1 ? '' : 's'} o pago{Number(extraWeekThresholdState) === 1 ? '' : 's'} incompleto{Number(extraWeekThresholdState) === 1 ? '' : 's'}
+                                            </span>
+                                        </div>
+                                        <p className="text-xs text-muted-foreground">
+                                            Define el número mínimo de semanas con pago incompleto u omitido en el plazo base para que el sistema active automáticamente la semana extra (+1 semana de cobro).
+                                        </p>
+                                    </div>
+                                    <div className="rounded-xl border border-blue-200 dark:border-blue-900/50 bg-blue-50/50 dark:bg-blue-950/20 p-4 space-y-2">
+                                        <div className="flex items-center gap-2 text-blue-700 dark:text-blue-300 font-bold text-sm">
+                                            <AlertCircle className="h-4 w-4 shrink-0" />
+                                            <span>Regla en vigor</span>
+                                        </div>
+                                        <p className="text-xs text-blue-900/80 dark:text-blue-200/80 leading-relaxed">
+                                            Con este ajuste fijado en <strong className="font-bold underline">{Number(extraWeekThresholdState) || 2} fallo{Number(extraWeekThresholdState) === 1 ? '' : 's'}</strong>, 
+                                            cualquier préstamo que alcance <strong className="font-bold">{Number(extraWeekThresholdState) || 2} o más semanas de atraso (fallos, omisiones o abonos parciales)</strong> activará de inmediato la semana extra (+1 semana de cobro) en hojas de cobranza, saldos, cartera vencida y liquidaciones. <strong className="font-semibold text-blue-950 dark:text-blue-100">Esta penalización es definitiva:</strong> si el cliente posteriormente recupera o regulariza sus abonos pendientes, la semana extra <strong className="font-bold">no se le retira</strong> y deberá pagarla obligatoriamente.
+                                        </p>
+                                    </div>
+                                </div>
+                                <div className="flex justify-end pt-4 border-t">
+                                    <Button onClick={onSaveExtraWeekThreshold} disabled={isSaving} className="bg-primary hover:bg-primary/95 font-bold h-10 px-6 rounded-lg">
+                                        {isSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Pencil className="mr-2 h-4 w-4" />}
+                                        Guardar Regla de Semana Extra
+                                    </Button>
+                                </div>
                             </CardContent>
                         </Card>
 

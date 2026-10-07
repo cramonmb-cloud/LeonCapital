@@ -23,7 +23,7 @@ import {
     DialogDescription,
 } from '@/components/ui/dialog';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { cn, getSaturdayOfWeek, getCurrentLoanWeekNumber } from '@/lib/utils';
+import { cn, getSaturdayOfWeek, getCurrentLoanWeekNumber, getExtraWeekThreshold } from '@/lib/utils';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import {
     Table,
@@ -104,8 +104,10 @@ export function OverdueCard({
             const p = (loan.payments || []).find(pay => pay.weekNumber === i);
             if (p && !p.isReverted) {
                 totalPaidInBaseTerm += p.amount;
-                if (p.amount < weeklyPayment) {
+                if (p.amount < weeklyPayment || p.isRecovered || p.paymentType === 'recovered') {
                     missedCount++;
+                }
+                if (p.amount < weeklyPayment) {
                     sumMissedAmount += (weeklyPayment - p.amount);
                 }
             } else if (i < currentLoanWeek) {
@@ -114,8 +116,9 @@ export function OverdueCard({
             }
         }
 
-        // REGLA DINÁMICA: Penalización solo si tiene 2+ fallos o venció debiendo del base
-        const hasPenalty = (missedCount >= 2) || (isExpired && totalPaidInBaseTerm < (baseTerm * weeklyPayment));
+        // REGLA DINÁMICA: Penalización según umbral de fallos configurado o venció debiendo del base
+        const penaltyThreshold = getExtraWeekThreshold(appConfig);
+        const hasPenalty = loan.hasPenalty || (missedCount >= penaltyThreshold) || (isExpired && totalPaidInBaseTerm < (baseTerm * weeklyPayment));
         
         const totalPaid = (loan.payments || []).reduce((acc, p) => acc + p.amount, 0);
         const totalExpected = (baseTerm + (hasPenalty ? 1 : 0)) * weeklyPayment;
@@ -820,6 +823,7 @@ export function OverdueCard({
                     loan={loan}
                     weekNumber={adjustData.weekNumber}
                     currentAmount={adjustData.amount}
+                    appConfig={appConfig}
                     onSuccess={() => {
                         if (typeof window !== 'undefined') window.location.reload();
                     }}

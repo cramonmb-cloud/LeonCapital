@@ -1,7 +1,7 @@
 import { getClients, getLoanPlans, getActiveLoans, getPlazas, getLocalidades, getPromotoras, getAppConfig } from '@/lib/firestore-data';
 import type { Client, Loan, LoanPlan, Plaza, Localidad, Promotora } from '@/lib/types';
 import { OverduePortfolioClientPage } from '@/components/overdue-portfolio-client-page';
-import { getCurrentLoanWeekNumber } from '@/lib/utils';
+import { getCurrentLoanWeekNumber, getExtraWeekThreshold } from '@/lib/utils';
 
 export type OverdueLoanDetails = {
     loan: Loan;
@@ -33,6 +33,8 @@ export default async function CarteraVencidaPage() {
         getAppConfig(),
     ]);
 
+    const penaltyThreshold = getExtraWeekThreshold(config);
+
     const overdueLoansDetails: OverdueLoanDetails[] = loans
         .filter(loan => loan.status !== 'Paid Off' && loan.status !== 'Pagado desde CV')
         .map(loan => {
@@ -61,14 +63,14 @@ export default async function CarteraVencidaPage() {
                 const p = currentPayments.find(pay => pay.weekNumber === i);
                 if (p && !p.isReverted) {
                     totalPaidInBaseTerm += p.amount;
-                    if (p.amount < weeklyPayment) missedCount++;
+                    if (p.amount < weeklyPayment || p.isRecovered || p.paymentType === 'recovered') missedCount++;
                 } else {
                     missedCount++;
                 }
             }
 
-            // REGLA DINÁMICA: Penalización solo si tiene 2+ fallos o venció debiendo del base
-            const hasPenalty = (missedCount >= 2) || (isExpired && totalPaidInBaseTerm < (baseTerm * weeklyPayment));
+            // REGLA DINÁMICA: Penalización según umbral de fallos configurado o venció debiendo del base
+            const hasPenalty = loan.hasPenalty || (missedCount >= penaltyThreshold) || (isExpired && totalPaidInBaseTerm < (baseTerm * weeklyPayment));
             
             const totalExpected = (baseTerm + (hasPenalty ? 1 : 0)) * weeklyPayment;
             const totalDue = Math.max(0, totalExpected - actualTotalPaid);

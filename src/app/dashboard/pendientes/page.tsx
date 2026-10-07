@@ -2,7 +2,7 @@ import { getClients, getLoanPlans, getActiveLoans, getPlazas, getLocalidades, ge
 import type { Client, Loan, LoanPlan, Plaza, Localidad, Promotora } from '@/lib/types';
 import { OverduePortfolioClientPage } from '@/components/overdue-portfolio-client-page';
 import type { OverdueLoanDetails } from '../cartera-vencida/page';
-import { getCurrentLoanWeekNumber } from '@/lib/utils';
+import { getCurrentLoanWeekNumber, getExtraWeekThreshold } from '@/lib/utils';
 
 export default async function OverduePortfolioPage() {
     const [loans, clients, loanPlans, plazas, localidades, promotoras, config] = await Promise.all([
@@ -14,6 +14,8 @@ export default async function OverduePortfolioPage() {
         getPromotoras(),
         getAppConfig(),
     ]);
+
+    const penaltyThreshold = getExtraWeekThreshold(config);
 
     const overdueLoansDetails: OverdueLoanDetails[] = loans
         .filter(loan => loan.status !== 'Paid Off' && loan.status !== 'Pagado desde CV')
@@ -40,8 +42,10 @@ export default async function OverduePortfolioPage() {
                 const p = loan.payments.find(pay => pay.weekNumber === i);
                 if (p && !p.isReverted) {
                     totalPaidInBaseTerm += p.amount;
-                    if (p.amount < weeklyPayment) {
+                    if (p.amount < weeklyPayment || p.isRecovered || p.paymentType === 'recovered') {
                         missedCount++;
+                    }
+                    if (p.amount < weeklyPayment) {
                         baseArrears += (weeklyPayment - p.amount);
                     }
                 } else if (i < currentLoanWeek) {
@@ -49,8 +53,8 @@ export default async function OverduePortfolioPage() {
                     baseArrears += weeklyPayment;
                 }
             }
-            // REGLA DINÁMICA: Penalización solo si tiene 2+ fallos o venció debiendo del base
-            const hasPenalty = (missedCount >= 2) || (isExpired && totalPaidInBaseTerm < (baseTerm * weeklyPayment));
+            // REGLA DINÁMICA: Penalización según umbral de fallos configurado o venció debiendo del base
+            const hasPenalty = loan.hasPenalty || (missedCount >= penaltyThreshold) || (isExpired && totalPaidInBaseTerm < (baseTerm * weeklyPayment));
 
             let penaltyArrear = 0;
             if (hasPenalty) {
@@ -61,9 +65,9 @@ export default async function OverduePortfolioPage() {
 
             const calculatedTotalDue = baseArrears + penaltyArrear;
 
-            // IMPORTANTE: En "Pagos Pendientes" mostramos préstamos vigentes o que requieren gestión activa
-            // pero si ya se pusieron al corriente (missedCount < 2) y no han expirado, ya no salen aquí.
-            if (!isExpired && missedCount >= 2 && calculatedTotalDue > 0) {
+            // IMPORTANTE: En "Pagos Pendientes" mostramos préstamos vigentes con adeudo
+            // (incluye saldo base pendiente y/o semana extra irrevocable por haber alcanzado el umbral de fallos).
+            if (!isExpired && (hasPenalty || missedCount > 0) && calculatedTotalDue > 0) {
                 return {
                     loan,
                     client,
