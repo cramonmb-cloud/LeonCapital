@@ -15,7 +15,7 @@ import { Label } from '@/components/ui/label';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
-import { getSaturdayOfWeek } from '@/lib/utils';
+import { getSaturdayOfWeek, calculatePromotoraWeeklyDebeAndAbonosSalientes } from '@/lib/utils';
 import type { Plaza, Localidad, Promotora, Loan, LoanPlan } from '@/lib/types';
 import { FileText, Printer, Building, MapPin, Calendar, Layers, FileSpreadsheet, Loader2, CheckSquare, Square } from 'lucide-react';
 import jsPDF from 'jspdf';
@@ -23,6 +23,7 @@ import 'jspdf-autotable';
 import type { UserOptions } from 'jspdf-autotable';
 import { collection, query, where, getDocs } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
+import { useAuth } from '@/hooks/use-auth';
 
 interface jsPDFWithAutoTable extends jsPDF {
   autoTable: (options: UserOptions) => jsPDF;
@@ -39,6 +40,7 @@ interface BorradorDebeModalProps {
   loans: Loan[];
   loanPlans: LoanPlan[];
   allAvailableWeeks: Date[];
+  config?: any;
 }
 
 function parseLocalDate(dateInput: any): Date {
@@ -66,57 +68,40 @@ function formatCurrency(amount: number): string {
   return new Intl.NumberFormat('es-MX', {
     style: 'currency',
     currency: 'MXN',
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  }).format(amount);
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(amount || 0);
 }
 
 /**
- * LÓGICA DE CÁLCULO DINÁMICO DEL "DEBE ENTREGAR" EN EL BORRADOR
+ * LÓGICA DE CÁLCULO DINÁMICO DEL "DEBE ENTREGAR", "ABONOS SALIENTES" Y "SEMANA EXTRA" EN EL BORRADOR
  * Para cada promotora/grupo dentro de las localidades seleccionadas:
- * 1. Se filtran sus préstamos registrados.
- * 2. Se determina si el préstamo estaba ACTIVO en el sábado de la semana consultada (selectedWeek):
- *    - El sábado de la semana consultada debe ser >= al sábado del startDate del préstamo.
- *    - El préstamo NO debe estar en estatus 'Overdue'.
- *    - Si está en 'Paid Off' o 'Pagado desde CV', el sábado de la semana consultada debe ser <= al sábado del último pago realizado.
- * 3. Para cada préstamo activo, se calcula su cuota semanal: (montoPrestamo / 1000) * tasaAbonoSemanalPlan.
- * 4. El Debe Entregar de la promotora es la suma de las cuotas de sus préstamos activos.
- * 5. Si la promotora tiene Debe Entregar > 0, se agrega a la tabla del borrador.
+ * 1. Se identifican sus préstamos activos en el sábado de la semana consultada.
+ * 2. Si un préstamo tiene abonos registrados previamente como adelanto para esta semana,
+ *    se contabilizan como "Abonos Salientes" y se descuentan de su Debe Entregar.
+ * 3. El Debe Entregar neto es la suma de cuotas semanales menos los Abonos Salientes.
+ * 4. La Semana Extra se contabiliza según la semana operativa (préstamos en su semana extra o abonados a la misma).
  */
 export function calculatePromotoraDraftDebe(
   promotoraId: string,
   selectedWeekStr: string,
   allLoans: Loan[],
-  allLoanPlans: LoanPlan[]
-): number {
-  const selectedWeekSaturday = getSaturdayOfWeek(parseLocalDate(selectedWeekStr));
-  const selectedWeekTime = selectedWeekSaturday.getTime();
-
-  const promotoraLoans = allLoans.filter((l) => l.promotoraId === promotoraId);
-
-  let totalDebe = 0;
-
-  promotoraLoans.forEach((loan) => {
-    const loanStartSaturday = getSaturdayOfWeek(parseLocalDate(loan.startDate));
-    const loanStartSaturdayTime = loanStartSaturday.getTime();
-
-    // El sábado de la semana consultada debe ser >= al sábado de inicio del préstamo
-    if (selectedWeekTime < loanStartSaturdayTime) return;
-
-    const plan = allLoanPlans.find((lp) => lp.id === loan.loanPlanId);
-    if (!plan) return;
-
-    const endSaturdayTime = loanStartSaturdayTime + (plan.termInWeeks * 7 * 24 * 3600 * 1000);
-    // Solo los préstamos cuyo plazo ya venció no se toman en cuenta para el debe
-    if (selectedWeekTime > endSaturdayTime) return;
-
-    const weeklyPaymentRate = plan.weeklyPaymentRate || 0;
-    const weeklyQuota = (loan.amount / 1000) * weeklyPaymentRate;
-
-    totalDebe += weeklyQuota;
-  });
-
-  return Math.round(totalDebe);
+  allLoanPlans: LoanPlan[],
+  config?: any
+): { debeEntregar: number; abonosSalientes: number; cuotaBase: number; semExt: number } {
+  const result = calculatePromotoraWeeklyDebeAndAbonosSalientes(
+    promotoraId,
+    selectedWeekStr,
+    allLoans,
+    allLoanPlans,
+    config
+  );
+  return {
+    debeEntregar: result.totalDebeEntregar,
+    abonosSalientes: result.totalAbonosSalientes,
+    cuotaBase: result.totalExpectedQuota,
+    semExt: result.totalSemExt,
+  };
 }
 
 export function BorradorDebeModal({
@@ -130,8 +115,10 @@ export function BorradorDebeModal({
   loans,
   loanPlans,
   allAvailableWeeks,
+  config,
 }: BorradorDebeModalProps) {
   const { toast } = useToast();
+  const { appUser, user } = useAuth();
 
   const [activeWeek, setActiveWeek] = useState<string>(selectedWeekStr || '');
   const [draftExportScope, setDraftExportScope] = useState<'plaza' | 'localidades'>('plaza');
@@ -250,15 +237,18 @@ export function BorradorDebeModal({
       const calculatedPromotoras = targetPromotoras
         .map((p) => {
           const loc = targetLocalidades.find((l) => l.id === p.localidadId);
-          const debeEntregar = calculatePromotoraDraftDebe(p.id, activeWeek, allTargetLoans, loanPlans);
+          const metrics = calculatePromotoraDraftDebe(p.id, activeWeek, allTargetLoans, loanPlans, config);
           return {
             promotora: p,
             localidad: loc,
             localidadName: loc?.name || 'DESCONOCIDA',
-            debeEntregar,
+            debeEntregar: metrics.debeEntregar,
+            abonosSalientes: metrics.abonosSalientes,
+            cuotaBase: metrics.cuotaBase,
+            semExt: metrics.semExt,
           };
         })
-        .filter((item) => item.debeEntregar > 0);
+        .filter((item) => item.debeEntregar > 0 || item.abonosSalientes > 0 || item.semExt > 0);
 
       if (calculatedPromotoras.length === 0) {
         toast({
@@ -273,232 +263,353 @@ export function BorradorDebeModal({
       // PDF setup
       const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'letter' }) as jsPDFWithAutoTable;
       const pageWidth = doc.internal.pageSize.getWidth();
-      const margin = 30;
-      const topMargin = 50;
+      const pageHeight = doc.internal.pageSize.getHeight();
+      const margin = 25;
 
       const printDateStr = new Date().toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric' });
       const weekDateFormatted = formatDateMX(activeWeek);
+      const executiveName = (appUser?.username || user?.displayName || user?.email || 'LEON CAPITAL').toUpperCase();
+
+      const drawInstitutionalHeader = (
+        title: string,
+        pageNum: number,
+        coordName: string,
+        ejecutivoName: string,
+        plazaName: string
+      ) => {
+        // Top right: Fecha & Pagina
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(8);
+        doc.setTextColor(0, 0, 0);
+        doc.text(printDateStr, pageWidth - margin, 18, { align: 'right' });
+        doc.text(`Página ${pageNum}`, pageWidth - margin, 28, { align: 'right' });
+
+        // Top center: Separador, Titulo & Subtitulo
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(8.5);
+        doc.text('-', pageWidth / 2, 12, { align: 'center' });
+
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(10.5);
+        doc.text(title, pageWidth / 2, 23, { align: 'center' });
+
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(8);
+        doc.text(`DEL ${weekDateFormatted}`, pageWidth / 2, 33, { align: 'center' });
+
+        // Metadata Bar
+        const metaY = 47;
+        doc.setFontSize(7.5);
+
+        // Coordinador
+        doc.setFont('helvetica', 'bold');
+        doc.text('Coordinador', margin, metaY);
+        doc.text(coordName.toUpperCase(), margin + 55, metaY);
+
+        // Ejecutivo
+        doc.text('Ejecutivo', 300, metaY);
+        doc.text(ejecutivoName.toUpperCase(), 345, metaY);
+
+        // Plaza
+        doc.text('Plaza', 600, metaY);
+        doc.text(plazaName.toUpperCase(), 630, metaY);
+      };
+
+      const drawInstitutionalFooter = (finalY: number, totalDebe: number) => {
+        let startY = finalY + 13;
+        if (startY + 92 > pageHeight - margin) {
+          doc.addPage('letter', 'landscape');
+          startY = 35;
+        }
+
+        // Relación de Gastos
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(7.5);
+        doc.setTextColor(0, 0, 0);
+        doc.text('Relación de Gastos', margin, startY);
+
+        const labelX = 245;
+        const valX = 305;
+        const lineSpacing = 9.5;
+
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(7);
+        doc.text('GASTOS', labelX, startY + 11, { align: 'right' });
+        doc.text('$0.00', valX, startY + 11, { align: 'right' });
+
+        doc.text('FONDO', labelX, startY + 11 + lineSpacing, { align: 'right' });
+        doc.text('$0.00', valX, startY + 11 + lineSpacing, { align: 'right' });
+
+        doc.text('A ENTREGAR', labelX, startY + 11 + lineSpacing * 2, { align: 'right' });
+        doc.text(formatCurrency(totalDebe), valX, startY + 11 + lineSpacing * 2, { align: 'right' });
+
+        doc.text('EXTRAS', labelX, startY + 11 + lineSpacing * 3, { align: 'right' });
+        doc.text('$0.00', valX, startY + 11 + lineSpacing * 3, { align: 'right' });
+
+        // Linea separadora antes del Gran Total
+        doc.setDrawColor(0, 0, 0);
+        doc.setLineWidth(0.5);
+        doc.line(labelX - 45, startY + 11 + lineSpacing * 3.6, valX + 2, startY + 11 + lineSpacing * 3.6);
+
+        // Gran Total
+        doc.setFont('helvetica', 'bold');
+        doc.text('GRAN TOTAL', labelX, startY + 11 + lineSpacing * 4.8, { align: 'right' });
+        doc.text(formatCurrency(totalDebe), valX, startY + 11 + lineSpacing * 4.8, { align: 'right' });
+
+        // Observaciones
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(7.5);
+        doc.text('Observaciones', 360, startY);
+
+        // Firmas
+        const sigY = startY + 68;
+        doc.setDrawColor(0, 0, 0);
+        doc.setLineWidth(0.5);
+
+        // Firma de Entrega
+        doc.line(360, sigY, 515, sigY);
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(7);
+        doc.text('Firma de Entrega', 437, sigY + 9, { align: 'center' });
+
+        // Firma de Recibido
+        doc.line(575, sigY, 730, sigY);
+        doc.text('Firma de Recibido', 652, sigY + 9, { align: 'center' });
+      };
+
+      const tableHeaders = [[
+        'Grupo',
+        '%',
+        'Debe Entregar',
+        'Falla',
+        'Efectivo',
+        'Recuperado',
+        'Total',
+        'Diferencia',
+        '%Falla',
+        'Venta',
+        'Comisión',
+        'Supervisión',
+        'Abono Ent',
+        'Abono Sal',
+        'Sem Ext'
+      ]];
+
+      const tableStyles = {
+        font: 'helvetica' as const,
+        fontSize: 6.5,
+        cellPadding: { top: 2.2, right: 2, bottom: 2.2, left: 2 },
+        valign: 'middle' as const,
+        lineColor: [40, 40, 40] as [number, number, number],
+        lineWidth: 0.4,
+        textColor: [0, 0, 0] as [number, number, number],
+        fillColor: [255, 255, 255] as [number, number, number],
+      };
+
+      const headStyles = {
+        fillColor: [255, 255, 255] as [number, number, number],
+        textColor: [0, 0, 0] as [number, number, number],
+        fontStyle: 'bold' as const,
+        fontSize: 6.5,
+        halign: 'center' as const,
+        valign: 'middle' as const,
+        lineColor: [0, 0, 0] as [number, number, number],
+        lineWidth: 0.5,
+      };
+
+      const footStyles = {
+        fillColor: [255, 255, 255] as [number, number, number],
+        textColor: [0, 0, 0] as [number, number, number],
+        fontStyle: 'bold' as const,
+        fontSize: 6.5,
+        lineColor: [0, 0, 0] as [number, number, number],
+        lineWidth: 0.5,
+      };
+
+      const columnStyles = {
+        0: { halign: 'left' as const, fontStyle: 'bold' as const, cellWidth: 105 },  // Grupo
+        1: { halign: 'center' as const, cellWidth: 32 },                            // %
+        2: { halign: 'right' as const, cellWidth: 49 },                             // Debe Entregar
+        3: { halign: 'right' as const, cellWidth: 42 },                             // Falla
+        4: { halign: 'right' as const, cellWidth: 49 },                             // Efectivo
+        5: { halign: 'right' as const, cellWidth: 42 },                             // Recuperado
+        6: { halign: 'right' as const, cellWidth: 49 },                             // Total
+        7: { halign: 'right' as const, cellWidth: 42 },                             // Diferencia
+        8: { halign: 'center' as const, cellWidth: 34 },                            // %Falla
+        9: { halign: 'right' as const, cellWidth: 42 },                             // Venta
+        10: { halign: 'right' as const, cellWidth: 44 },                            // Comisión
+        11: { halign: 'right' as const, cellWidth: 46 },                            // Supervisión
+        12: { halign: 'right' as const, cellWidth: 44 },                            // Abono Ent
+        13: { halign: 'right' as const, cellWidth: 50 },                            // Abono Sal
+        14: { halign: 'right' as const, cellWidth: 38 },                            // Sem Ext
+      };
 
       if (draftLayoutMode === 'combined') {
         // --- MODALIDAD: TODAS JUNTAS (CONSOLIDADO CONTINUO) ---
-        // Sort by localidad name, then promotora name
         calculatedPromotoras.sort((a, b) => {
           const locCompare = a.localidadName.localeCompare(b.localidadName);
           if (locCompare !== 0) return locCompare;
           return a.promotora.name.localeCompare(b.promotora.name);
         });
 
-        // Header bar
-        doc.setFillColor(30, 41, 59);
-        doc.rect(0, 0, pageWidth, 40, 'F');
-
-        doc.setFontSize(13);
-        doc.setFont('helvetica', 'bold');
-        doc.setTextColor(255, 255, 255);
-        doc.text('CONTROL DE PROMOTORAS - BORRADOR CONSOLIDADO PLAZA', margin, 25);
-
-        // Metadata block
-        doc.setTextColor(30, 41, 59);
-        doc.setFontSize(9);
-        doc.setFont('helvetica', 'bold');
-        doc.text('PLAZA:', margin, topMargin + 10);
-        doc.text('LOCALIDAD:', margin, topMargin + 25);
-        doc.text('SEMANA:', margin, topMargin + 40);
-
-        doc.setFont('helvetica', 'normal');
-        doc.text(currentPlaza.name.toUpperCase(), margin + 80, topMargin + 10);
-        doc.text('TODAS (CONSOLIDADO PLAZA)', margin + 80, topMargin + 25);
-        doc.text(weekDateFormatted, margin + 80, topMargin + 40);
-
-        const rightColX = pageWidth - margin - 210;
-        doc.setFont('helvetica', 'bold');
-        doc.text('FECHA GENERACIÓN:', rightColX, topMargin + 10);
-        doc.text('GRUPOS ACTIVOS:', rightColX, topMargin + 25);
-
-        doc.setFont('helvetica', 'normal');
-        doc.text(printDateStr, rightColX + 130, topMargin + 10);
-        doc.text(`${calculatedPromotoras.length} PROMOTORAS`, rightColX + 130, topMargin + 25);
-
-        const headers = [[
-          'LOCALIDAD / GRUPO',
-          'DEBE ENTREGAR',
-          'FALLA',
-          'EFECTIVO',
-          'RECUPERADO',
-          'TOTAL',
-          'DIFERENCIA',
-          '% FALLA',
-          'VENTA',
-          'COMISION',
-          'SEM EXT.'
-        ]];
+        drawInstitutionalHeader(
+          'DETERMINACION DE FONDOS',
+          1,
+          'CONSOLIDADO PLAZA',
+          executiveName,
+          currentPlaza.name
+        );
 
         let totalDebePlaza = 0;
+        let totalAbonosSalientesPlaza = 0;
+        let totalSemExtPlaza = 0;
         const pdfRows = calculatedPromotoras.map((item) => {
           totalDebePlaza += item.debeEntregar;
+          totalAbonosSalientesPlaza += item.abonosSalientes;
+          totalSemExtPlaza += item.semExt;
           return [
             `${item.localidadName.toUpperCase()} - ${item.promotora.name.toUpperCase()}`,
-            formatCurrency(item.debeEntregar),
-            '', '', '', '', '', '', '', '', ''
+            '',
+            item.debeEntregar > 0 ? formatCurrency(item.debeEntregar) : '',
+            '',
+            '',
+            '',
+            '',
+            '',
+            '',
+            '',
+            '',
+            '',
+            '',
+            item.abonosSalientes > 0 ? formatCurrency(item.abonosSalientes) : '',
+            item.semExt > 0 ? formatCurrency(item.semExt) : ''
           ];
         });
 
         const pdfFoot = [[
-          'TOTAL GENERAL PLAZA',
+          'TOTALES',
+          '',
           formatCurrency(totalDebePlaza),
-          '', '', '', '', '', '', '', '', ''
+          '',
+          '',
+          '',
+          '',
+          '',
+          '',
+          '',
+          '',
+          '',
+          '',
+          totalAbonosSalientesPlaza > 0 ? formatCurrency(totalAbonosSalientesPlaza) : '',
+          totalSemExtPlaza > 0 ? formatCurrency(totalSemExtPlaza) : ''
         ]];
 
         doc.autoTable({
-          startY: topMargin + 52,
-          head: headers,
+          startY: 55,
+          head: tableHeaders,
           body: pdfRows,
           foot: pdfFoot,
           theme: 'grid',
-          styles: {
-            fontSize: 7.5,
-            cellPadding: 6,
-            halign: 'center',
-            valign: 'middle',
-            lineColor: [203, 213, 225],
-            lineWidth: 0.5,
-          },
-          headStyles: {
-            fillColor: [30, 41, 59],
-            textColor: 255,
-            fontStyle: 'bold',
-            fontSize: 8,
-          },
-          footStyles: {
-            fillColor: [241, 245, 249],
-            textColor: [30, 41, 59],
-            fontStyle: 'bold',
-            fontSize: 9,
-          },
-          columnStyles: {
-            0: { halign: 'left', fontStyle: 'bold', minCellWidth: 140 },
-            1: { halign: 'right', fontStyle: 'bold', fontSize: 9.5 },
-          },
+          styles: tableStyles,
+          headStyles: headStyles,
+          footStyles: footStyles,
+          columnStyles: columnStyles,
           margin: { left: margin, right: margin },
         });
 
+        const finalY = (doc as any).lastAutoTable?.finalY || 200;
+        drawInstitutionalFooter(finalY, totalDebePlaza);
+
       } else {
         // --- MODALIDAD: HOJAS SEPARADAS (1 HOJA POR LOCALIDAD) ---
-        let isFirstPage = true;
+        let pageCount = 0;
 
         for (const loc of targetLocalidades) {
           const locPromotoras = calculatedPromotoras
             .filter((cp) => cp.localidad?.id === loc.id)
             .sort((a, b) => a.promotora.name.localeCompare(b.promotora.name));
 
-          // If no active promotoras in this localidad, skip
           if (locPromotoras.length === 0) continue;
 
-          if (!isFirstPage) {
+          pageCount++;
+          if (pageCount > 1) {
             doc.addPage('letter', 'landscape');
           }
-          isFirstPage = false;
 
-          // Header bar
-          doc.setFillColor(30, 41, 59);
-          doc.rect(0, 0, pageWidth, 40, 'F');
-
-          doc.setFontSize(13);
-          doc.setFont('helvetica', 'bold');
-          doc.setTextColor(255, 255, 255);
-          doc.text('CONTROL DE PROMOTORAS - BORRADOR DE DEBES', margin, 25);
-
-          // Metadata block
-          doc.setTextColor(30, 41, 59);
-          doc.setFontSize(9);
-          doc.setFont('helvetica', 'bold');
-          doc.text('PLAZA:', margin, topMargin + 10);
-          doc.text('LOCALIDAD:', margin, topMargin + 25);
-          doc.text('SEMANA:', margin, topMargin + 40);
-
-          doc.setFont('helvetica', 'normal');
-          doc.text(currentPlaza.name.toUpperCase(), margin + 80, topMargin + 10);
-          doc.text(loc.name.toUpperCase(), margin + 80, topMargin + 25);
-          doc.text(weekDateFormatted, margin + 80, topMargin + 40);
-
-          const rightColX = pageWidth - margin - 210;
-          doc.setFont('helvetica', 'bold');
-          doc.text('FECHA GENERACIÓN:', rightColX, topMargin + 10);
-          doc.text('GRUPOS EN LOCALIDAD:', rightColX, topMargin + 25);
-
-          doc.setFont('helvetica', 'normal');
-          doc.text(printDateStr, rightColX + 130, topMargin + 10);
-          doc.text(`${locPromotoras.length} PROMOTORAS`, rightColX + 130, topMargin + 25);
-
-          const headers = [[
-            'GRUPO',
-            'DEBE ENTREGAR',
-            'FALLA',
-            'EFECTIVO',
-            'RECUPERADO',
-            'TOTAL',
-            'DIFERENCIA',
-            '% FALLA',
-            'VENTA',
-            'COMISION',
-            'SEM EXT.'
-          ]];
+          drawInstitutionalHeader(
+            'DETERMINACION DE FONDOS',
+            pageCount,
+            loc.name,
+            executiveName,
+            currentPlaza.name
+          );
 
           let totalDebeLoc = 0;
+          let totalAbonosSalientesLoc = 0;
+          let totalSemExtLoc = 0;
           const pdfRows = locPromotoras.map((item) => {
             totalDebeLoc += item.debeEntregar;
+            totalAbonosSalientesLoc += item.abonosSalientes;
+            totalSemExtLoc += item.semExt;
             return [
               item.promotora.name.toUpperCase(),
-              formatCurrency(item.debeEntregar),
-              '', '', '', '', '', '', '', '', ''
+              '',
+              item.debeEntregar > 0 ? formatCurrency(item.debeEntregar) : '',
+              '',
+              '',
+              '',
+              '',
+              '',
+              '',
+              '',
+              '',
+              '',
+              '',
+              item.abonosSalientes > 0 ? formatCurrency(item.abonosSalientes) : '',
+              item.semExt > 0 ? formatCurrency(item.semExt) : ''
             ];
           });
 
           const pdfFoot = [[
-            'TOTAL LOCALIDAD',
+            'TOTALES',
+            '',
             formatCurrency(totalDebeLoc),
-            '', '', '', '', '', '', '', '', ''
+            '',
+            '',
+            '',
+            '',
+            '',
+            '',
+            '',
+            '',
+            '',
+            '',
+            totalAbonosSalientesLoc > 0 ? formatCurrency(totalAbonosSalientesLoc) : '',
+            totalSemExtLoc > 0 ? formatCurrency(totalSemExtLoc) : ''
           ]];
 
           doc.autoTable({
-            startY: topMargin + 52,
-            head: headers,
+            startY: 55,
+            head: tableHeaders,
             body: pdfRows,
             foot: pdfFoot,
             theme: 'grid',
-            styles: {
-              fontSize: 7.5,
-              cellPadding: 6,
-              halign: 'center',
-              valign: 'middle',
-              lineColor: [203, 213, 225],
-              lineWidth: 0.5,
-            },
-            headStyles: {
-              fillColor: [30, 41, 59],
-              textColor: 255,
-              fontStyle: 'bold',
-              fontSize: 8,
-            },
-            footStyles: {
-              fillColor: [241, 245, 249],
-              textColor: [30, 41, 59],
-              fontStyle: 'bold',
-              fontSize: 9,
-            },
-            columnStyles: {
-              0: { halign: 'left', fontStyle: 'bold', minCellWidth: 130 },
-              1: { halign: 'right', fontStyle: 'bold', fontSize: 9.5 },
-            },
+            styles: tableStyles,
+            headStyles: headStyles,
+            footStyles: footStyles,
+            columnStyles: columnStyles,
             margin: { left: margin, right: margin },
           });
+
+          const finalY = (doc as any).lastAutoTable?.finalY || 200;
+          drawInstitutionalFooter(finalY, totalDebeLoc);
         }
       }
 
       // Download PDF
       const sanitizePlaza = currentPlaza.name.toUpperCase().replace(/\s+/g, '_');
       const cleanWeekDate = weekDateFormatted.replace(/\//g, '-');
-      const fileName = `BORRADOR_DEBES_${sanitizePlaza}_${cleanWeekDate}.pdf`;
+      const fileName = `DETERMINACION_FONDOS_${sanitizePlaza}_${cleanWeekDate}.pdf`;
 
       doc.save(fileName);
 

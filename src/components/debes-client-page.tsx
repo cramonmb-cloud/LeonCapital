@@ -10,7 +10,7 @@ import { useToast } from '@/hooks/use-toast';
 import { useRealtimeData } from '@/hooks/use-realtime-data';
 import { collection, query, where } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-import { cn, getSaturdayOfWeek, getMexicoNow, getExtraWeekThreshold } from '@/lib/utils';
+import { cn, getSaturdayOfWeek, getMexicoNow, getExtraWeekThreshold, getLoanAbonoSalienteForWeek, isLoanInSemanaExtraForWeek, getLoanSemanaExtraPaidAmountForWeek } from '@/lib/utils';
 import type { Client, LoanPlan, Loan, Plaza, Localidad, Promotora, PromotoraSettlement } from '@/lib/types';
 import { saveSettlementAction, deleteSettlementAction, deleteGroupSettlementsAction } from '@/app/dashboard/debes/actions';
 import { useAuth } from '@/hooks/use-auth';
@@ -163,54 +163,20 @@ export function DebesClientPage({
   );
 
   const getSemanaExtraCountForPromotora = (pId: string, targetWeekStr: string) => {
-    const pLoans = loans.filter(l => l.promotoraId === pId);
-    const targetWeekTime = new Date(targetWeekStr + 'T00:00:00').getTime();
-
-    let count = 0;
+    const pLoans = loans.filter(l => 
+      l.promotoraId === pId && 
+      l.status !== 'Overdue' && 
+      l.status !== 'Paid Off' && 
+      l.status !== 'Pagado desde CV'
+    );
+    let total = 0;
 
     pLoans.forEach(loan => {
       const plan = loanPlans.find(lp => lp.id === loan.loanPlanId);
-      if (!plan) return;
-
-      const loanSaturday = getSaturdayOfWeek(parseLocalDate(loan.startDate));
-      const loanSaturdayTime = loanSaturday.getTime();
-
-      // Check if active on target week
-      if (targetWeekTime < loanSaturdayTime) return;
-
-      const elapsedWeeks = Math.round((targetWeekTime - loanSaturdayTime) / (7 * 24 * 3600 * 1000));
-      if (elapsedWeeks > plan.termInWeeks) {
-        // Count fallos up to targetWeekTime
-        const weeklyPayment = (loan.amount / 1000) * plan.weeklyPaymentRate;
-        let fallosCount = 0;
-
-        for (let w = 1; w <= elapsedWeeks; w++) {
-          const weekSaturdayTime = loanSaturdayTime + (w * 7 * 24 * 3600 * 1000);
-          const paymentsInWeek = (loan.payments || []).filter(p => {
-            if (p.isReverted) return false;
-            if (p.weekNumber && p.weekNumber > 0) {
-              return p.weekNumber === w;
-            }
-            const paymentDate = parseLocalDate(p.date);
-            const paymentSaturday = getSaturdayOfWeek(paymentDate);
-            return paymentSaturday.getTime() === weekSaturdayTime;
-          });
-          const actualPaidInWeek = paymentsInWeek.reduce((sum, p) => sum + p.amount, 0);
-          const hasRecoveredInWeek = paymentsInWeek.some(p => p.isRecovered || p.paymentType === 'recovered');
-
-          if (actualPaidInWeek < weeklyPayment - 1 || hasRecoveredInWeek) {
-            fallosCount++;
-          }
-        }
-
-        const penaltyThreshold = getExtraWeekThreshold(realtime?.config);
-        if (loan.hasPenalty || fallosCount >= penaltyThreshold) {
-          count++;
-        }
-      }
+      total += getLoanSemanaExtraPaidAmountForWeek(loan, plan, targetWeekStr, realtime?.config);
     });
 
-    return count;
+    return total;
   };
 
   const rows = useMemo(() => {
@@ -305,6 +271,7 @@ export function DebesClientPage({
         const weekTime = week.getTime();
 
         let realDebeEntregar = 0;
+        let realAdelSal = 0;
         let realFalla = 0;
         let realEfectivo = 0;
         let realRecuperado = 0;
@@ -314,24 +281,30 @@ export function DebesClientPage({
           const plan = loanPlans.find(lp => lp.id === loan.loanPlanId);
           if (!plan) return;
 
+          const breakdown = getLoanAbonoSalienteForWeek(loan, plan, week, realtime?.config);
           const loanSaturday = getSaturdayOfWeek(parseLocalDate(loan.startDate));
           const loanSaturdayTime = loanSaturday.getTime();
+          const targetWeekNumber = breakdown.targetWeekNumber;
 
-          const endSaturdayTime = loanSaturdayTime + (plan.termInWeeks * 7 * 24 * 3600 * 1000);
-          let isActive = true;
-          // Un préstamo está activo desde su sábado de inicio hasta que concluya su plazo en semanas
-          if (weekTime < loanSaturdayTime || weekTime > endSaturdayTime) {
-            isActive = false;
-          }
-
-          const weeklyPayment = (loan.amount / 1000) * plan.weeklyPaymentRate;
-          const expectedForLoan = isActive ? weeklyPayment : 0;
+          const expectedForLoan = breakdown.isActive ? breakdown.netDebe : 0;
           realDebeEntregar += expectedForLoan;
-
-          const targetWeekNumber = Math.round((weekTime - loanSaturdayTime) / (7 * 24 * 3600 * 1000));
+          if (breakdown.isActive) {
+            realAdelSal += breakdown.abonoSaliente;
+          }
 
           const paymentsInWeek = (loan.payments || []).filter(p => {
             if (p.isReverted) return false;
+
+            const regTime = p.registeredWeekDate
+              ? getSaturdayOfWeek(parseLocalDate(p.registeredWeekDate)).getTime()
+              : (p.date ? getSaturdayOfWeek(parseLocalDate(p.date)).getTime() : 0);
+
+            // Si es un abono que ingresó como adelanto en una semana previa cubriendo esta semana (Abono Saliente),
+            // no es cobranza física recaudada en la semana en curso
+            if (regTime < weekTime && (p.isAdvance || p.paymentType === 'adelanto_entrante' || (p.weekNumber && p.weekNumber === targetWeekNumber))) {
+              return false;
+            }
+
             if (p.weekNumber && p.weekNumber > 0) {
               return p.weekNumber === targetWeekNumber;
             }
@@ -400,7 +373,7 @@ export function DebesClientPage({
             debeEntregar = local.debeEntregar;
           } else {
             const prevRow = computedChronoRows[index - 1];
-            debeEntregar = prevRow.deuda + abonoSemanalVal + prevRow.adelEnt - prevRow.adelSal;
+            debeEntregar = prevRow.deuda + abonoSemanalVal;
           }
         }
 
@@ -413,6 +386,7 @@ export function DebesClientPage({
         const defaultFalla = realFalla;
         const defaultRecuperado = realRecuperado;
         const defaultAdelEnt = realAdelEnt;
+        const defaultAdelSal = realAdelSal;
 
         const falla = local.falla !== undefined ? local.falla : (saved?.falla !== undefined ? saved.falla : defaultFalla);
         const recuperado = local.recuperado !== undefined ? local.recuperado : (saved?.recuperado !== undefined ? saved.recuperado : defaultRecuperado);
@@ -421,7 +395,11 @@ export function DebesClientPage({
           : (saved?.adelEnt !== undefined && saved.adelEnt > 0 
               ? saved.adelEnt 
               : defaultAdelEnt);
-        const adelSal = local.adelSal !== undefined ? local.adelSal : (saved?.adelSal !== undefined ? saved.adelSal : 0);
+        const adelSal = local.adelSal !== undefined 
+          ? local.adelSal 
+          : (saved?.adelSal !== undefined && saved.adelSal > 0 
+              ? saved.adelSal 
+              : defaultAdelSal);
 
         let efectivo = debeEntregar - falla;
         if (local.efectivo !== undefined) {
@@ -789,7 +767,7 @@ export function DebesClientPage({
       formatCurrency(r.supervision || 0),
       formatCurrency(r.adelEnt || 0),
       formatCurrency(r.adelSal || 0),
-      r.semExt.toString()
+      formatCurrency(r.semExt || 0)
     ]);
 
     // Add consolidated totals row
@@ -809,7 +787,7 @@ export function DebesClientPage({
       formatCurrency(totals.supervision),
       formatCurrency(totals.adelEnt),
       formatCurrency(totals.adelSal),
-      totals.semExt.toString()
+      formatCurrency(totals.semExt || 0)
     ]);
 
     doc.autoTable({
@@ -1138,7 +1116,7 @@ export function DebesClientPage({
 
                         {/* Sem Ext */}
                         <TableCell className="font-bold text-center text-[11px] text-orange-600 py-2 px-1 bg-orange-50/10">
-                          {row.semExt}
+                          {row.semExt > 0 ? formatCurrency(row.semExt) : '-'}
                         </TableCell>
 
                         {/* Action */}
@@ -1264,7 +1242,7 @@ export function DebesClientPage({
                       {formatCurrency(totals.adelSal)}
                     </TableCell>
                     <TableCell className="text-center text-[11px] text-orange-600 py-3 px-1">
-                      {totals.semExt}
+                      {formatCurrency(totals.semExt)}
                     </TableCell>
                     <TableCell className="py-3 px-1" />
                   </TableRow>
@@ -1299,6 +1277,7 @@ export function DebesClientPage({
         loans={loans}
         loanPlans={loanPlans}
         allAvailableWeeks={allAvailableWeeks}
+        config={realtime?.config}
       />
     </div>
   );

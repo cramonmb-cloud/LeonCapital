@@ -303,3 +303,231 @@ export function doesLoanHavePenalty(
 
   return (missedCount >= threshold) || (isExpired && totalPaidInBaseTerm < (baseTerm * weeklyPayment));
 }
+
+export interface LoanWeeklyDebeBreakdown {
+  expectedQuota: number;
+  abonoSaliente: number;
+  netDebe: number;
+  isActive: boolean;
+  targetWeekNumber: number;
+}
+
+/**
+ * Calcula el desglose de cuota semanal, abonos salientes y debe neto de un préstamo para una semana dada.
+ * Un Abono Saliente es aquel pago que corresponde a la semana evaluada pero que fue registrado
+ * previamente como un adelanto (Adelanto Entrante en una semana anterior).
+ * Si el préstamo tiene penalización de semana extra, su plazo efectivo se extiende a baseTerm + 1.
+ */
+export function getLoanAbonoSalienteForWeek(
+  loan: { startDate: any; amount: number; loanPlanId: string; payments?: any[]; hasPenalty?: boolean; status?: string },
+  loanPlan: { termInWeeks: number; weeklyPaymentRate: number } | undefined,
+  targetWeekSaturdayDate: Date | string,
+  config?: { extraWeekMissedThreshold?: number } | null
+): LoanWeeklyDebeBreakdown {
+  if (!loanPlan || loan.status === 'Paid Off' || loan.status === 'Pagado desde CV') {
+    return { expectedQuota: 0, abonoSaliente: 0, netDebe: 0, isActive: false, targetWeekNumber: 0 };
+  }
+
+  const targetDate = typeof targetWeekSaturdayDate === 'string'
+    ? parseLocalDate(targetWeekSaturdayDate)
+    : targetWeekSaturdayDate;
+  const targetSaturdayTime = getSaturdayOfWeek(targetDate).getTime();
+
+  const loanStartSat = getSaturdayOfWeek(parseLocalDate(loan.startDate));
+  const loanStartSatTime = loanStartSat.getTime();
+
+  // Si la semana consultada es previa al inicio del préstamo
+  if (targetSaturdayTime < loanStartSatTime) {
+    return { expectedQuota: 0, abonoSaliente: 0, netDebe: 0, isActive: false, targetWeekNumber: 0 };
+  }
+
+  const baseTerm = loanPlan.termInWeeks;
+  const targetWeekNumber = Math.round((targetSaturdayTime - loanStartSatTime) / (7 * 24 * 3600 * 1000));
+
+  // El Debe Entregar regular solo contempla préstamos activos en sus semanas del plazo base (1 a baseTerm).
+  // Si targetWeekNumber > baseTerm, ya concluyó su plazo base (o está en semana extra o en Cartera Vencida).
+  if (targetWeekNumber < 1 || targetWeekNumber > baseTerm) {
+    return { expectedQuota: 0, abonoSaliente: 0, netDebe: 0, isActive: false, targetWeekNumber: 0 };
+  }
+
+  const weeklyQuota = Math.round((loan.amount / 1000) * (loanPlan.weeklyPaymentRate || 0));
+
+  // Buscar pagos registrados para este número de semana que hayan ingresado como adelantos previamente
+  let abonoSaliente = 0;
+  (loan.payments || []).forEach(p => {
+    if (p.isReverted) return;
+
+    let matchesWeek = false;
+    if (p.weekNumber && p.weekNumber > 0) {
+      matchesWeek = p.weekNumber === targetWeekNumber;
+    } else if (p.date) {
+      matchesWeek = getSaturdayOfWeek(parseLocalDate(p.date)).getTime() === targetSaturdayTime;
+    }
+
+    if (!matchesWeek) return;
+
+    const regTime = p.registeredWeekDate
+      ? getSaturdayOfWeek(parseLocalDate(p.registeredWeekDate)).getTime()
+      : (p.date ? getSaturdayOfWeek(parseLocalDate(p.date)).getTime() : targetSaturdayTime);
+
+    // Es adelanto si tiene flag de adelanto o si su fecha de registro es estrictamente anterior a la semana actual
+    const isAdvance = p.isAdvance || p.paymentType === 'adelanto_entrante' || (regTime < targetSaturdayTime);
+
+    if (isAdvance) {
+      abonoSaliente += p.amount;
+    }
+  });
+
+  const netDebe = Math.max(0, weeklyQuota - abonoSaliente);
+
+  return {
+    expectedQuota: weeklyQuota,
+    abonoSaliente,
+    netDebe,
+    isActive: true,
+    targetWeekNumber
+  };
+}
+
+/**
+ * Calcula el monto acumulado de abonos a la semana extra que YA SE HAN COBRADO/INGRESADO
+ * para un préstamo en la semana consultada.
+ * REGLA ESTRICTA:
+ * 1. Solo aplica para préstamos que SIGAN ACTIVOS (que aún no vencen y no estén en Cartera Vencida).
+ *    Cuando un préstamo supera su plazo total o se marca como Overdue/Paid Off, pasa a Cartera Vencida / Liquidado
+ *    y sale de las hojas de semana (Préstamos de la Semana).
+ * 2. La semana extra de cobranza solo ocurre en la semana de penalización (weekNumber === baseTerm + 1).
+ *    En semanas previas (1..baseTerm) o posteriores (> baseTerm + 1), retorna 0.
+ * 3. Solo contabiliza los pagos que YA SE HAN INGRESADO en la columna de semana extra (weekNumber >= baseTerm + 1).
+ * 4. NO contabiliza semanas extras pendientes o esperadas sin pago registrado.
+ */
+export function getLoanSemanaExtraPaidAmountForWeek(
+  loan: { startDate: any; amount?: number; loanPlanId: string; payments?: any[]; hasPenalty?: boolean; status?: string },
+  loanPlan: { termInWeeks: number; weeklyPaymentRate?: number } | undefined,
+  targetWeekSaturdayDate: Date | string,
+  config?: { extraWeekMissedThreshold?: number } | null
+): number {
+  if (!loanPlan || !loan.startDate || !loan.payments || loan.payments.length === 0) return 0;
+  if (loan.status === 'Overdue' || loan.status === 'Paid Off' || loan.status === 'Pagado desde CV') return 0;
+
+  const targetDate = typeof targetWeekSaturdayDate === 'string'
+    ? parseLocalDate(targetWeekSaturdayDate)
+    : targetWeekSaturdayDate;
+  const targetSaturdayTime = getSaturdayOfWeek(targetDate).getTime();
+
+  const loanStartSat = getSaturdayOfWeek(parseLocalDate(loan.startDate));
+  const loanStartSatTime = loanStartSat.getTime();
+
+  if (targetSaturdayTime < loanStartSatTime) return 0;
+
+  const baseTerm = loanPlan.termInWeeks;
+  const weeklyQuota = Math.round(((loan.amount || 0) / 1000) * (loanPlan.weeklyPaymentRate || 0));
+  const threshold = getExtraWeekThreshold(config);
+  const hasPenalty = doesLoanHavePenalty(loan, baseTerm, weeklyQuota, threshold, targetDate);
+  const totalTerm = baseTerm + (hasPenalty ? 1 : 0);
+  const extraWeekNumber = baseTerm + 1;
+
+  // Si no tiene penalización, no tiene semana extra
+  if (!hasPenalty) {
+    return 0;
+  }
+
+  const targetWeekNumber = Math.round((targetSaturdayTime - loanStartSatTime) / (7 * 24 * 3600 * 1000));
+
+  // La semana extra de cobranza solo se evalúa en su semana activa (targetWeekNumber === extraWeekNumber).
+  // Si targetWeekNumber < extraWeekNumber: el préstamo está en semanas regulares (1 a baseTerm).
+  // Si targetWeekNumber > extraWeekNumber (o > totalTerm): ya venció, se fue a Cartera Vencida y sale de las hojas de la semana.
+  if (targetWeekNumber !== extraWeekNumber || targetWeekNumber > totalTerm) {
+    return 0;
+  }
+
+  // Verificar que el préstamo no esté vencido actualmente en el sistema (según la fecha de hoy)
+  const currentLoanWeek = getCurrentLoanWeekNumber(loan.startDate, getMexicoNow());
+  if (currentLoanWeek > totalTerm) {
+    return 0;
+  }
+
+  const extraWeekSaturdayTime = loanStartSatTime + (extraWeekNumber * 7 * 24 * 3600 * 1000);
+
+  let paidAmount = 0;
+
+  loan.payments.forEach(p => {
+    if (p.isReverted) return;
+
+    // Solo pagos de semana extra (weekNumber >= extraWeekNumber)
+    const isExtraWeekPayment = typeof p.weekNumber === 'number' && p.weekNumber >= extraWeekNumber;
+    if (!isExtraWeekPayment) return;
+
+    const pAmount = typeof p.amount === 'number' ? p.amount : 0;
+    if (pAmount <= 0) return;
+
+    let matchesWeek = false;
+
+    if (p.registeredWeekDate) {
+      matchesWeek = getSaturdayOfWeek(parseLocalDate(p.registeredWeekDate)).getTime() === targetSaturdayTime;
+    } else if (p.date) {
+      matchesWeek = getSaturdayOfWeek(parseLocalDate(p.date)).getTime() === targetSaturdayTime;
+    }
+
+    if (!matchesWeek && extraWeekSaturdayTime === targetSaturdayTime) {
+      matchesWeek = true;
+    }
+
+    if (matchesWeek) {
+      paidAmount += pAmount;
+    }
+  });
+
+  return paidAmount;
+}
+
+/**
+ * Determina si un préstamo tuvo abonos cobrados de semana extra en la semana consultada.
+ */
+export function isLoanInSemanaExtraForWeek(
+  loan: { startDate: any; amount: number; loanPlanId: string; payments?: any[]; hasPenalty?: boolean; status?: string },
+  loanPlan: { termInWeeks: number; weeklyPaymentRate: number } | undefined,
+  targetWeekSaturdayDate: Date | string,
+  config?: { extraWeekMissedThreshold?: number } | null
+): boolean {
+  return getLoanSemanaExtraPaidAmountForWeek(loan, loanPlan, targetWeekSaturdayDate, config) > 0;
+}
+
+/**
+ * Calcula la sumatoria de cuota base, abonos salientes, debe neto y monto de semana extra cobrada
+ * para todos los préstamos de una promotora en una semana operativa determinada.
+ */
+export function calculatePromotoraWeeklyDebeAndAbonosSalientes(
+  promotoraId: string,
+  targetWeekSaturdayDate: Date | string,
+  loans: Array<{ promotoraId?: string; startDate: any; amount: number; loanPlanId: string; payments?: any[]; hasPenalty?: boolean; status?: string }>,
+  loanPlans: Array<{ id: string; termInWeeks: number; weeklyPaymentRate: number }>,
+  config?: { extraWeekMissedThreshold?: number } | null
+): { totalExpectedQuota: number; totalAbonosSalientes: number; totalDebeEntregar: number; totalSemExt: number } {
+  const pLoans = loans.filter(l => l.promotoraId === promotoraId);
+  let totalExpectedQuota = 0;
+  let totalAbonosSalientes = 0;
+  let totalDebeEntregar = 0;
+  let totalSemExt = 0;
+
+  pLoans.forEach(loan => {
+    if (loan.status === 'Paid Off' || loan.status === 'Pagado desde CV') return;
+
+    const plan = loanPlans.find(lp => lp.id === loan.loanPlanId);
+    const breakdown = getLoanAbonoSalienteForWeek(loan, plan, targetWeekSaturdayDate);
+    if (breakdown.isActive) {
+      totalExpectedQuota += breakdown.expectedQuota;
+      totalAbonosSalientes += breakdown.abonoSaliente;
+      totalDebeEntregar += breakdown.netDebe;
+    }
+    const extraPaid = getLoanSemanaExtraPaidAmountForWeek(loan, plan, targetWeekSaturdayDate, config);
+    totalSemExt += extraPaid;
+  });
+
+  return {
+    totalExpectedQuota,
+    totalAbonosSalientes,
+    totalDebeEntregar,
+    totalSemExt
+  };
+}
