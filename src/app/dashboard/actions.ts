@@ -530,17 +530,17 @@ export async function payOffLoanAction(loanId: string, userId?: string) {
                 if (needed > 0 && remainingToDistribute > 0) {
                     const payAmount = Math.min(needed, remainingToDistribute);
                     remainingToDistribute -= payAmount;
-                    const isAdv = w >= currentLoanWeek;
+                    const existingP = existingIndex >= 0 ? newPayments[existingIndex] : null;
+                    const isAdv = existingP ? Boolean(existingP.isAdvance || existingP.paymentType === 'adelanto_entrante' || w >= currentLoanWeek) : (w >= currentLoanWeek);
                     if (existingIndex >= 0) {
-                        const existingP = newPayments[existingIndex];
                         const updatedP: Payment = {
-                            ...existingP,
+                            ...existingP!,
                             amount: currentPaid + payAmount,
                             isAdvance: isAdv,
                             isAccumulated: true,
-                            paymentType: isAdv ? 'adelanto_entrante' : (existingP.paymentType || 'regular'),
+                            paymentType: isAdv ? 'adelanto_entrante' : (existingP!.paymentType || 'regular'),
                         };
-                        const regDate = isAdv ? (liquidationWeekStr || existingP.registeredWeekDate) : existingP.registeredWeekDate;
+                        const regDate = isAdv ? (liquidationWeekStr || existingP!.registeredWeekDate) : existingP!.registeredWeekDate;
                         if (isAdv && regDate) {
                             updatedP.registeredWeekDate = regDate;
                         } else {
@@ -671,7 +671,7 @@ export async function accumulateAssumedPaymentsAction(
                 const currentPayments = loan.payments || [];
                 let hasChanges = false;
                 const newPayments = currentPayments.map(p => {
-                    if (p.weekNumber <= currentWeekToFill && !p.isAccumulated) {
+                    if (p.weekNumber <= currentWeekToFill && !p.isAccumulated && !p.isReverted) {
                         hasChanges = true;
                         return { ...p, isAccumulated: true };
                     }
@@ -679,8 +679,31 @@ export async function accumulateAssumedPaymentsAction(
                 });
 
                 for (let w = 1; w <= currentWeekToFill; w++) {
-                    const exists = newPayments.some(p => p.weekNumber === w);
-                    if (!exists) {
+                    const existingIndex = newPayments.findIndex(p => p.weekNumber === w);
+                    if (existingIndex >= 0) {
+                        if (newPayments[existingIndex].isReverted) {
+                            newPayments[existingIndex] = {
+                                date: new Date().toISOString(),
+                                amount: weeklyPayment,
+                                weekNumber: w,
+                                isAccumulated: true,
+                                paymentType: 'assumed'
+                            };
+                            totalAccumulated += weeklyPayment;
+                            count++;
+                            hasChanges = true;
+
+                            txOps.push({
+                                type: 'credit',
+                                amount: weeklyPayment,
+                                date: new Date(),
+                                description: `Abono asumido (Hoja) de ${client?.name || 'N/A'} - Sem ${w}`,
+                                loanId: loanSnap.id,
+                                clientId: loan.clientId,
+                                userId: userId || null
+                            });
+                        }
+                    } else {
                         newPayments.push({
                             date: new Date().toISOString(),
                             amount: weeklyPayment,

@@ -297,7 +297,7 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
       const currentWeek = Math.min(currentLoanWeek, term);
 
       for (let w = 1; w <= currentWeek; w++) {
-        const exists = (loan.payments || []).some(p => p.weekNumber === w);
+        const exists = (loan.payments || []).some(p => p.weekNumber === w && !p.isReverted);
         if (!exists) return true;
       }
       return false;
@@ -344,7 +344,7 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
 
       let loanHasNewPayments = false;
       for (let w = 1; w <= maxWeekToFill; w++) {
-        const exists = (loan.payments || []).some(p => p.weekNumber === w);
+        const exists = (loan.payments || []).some(p => p.weekNumber === w && !p.isReverted);
         if (!exists) {
           paymentsCount++;
           totalAmount += wp;
@@ -661,15 +661,15 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
             const currentWeek = Math.min(currentLoanWeek, term);
 
             for (let w = 1; w <= currentWeek; w++) {
-                const exists = (loan.payments || []).some(p => p.weekNumber === w);
+                const exists = (loan.payments || []).some(p => p.weekNumber === w && !p.isReverted);
                 if (!exists) return true;
             }
             return false;
         });
 
-        // Detect if any loan in this sheet has a payment record for the currentGroupWeek
+        // Detect if any loan in this sheet has an active (non-reverted) payment record for the currentGroupWeek
         const hasRevertible = filteredLoans.some(loan => 
-            (loan.payments || []).some(p => p.weekNumber === currentGroupWeek)
+            (loan.payments || []).some(p => p.weekNumber === currentGroupWeek && !p.isReverted && p.amount > 0)
         );
 
         return { currentGroupWeek, weeklyFailures: failures, weeklyCollected: collected, hasAssumedPayments: hasAssumed, hasPaymentsToRevert: hasRevertible, loansWithPenalty: newLoansWithPenalty };
@@ -742,13 +742,16 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
         }
 
         if ((loan.status === 'Paid Off' || loan.status === 'Pagado desde CV') && weekNumber <= termInWeeks) {
-            const isAdvance = weekNumber >= currentLoanWeek;
+            const existingPayment = loan.payments?.find(p => p.weekNumber === weekNumber);
+            const isAdvance = existingPayment 
+                ? Boolean(existingPayment.isAdvance || existingPayment.paymentType === 'adelanto_entrante' || weekNumber >= currentLoanWeek)
+                : (weekNumber >= currentLoanWeek);
             return { 
                 status: 'paid' as const, 
                 date: weekDate, 
-                amountPaid: weeklyPaymentAmount, 
+                amountPaid: existingPayment?.amount ?? weeklyPaymentAmount, 
                 isAssumedPaid: false, 
-                isRecovered: false,
+                isRecovered: existingPayment?.isRecovered ?? false,
                 isAdvance,
                 isAccumulated: true
             };
