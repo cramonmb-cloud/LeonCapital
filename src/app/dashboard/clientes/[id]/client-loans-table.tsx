@@ -76,6 +76,20 @@ export function ClientLoansTable({ clientLoans, loanPlans, allLoans, users, plaz
     return loanPlans.find(p => p.id === planId)?.name || 'N/A';
   };
 
+  const getPromotoraName = (loan: Loan) => {
+    if (!loan.promotoraId) return '—';
+    const p = promotoras.find(prom => prom.id === loan.promotoraId);
+    return p?.name?.trim() || '—';
+  };
+
+  const getLocalidadName = (loan: Loan) => {
+    const p = promotoras.find(prom => prom.id === loan.promotoraId);
+    const locId = p?.localidadId || (loan as any).localidadId;
+    if (!locId) return '—';
+    const l = localidades.find(loc => loc.id === locId);
+    return l?.name?.trim() || '—';
+  };
+
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat('es-MX', {
       style: 'currency',
@@ -209,43 +223,68 @@ export function ClientLoansTable({ clientLoans, loanPlans, allLoans, users, plaz
     <>
       <Table>
         <TableHeader>
-          <TableRow>
-            <TableHead>Fecha del Préstamo</TableHead>
-            <TableHead>Monto</TableHead>
-            <TableHead>Abono</TableHead>
-            <TableHead>Plan</TableHead>
-            <TableHead>Estado</TableHead>
-            <TableHead className="text-center">Abonos</TableHead>
-            <TableHead className="text-right">Acciones</TableHead>
+          <TableRow className="bg-zinc-50/80 dark:bg-zinc-900/40 hover:bg-transparent border-b border-zinc-200 dark:border-zinc-800">
+            <TableHead className="text-[10px] font-black uppercase tracking-wider text-muted-foreground h-9 px-3">Fecha</TableHead>
+            <TableHead className="text-[10px] font-black uppercase tracking-wider text-muted-foreground h-9 px-3">Monto</TableHead>
+            <TableHead className="text-[10px] font-black uppercase tracking-wider text-muted-foreground h-9 px-3">Abono Semanal</TableHead>
+            <TableHead className="text-[10px] font-black uppercase tracking-wider text-muted-foreground h-9 px-3">Plan</TableHead>
+            <TableHead className="text-[10px] font-black uppercase tracking-wider text-muted-foreground h-9 px-3">Localidad</TableHead>
+            <TableHead className="text-[10px] font-black uppercase tracking-wider text-muted-foreground h-9 px-3">Promotora</TableHead>
+            <TableHead className="text-[10px] font-black uppercase tracking-wider text-muted-foreground h-9 px-3">Estado</TableHead>
+            <TableHead className="text-[10px] font-black uppercase tracking-wider text-muted-foreground h-9 px-3 text-center">Abonos</TableHead>
+            <TableHead className="text-[10px] font-black uppercase tracking-wider text-muted-foreground h-9 px-3 text-right">Acción</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
           {sortedLoans.length > 0 ? (
             sortedLoans.map((loan) => {
               const weeklyPayment = getWeeklyPayment(loan);
+              const locName = getLocalidadName(loan);
+              const promName = getPromotoraName(loan);
+
               return (
                 <TableRow 
                   key={loan.id} 
-                  className="cursor-pointer hover:bg-muted/50" 
+                  className="cursor-pointer hover:bg-blue-50/40 dark:hover:bg-zinc-800/40 transition-colors border-b border-zinc-100 dark:border-zinc-800/60" 
                   onClick={() => handleRowClick(loan)}
                 >
-                  <TableCell className="font-semibold">{formatDate(loan.startDate)}</TableCell>
-                  <TableCell>{formatCurrency(loan.amount)}</TableCell>
-                  <TableCell className="font-semibold text-indigo-600 dark:text-indigo-400">{formatCurrency(weeklyPayment)}</TableCell>
-                  <TableCell>{getPlanName(loan.loanPlanId)}</TableCell>
-                  <TableCell>
-                    <Badge variant={getStatusVariant(loan.status)}>{translateStatus(loan.status)}</Badge>
+                  <TableCell className="font-semibold text-xs py-2.5 px-3 text-zinc-900 dark:text-zinc-100">{formatDate(loan.startDate)}</TableCell>
+                  <TableCell className="font-bold text-xs py-2.5 px-3 text-zinc-900 dark:text-zinc-100">{formatCurrency(loan.amount)}</TableCell>
+                  <TableCell className="font-bold text-xs py-2.5 px-3 text-indigo-600 dark:text-indigo-400">{formatCurrency(weeklyPayment)}</TableCell>
+                  <TableCell className="py-2.5 px-3">
+                    <span className="inline-flex items-center text-[11px] font-medium text-zinc-700 dark:text-zinc-300 bg-zinc-100 dark:bg-zinc-800/80 px-2 py-0.5 rounded">
+                      {getPlanName(loan.loanPlanId)}
+                    </span>
                   </TableCell>
-                  <TableCell className="text-center" onClick={(e) => e.stopPropagation()}>
-                      <Button variant="ghost" size="sm" onClick={() => handleRowClick(loan)}>
-                          <ListTodo className="h-4 w-4 mr-1" />
+                  <TableCell className="py-2.5 px-3 text-xs">
+                    {locName !== '—' ? (
+                      <span className="font-medium text-zinc-800 dark:text-zinc-200">{locName}</span>
+                    ) : (
+                      <span className="text-muted-foreground">—</span>
+                    )}
+                  </TableCell>
+                  <TableCell className="py-2.5 px-3 text-xs">
+                    {promName !== '—' ? (
+                      <span className="font-semibold text-zinc-800 dark:text-zinc-200">{promName}</span>
+                    ) : (
+                      <span className="text-muted-foreground">—</span>
+                    )}
+                  </TableCell>
+                  <TableCell className="py-2.5 px-3">
+                    <Badge variant={getStatusVariant(loan.status)} className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5">
+                      {translateStatus(loan.status)}
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="text-center py-2.5 px-3" onClick={(e) => e.stopPropagation()}>
+                      <Button variant="outline" size="sm" className="h-7 text-xs px-2.5 font-medium border-zinc-200 dark:border-zinc-700 hover:border-blue-300 hover:text-blue-700 hover:bg-blue-50/50" onClick={() => handleRowClick(loan)}>
+                          <ListTodo className="h-3.5 w-3.5 mr-1 text-blue-600" />
                           Abonos
                       </Button>
                   </TableCell>
-                  <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
+                  <TableCell className="text-right py-2.5 px-3" onClick={(e) => e.stopPropagation()}>
                       {canEdit ? (
-                          <Button variant="ghost" size="icon" onClick={(e) => handleEditClick(e, loan)}>
-                            <Edit className="h-4 w-4" />
+                          <Button variant="ghost" size="icon" className="h-7 w-7 text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100" onClick={(e) => handleEditClick(e, loan)}>
+                            <Edit className="h-3.5 w-3.5" />
                             <span className="sr-only">Editar Préstamo</span>
                           </Button>
                       ) : (
@@ -257,7 +296,9 @@ export function ClientLoansTable({ clientLoans, loanPlans, allLoans, users, plaz
             })
           ) : (
             <TableRow>
-              <TableCell colSpan={7} className="text-center">No hay préstamos para este cliente.</TableCell>
+              <TableCell colSpan={9} className="text-center py-8 text-xs text-muted-foreground">
+                No hay préstamos registrados para este cliente.
+              </TableCell>
             </TableRow>
           )}
         </TableBody>
@@ -267,6 +308,13 @@ export function ClientLoansTable({ clientLoans, loanPlans, allLoans, users, plaz
           <DialogContent className="max-w-4xl h-[90vh] flex flex-col p-0 overflow-hidden">
               <DialogHeader className="p-6 pb-2 shrink-0">
                   <DialogTitle className="text-center border-b pb-2">Detalle de los abonos del prestamo</DialogTitle>
+                  {loanForDetails && (
+                    <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1 text-xs text-muted-foreground pt-1">
+                      <span>Localidad: <strong className="text-foreground">{getLocalidadName(loanForDetails)}</strong></span>
+                      <span>•</span>
+                      <span>Promotora: <strong className="text-foreground">{getPromotoraName(loanForDetails)}</strong></span>
+                    </div>
+                  )}
               </DialogHeader>
               <div className="flex-1 min-h-0">
                 <ScrollArea className="h-full px-6">

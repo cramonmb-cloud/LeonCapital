@@ -55,9 +55,9 @@ export function ClientPageActions({ clientId }: ClientPageActionsProps) {
     return (
         <div className="flex items-center gap-2">
             {canEdit && (
-                <Button asChild variant="outline">
+                <Button asChild variant="outline" size="sm" className="h-8 text-xs font-semibold">
                     <Link href={`/dashboard/clientes/${clientId}/edit`}>
-                        <Edit className="mr-2 h-4 w-4" />
+                        <Edit className="mr-1.5 h-3.5 w-3.5" />
                         Editar Cliente
                     </Link>
                 </Button>
@@ -66,9 +66,9 @@ export function ClientPageActions({ clientId }: ClientPageActionsProps) {
             {isCristobal && (
                 <AlertDialog>
                     <AlertDialogTrigger asChild>
-                        <Button variant="destructive">
-                            <Trash2 className="mr-2 h-4 w-4" />
-                            Eliminar Cliente
+                        <Button variant="destructive" size="sm" className="h-8 text-xs font-semibold">
+                            <Trash2 className="mr-1.5 h-3.5 w-3.5" />
+                            Eliminar
                         </Button>
                     </AlertDialogTrigger>
                     <AlertDialogContent>
