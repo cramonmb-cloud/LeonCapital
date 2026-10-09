@@ -135,6 +135,7 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
   const [selectedLoanForPayment, setSelectedLoanForPayment] = useState<Loan | null>(null);
   const [selectedLoanIds, setSelectedLoanIds] = useState<Set<string>>(new Set());
   const { appUser } = useAuth();
+  const isCristobal = useMemo(() => (appUser?.username || '').trim().toLowerCase() === 'cristobal', [appUser]);
   const [isAccumulating, setIsAccumulating] = useState(false);
   const [isAccumulatingAll, setIsAccumulatingAll] = useState(false);
   const [accumulateAllDialogOpen, setAccumulateAllDialogOpen] = useState(false);
@@ -1575,9 +1576,9 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
         </div>
         
         <div className="flex items-center gap-2 w-full md:w-auto justify-end flex-wrap">
-            {appUser?.username === 'Cristobal' && (
+            {isCristobal && (
                 <>
-                    <Button variant="default" onClick={() => setChangeDateDialogOpen(true)} disabled={selectedLoanIds.size === 0} className='hidden sm:flex'>
+                    <Button variant="default" onClick={() => setChangeDateDialogOpen(true)} disabled={selectedLoanIds.size === 0} className='flex'>
                         <CalendarCog className="mr-2 h-4 w-4" />
                         Mover Fecha
                     </Button>
@@ -1585,8 +1586,8 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
                         variant="secondary" 
                         onClick={handleOpenMovePromotora} 
                         disabled={selectedLoanIds.size === 0} 
-                        className='hidden sm:flex bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 dark:bg-amber-950/50 dark:hover:bg-amber-900/60 dark:text-amber-200 dark:border-amber-700 font-medium'
-                        title="Mover los préstamos seleccionados a otra promotora/grupo"
+                        className='flex bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 dark:bg-amber-950/50 dark:hover:bg-amber-900/60 dark:text-amber-200 dark:border-amber-700 font-medium'
+                        title={selectedLoanIds.size === 0 ? "Selecciona préstamos con la casilla para moverlos" : "Mover los préstamos seleccionados a otra promotora/grupo"}
                     >
                         <UserCog className="mr-2 h-4 w-4 text-amber-700 dark:text-amber-300" />
                         Mover Promotora
@@ -1703,7 +1704,7 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      {appUser?.username === 'Cristobal' && (
+                      {isCristobal && (
                           <TableHead className="sticky left-0 bg-card z-10 w-auto py-1.5 px-1 h-8 text-center">
                               <Checkbox
                                   checked={selectedLoanIds.size > 0 && selectedLoanIds.size === filteredLoans.length}
@@ -1714,7 +1715,7 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
                               />
                           </TableHead>
                       )}
-                      <TableHead className={cn("sticky bg-card z-10 w-[150px] py-1.5 px-2 h-8 text-left font-black text-[10px] uppercase text-slate-700", appUser?.username === 'Cristobal' ? "left-10" : "left-0")}>Cliente</TableHead>
+                      <TableHead className={cn("sticky bg-card z-10 w-[150px] py-1.5 px-2 h-8 text-left font-black text-[10px] uppercase text-slate-700", isCristobal ? "left-10" : "left-0")}>Cliente</TableHead>
                       <TableHead className="py-1.5 px-1 h-8 text-center font-black text-[10px] uppercase text-slate-700">Préstamo</TableHead>
                       <TableHead className="py-1.5 px-1 h-8 text-center font-black text-[10px] uppercase text-slate-700">Abono</TableHead>
                       <TableHead className="py-1.5 px-1 h-8 text-center font-black text-[10px] uppercase text-slate-700">Estado</TableHead>
@@ -1769,7 +1770,7 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
                           )} 
                           data-state={selectedLoanIds.has(loan.id) && "selected"}
                         >
-                          {appUser?.username === 'Cristobal' && (
+                          {isCristobal && (
                               <TableCell className="sticky left-0 z-10 w-auto py-1 px-1 bg-inherit text-center">
                                   <Checkbox
                                       checked={selectedLoanIds.has(loan.id)}
@@ -1779,7 +1780,7 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
                                   />
                               </TableCell>
                           )}
-                          <TableCell className={cn("font-extrabold sticky z-10 w-[150px] py-1 px-2 bg-inherit text-[11px] leading-tight text-slate-800 uppercase truncate", appUser?.username === 'Cristobal' ? "left-10" : "left-0")}>
+                          <TableCell className={cn("font-extrabold sticky z-10 w-[150px] py-1 px-2 bg-inherit text-[11px] leading-tight text-slate-800 uppercase truncate", isCristobal ? "left-10" : "left-0")}>
                             <Link href={`/dashboard/clientes/${loan.clientId}`} className="hover:underline">
                               {getClientName(loan.clientId)}
                             </Link>
@@ -1905,11 +1906,26 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
                                  <DropdownMenuItem asChild>
                                     <Link href={`/dashboard/clientes/${loan.clientId}`}>Ver Detalles del Cliente</Link>
                                 </DropdownMenuItem>
-                                {appUser?.username === 'Cristobal' && (
-                                    <DropdownMenuItem onClick={() => setLoanToPayOff(loan)} className="text-blue-600 font-semibold">
-                                        <BadgeDollarSign className="mr-2 h-4 w-4" />
-                                        Liquidar Préstamo
-                                    </DropdownMenuItem>
+                                {isCristobal && (
+                                    <>
+                                        <DropdownMenuItem 
+                                            onClick={() => {
+                                                setSelectedLoanIds(new Set([loan.id]));
+                                                setTargetMovePlaza(selectedPlaza || (plazas[0]?.id || ""));
+                                                setTargetMoveLocalidad(selectedLocalidad || "");
+                                                setTargetMovePromotora("");
+                                                setChangePromotoraDialogOpen(true);
+                                            }} 
+                                            className="text-amber-700 dark:text-amber-400 font-semibold cursor-pointer"
+                                        >
+                                            <UserCog className="mr-2 h-4 w-4" />
+                                            Mover Promotora
+                                        </DropdownMenuItem>
+                                        <DropdownMenuItem onClick={() => setLoanToPayOff(loan)} className="text-blue-600 font-semibold cursor-pointer">
+                                            <BadgeDollarSign className="mr-2 h-4 w-4" />
+                                            Liquidar Préstamo
+                                        </DropdownMenuItem>
+                                    </>
                                 )}
                               </DropdownMenuContent>
                             </DropdownMenu>
@@ -1927,7 +1943,7 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
                   {filteredLoans.length > 0 && weeklyFailures.length > 0 && weeklyCollected.length > 0 && (
                     <TableFooter>
                         <TableRow className="h-8">
-                            <TableCell colSpan={appUser?.username === 'Cristobal' ? 5 : 4} className="sticky left-0 bg-inherit py-1 px-2 font-black text-right text-[10px] uppercase text-slate-700">Total a Cobrar</TableCell>
+                            <TableCell colSpan={isCristobal ? 5 : 4} className="sticky left-0 bg-inherit py-1 px-2 font-black text-right text-[10px] uppercase text-slate-700">Total a Cobrar</TableCell>
                             {Array.from({ length: 16 }).map((_, i) => {
                                 const weekNumber = i + 1;
                                 const isCurrentWeek = weekNumber === currentGroupWeek;
@@ -1947,7 +1963,7 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
                             <TableCell className="sticky right-0 bg-inherit py-1 px-1"></TableCell>
                         </TableRow>
                         <TableRow className="border-t h-8">
-                          <TableCell colSpan={appUser?.username === 'Cristobal' ? 5 : 4} className="sticky left-0 bg-inherit py-1 px-2 font-black text-right text-destructive text-[10px] uppercase">Falla</TableCell>
+                          <TableCell colSpan={isCristobal ? 5 : 4} className="sticky left-0 bg-inherit py-1 px-2 font-black text-right text-destructive text-[10px] uppercase">Falla</TableCell>
                             {weeklyFailures.map((total, i) => {
                                 const weekNumber = i + 1;
                                 const isCurrentWeek = weekNumber === currentGroupWeek;
@@ -1959,7 +1975,7 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
                             <TableCell className="sticky right-0 bg-inherit py-1 px-1"></TableCell>
                         </TableRow>
                         <TableRow className="border-t h-8">
-                            <TableCell colSpan={appUser?.username === 'Cristobal' ? 5 : 4} className="sticky left-0 bg-inherit py-1 px-2 font-black text-right text-blue-600 text-[10px] uppercase">Cobrado</TableCell>
+                            <TableCell colSpan={isCristobal ? 5 : 4} className="sticky left-0 bg-inherit py-1 px-2 font-black text-right text-blue-600 text-[10px] uppercase">Cobrado</TableCell>
                             {weeklyCollected.map((total, i) => {
                                 const weekNumber = i + 1;
                                 const isCurrentWeek = weekNumber === currentGroupWeek;
@@ -1978,7 +1994,7 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
           </CardContent>
            {filteredLoans.length > 0 && (
                 <CardFooter className="justify-end p-2 border-t gap-2">
-                    {appUser?.username === 'Cristobal' && hasPaymentsToRevert && (
+                    {isCristobal && hasPaymentsToRevert && (
                          <Button 
                             variant="outline"
                             onClick={() => setRevertDialogOpen(true)} 
