@@ -241,6 +241,20 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
       )
     ).sort((a, b) => new Date(b).getTime() - new Date(a).getTime())
   , [loans, selectedPromotora, loanPlans]);
+
+  const loansCountByWeek = useMemo(() => {
+    const counts: Record<string, number> = {};
+    if (!selectedPromotora) return counts;
+
+    loans.forEach(loan => {
+      if (loan.promotoraId === selectedPromotora && isLoanActive(loan)) {
+        const weekIso = getSaturdayOfWeek(loan.startDate).toISOString();
+        counts[weekIso] = (counts[weekIso] || 0) + 1;
+      }
+    });
+
+    return counts;
+  }, [loans, selectedPromotora, loanPlans]);
   
   const allLoanWeeksInSystem = useMemo(() =>
     Array.from(
@@ -1631,7 +1645,7 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
         </div>
       </div>
       
-      <div className="grid gap-4 md:grid-cols-[200px_1fr] items-start">
+      <div className="grid gap-4 md:grid-cols-[220px_1fr] items-start">
         <Card>
             <CardHeader className="p-2 pt-4">
                 <CardTitle className="text-base uppercase font-black text-zinc-500 text-[10px] tracking-widest px-2">Semanas Activas</CardTitle>
@@ -1642,28 +1656,41 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
                         <div className="flex flex-col gap-0.5 p-1 bg-muted/20 rounded-xl border border-border/40 shadow-inner">
                             {loanWeeks.map((week) => {
                                 const isSelected = selectedWeek === week;
+                                const count = loansCountByWeek[week] || 0;
                                 return (
                                     <Button 
                                         key={week}
                                         variant="ghost"
                                         className={cn(
-                                            "w-full justify-start h-8 px-3 text-[11px] font-bold transition-all rounded-lg relative overflow-hidden active:scale-95",
+                                            "w-full justify-start h-8 px-2.5 text-[11px] font-bold transition-all rounded-lg relative overflow-hidden active:scale-95 group",
                                             isSelected 
-                                                ? "bg-blue-50 text-blue-700 shadow-sm border border-blue-200/50" 
-                                                : "text-muted-foreground hover:bg-background/50"
+                                                ? "bg-blue-50 text-blue-700 shadow-sm border border-blue-200/50 dark:bg-blue-950/40 dark:text-blue-300 dark:border-blue-800/60" 
+                                                : "text-muted-foreground hover:bg-background/50 hover:text-foreground"
                                         )}
                                         onClick={() => setSelectedWeek(week)}
                                         disabled={!selectedPromotora}
                                     >
-                                        <span className={cn(
-                                            "transition-all duration-300",
-                                            isSelected ? "opacity-100" : "opacity-80"
-                                        )}>
-                                            {formatDate(week)}
-                                        </span>
-                                        {isSelected && (
-                                            <span className="absolute right-3 top-1/2 -translate-y-1/2 w-1.5 h-1.5 rounded-full bg-blue-600 animate-pulse" />
-                                        )}
+                                        <div className="flex items-center justify-between w-full gap-2">
+                                            <div className="flex items-center gap-1.5 min-w-0">
+                                                {isSelected && (
+                                                    <span className="w-1.5 h-1.5 rounded-full bg-blue-600 dark:bg-blue-400 animate-pulse shrink-0" />
+                                                )}
+                                                <span className={cn(
+                                                    "transition-all duration-300 truncate",
+                                                    isSelected ? "opacity-100 font-extrabold" : "opacity-80"
+                                                )}>
+                                                    {formatDate(week)}
+                                                </span>
+                                            </div>
+                                            <span className={cn(
+                                                "text-[10px] font-bold px-1.5 py-0.5 rounded-full transition-colors shrink-0 leading-none",
+                                                isSelected 
+                                                    ? "bg-blue-200/70 text-blue-800 dark:bg-blue-900/60 dark:text-blue-200" 
+                                                    : "bg-muted/80 text-muted-foreground group-hover:bg-muted"
+                                            )}>
+                                                {count} {count === 1 ? 'préstamo' : 'préstamos'}
+                                            </span>
+                                        </div>
                                     </Button>
                                 )
                             })}
