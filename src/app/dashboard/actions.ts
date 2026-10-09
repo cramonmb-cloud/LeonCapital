@@ -225,6 +225,26 @@ export async function changeLoansDateAction(loanIds: string[], targetDateIso: st
     }
 }
 
+export async function changeLoansPromotoraAction(loanIds: string[], targetPromotoraId: string) {
+    try {
+        const batch = writeBatch(db);
+        
+        loanIds.forEach(id => {
+            const ref = doc(db, 'loans', id);
+            batch.update(ref, { promotoraId: targetPromotoraId });
+        });
+
+        await batch.commit();
+        revalidatePath('/dashboard/prestamos');
+        revalidatePath('/dashboard/clientes');
+        revalidatePath('/dashboard/control');
+        return { success: true, message: `Se movieron ${loanIds.length} préstamo(s) a la nueva promotora correctamente.` };
+    } catch (error: any) {
+        console.error('Error changing loans promotora:', error);
+        return { success: false, message: `Error al mover promotora: ${error.message}` };
+    }
+}
+
 
 export async function registerPaymentAction(loanId: string, paymentStartDate: Date, amountPaid: number, startingWeekNumber: number, userId?: string) {
     try {

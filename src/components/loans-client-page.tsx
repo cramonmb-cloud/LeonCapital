@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useMemo } from 'react';
-import { MoreHorizontal, CheckCircle2, XCircle, Circle, AlertCircle, FileDown, Loader2, CalendarCog, BadgeDollarSign, Filter, ChevronDown, ChevronUp, RotateCcw, Search, Coins, ArrowUpRight, Check, History, ShieldAlert } from 'lucide-react';
+import { MoreHorizontal, CheckCircle2, XCircle, Circle, AlertCircle, FileDown, Loader2, CalendarCog, BadgeDollarSign, Filter, ChevronDown, ChevronUp, RotateCcw, Search, Coins, ArrowUpRight, Check, History, ShieldAlert, UserCog } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   Card,
@@ -75,7 +75,7 @@ import 'jspdf-autotable';
 import type { UserOptions } from 'jspdf-autotable';
 import { useAuth } from '@/hooks/use-auth';
 import { useToast } from '@/hooks/use-toast';
-import { accumulateAssumedPaymentsAction, changeLoansDateAction, payOffLoanAction, revertPaymentsForWeekAction, applyCarteraVencidaAbonoAction } from '@/app/dashboard/actions';
+import { accumulateAssumedPaymentsAction, changeLoansDateAction, changeLoansPromotoraAction, payOffLoanAction, revertPaymentsForWeekAction, applyCarteraVencidaAbonoAction } from '@/app/dashboard/actions';
 import { format as formatDateFns } from 'date-fns';
 import { useRealtimeData } from '@/hooks/use-realtime-data';
 import { query, where, collection } from 'firebase/firestore';
@@ -83,6 +83,7 @@ import { db } from '@/lib/firebase';
 import Loading from '../app/dashboard/loading';
 import { Checkbox } from './ui/checkbox';
 import { Input } from './ui/input';
+import { Label } from '@/components/ui/label';
 
 
 interface jsPDFWithAutoTable extends jsPDF {
@@ -143,6 +144,11 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
   const [isPayingOff, setIsPayingOff] = useState(false);
   const [loanToPayOff, setLoanToPayOff] = useState<Loan | null>(null);
   const [changeDateDialogOpen, setChangeDateDialogOpen] = useState(false);
+  const [changePromotoraDialogOpen, setChangePromotoraDialogOpen] = useState(false);
+  const [targetMovePlaza, setTargetMovePlaza] = useState<string>('');
+  const [targetMoveLocalidad, setTargetMoveLocalidad] = useState<string>('');
+  const [targetMovePromotora, setTargetMovePromotora] = useState<string>('');
+  const [isChangingPromotora, setIsChangingPromotora] = useState(false);
   const [revertDialogOpen, setRevertDialogOpen] = useState(false);
   const [isLocalidadDialogOpen, setIsLocalidadDialogOpen] = useState(false);
   const [localidadSearchTerm, setLocalidadSearchTerm] = useState('');
@@ -958,6 +964,50 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
         }
     };
 
+    const moveFilteredLocalidades = useMemo(() => {
+        if (!targetMovePlaza) return [];
+        return localidades.filter(l => l.plazaId === targetMovePlaza).sort((a, b) => (a?.name || '').localeCompare(b?.name || ''));
+    }, [localidades, targetMovePlaza]);
+
+    const moveFilteredPromotoras = useMemo(() => {
+        if (!targetMoveLocalidad) return [];
+        return promotoras.filter(p => p.localidadId === targetMoveLocalidad).sort((a, b) => (a?.name || '').localeCompare(b?.name || ''));
+    }, [promotoras, targetMoveLocalidad]);
+
+    const handleOpenMovePromotora = () => {
+        setTargetMovePlaza(selectedPlaza || (plazas[0]?.id || ''));
+        setTargetMoveLocalidad(selectedLocalidad || '');
+        setTargetMovePromotora('');
+        setChangePromotoraDialogOpen(true);
+    };
+
+    const handleChangePromotora = async () => {
+        if (!targetMovePromotora || selectedLoanIds.size === 0) {
+            toast({ variant: 'destructive', title: 'Error', description: 'Selecciona una promotora de destino y al menos un préstamo.' });
+            return;
+        }
+        if (targetMovePromotora === selectedPromotora) {
+            toast({ variant: 'destructive', title: 'Error', description: 'La promotora de destino debe ser diferente a la actual.' });
+            return;
+        }
+        setIsChangingPromotora(true);
+        try {
+            const loanIds = Array.from(selectedLoanIds);
+            const result = await changeLoansPromotoraAction(loanIds, targetMovePromotora);
+            if (result.success) {
+                toast({ title: 'Éxito', description: result.message });
+                setChangePromotoraDialogOpen(false);
+                setSelectedLoanIds(new Set());
+            } else {
+                throw new Error(result.message);
+            }
+        } catch (error: any) {
+            toast({ variant: 'destructive', title: 'Error', description: error.message });
+        } finally {
+            setIsChangingPromotora(false);
+        }
+    };
+
     const handlePayOffLoan = async () => {
         if (!loanToPayOff) return;
         setIsPayingOff(true);
@@ -1526,10 +1576,22 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
         
         <div className="flex items-center gap-2 w-full md:w-auto justify-end flex-wrap">
             {appUser?.username === 'Cristobal' && (
-                <Button variant="default" onClick={() => setChangeDateDialogOpen(true)} disabled={selectedLoanIds.size === 0} className='hidden sm:flex'>
-                    <CalendarCog className="mr-2 h-4 w-4" />
-                    Mover Fecha
-                </Button>
+                <>
+                    <Button variant="default" onClick={() => setChangeDateDialogOpen(true)} disabled={selectedLoanIds.size === 0} className='hidden sm:flex'>
+                        <CalendarCog className="mr-2 h-4 w-4" />
+                        Mover Fecha
+                    </Button>
+                    <Button 
+                        variant="secondary" 
+                        onClick={handleOpenMovePromotora} 
+                        disabled={selectedLoanIds.size === 0} 
+                        className='hidden sm:flex bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 dark:bg-amber-950/50 dark:hover:bg-amber-900/60 dark:text-amber-200 dark:border-amber-700 font-medium'
+                        title="Mover los préstamos seleccionados a otra promotora/grupo"
+                    >
+                        <UserCog className="mr-2 h-4 w-4 text-amber-700 dark:text-amber-300" />
+                        Mover Promotora
+                    </Button>
+                </>
             )}
             <Button 
                 variant="outline" 
@@ -2159,6 +2221,93 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
                 <Button onClick={handleChangeDate} disabled={isChangingDate || !targetWeek}>
                     {isChangingDate && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                     Confirmar Cambio de Fecha
+                </Button>
+            </DialogFooter>
+        </DialogContent>
+    </Dialog>
+
+    <Dialog open={changePromotoraDialogOpen} onOpenChange={setChangePromotoraDialogOpen}>
+        <DialogContent className="sm:max-w-[480px]">
+            <DialogHeader>
+                <DialogTitle>Mover Préstamo(s) a Otra Promotora</DialogTitle>
+                <DialogDescription>
+                    Reubica los {selectedLoanIds.size} préstamo(s) seleccionados en otro grupo o promotora. Cada préstamo se traslada de forma individual y los demás préstamos de los clientes permanecerán en su grupo original.
+                </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-2">
+                <div className="p-3 bg-muted/60 rounded-lg text-xs space-y-1">
+                    <p className="text-muted-foreground">Promotora actual:</p>
+                    <p className="font-semibold text-sm text-foreground">{selectedPromotoraObj?.name || 'N/A'}</p>
+                </div>
+                <div className="space-y-2">
+                    <Label className="text-xs font-medium">Plaza de Destino</Label>
+                    <Select 
+                        value={targetMovePlaza} 
+                        onValueChange={(val) => {
+                            setTargetMovePlaza(val);
+                            setTargetMoveLocalidad('');
+                            setTargetMovePromotora('');
+                        }}
+                    >
+                        <SelectTrigger>
+                            <SelectValue placeholder="Selecciona Plaza" />
+                        </SelectTrigger>
+                        <SelectContent>
+                            {plazas.map(p => (
+                                <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                            ))}
+                        </SelectContent>
+                    </Select>
+                </div>
+                <div className="space-y-2">
+                    <Label className="text-xs font-medium">Localidad de Destino</Label>
+                    <Select 
+                        value={targetMoveLocalidad} 
+                        onValueChange={(val) => {
+                            setTargetMoveLocalidad(val);
+                            setTargetMovePromotora('');
+                        }}
+                        disabled={!targetMovePlaza}
+                    >
+                        <SelectTrigger>
+                            <SelectValue placeholder="Selecciona Localidad" />
+                        </SelectTrigger>
+                        <SelectContent>
+                            {moveFilteredLocalidades.map(l => (
+                                <SelectItem key={l.id} value={l.id}>{l.name}</SelectItem>
+                            ))}
+                        </SelectContent>
+                    </Select>
+                </div>
+                <div className="space-y-2">
+                    <Label className="text-xs font-medium">Promotora de Destino</Label>
+                    <Select 
+                        value={targetMovePromotora} 
+                        onValueChange={setTargetMovePromotora}
+                        disabled={!targetMoveLocalidad}
+                    >
+                        <SelectTrigger>
+                            <SelectValue placeholder="Selecciona Promotora" />
+                        </SelectTrigger>
+                        <SelectContent>
+                            {moveFilteredPromotoras.map(p => (
+                                <SelectItem key={p.id} value={p.id} disabled={p.id === selectedPromotora}>
+                                    {p.name} {p.id === selectedPromotora ? '(Actual)' : ''}
+                                </SelectItem>
+                            ))}
+                        </SelectContent>
+                    </Select>
+                </div>
+            </div>
+            <DialogFooter>
+                <Button variant="outline" onClick={() => setChangePromotoraDialogOpen(false)}>Cancelar</Button>
+                <Button 
+                    onClick={handleChangePromotora} 
+                    disabled={isChangingPromotora || !targetMovePromotora || targetMovePromotora === selectedPromotora}
+                    className="bg-amber-600 hover:bg-amber-700 text-white dark:bg-amber-600 dark:hover:bg-amber-700"
+                >
+                    {isChangingPromotora && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                    Confirmar Mover Promotora
                 </Button>
             </DialogFooter>
         </DialogContent>
