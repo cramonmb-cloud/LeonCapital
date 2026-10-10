@@ -32,7 +32,7 @@ import {
 } from '@/components/ui/alert-dialog';
 import { Trash, Loader2, BookmarkCheck } from 'lucide-react';
 import { useState } from 'react';
-import { deleteLoanPlanAction, saveLoanPlanAction } from '@/app/dashboard/planes/actions';
+import { deleteLoanPlanAction, saveLoanPlanAction } from '@/app/inicio/planes/actions';
 
 const formSchema = z.object({
   name: z.string().min(1, 'El nombre es requerido.'),

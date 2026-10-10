@@ -10,7 +10,7 @@ import {
     X, Home, ListTodo, PencilLine, User, Building, Route, Info, UserCheck,
     Calendar, AlertTriangle
 } from 'lucide-react';
-import type { OverdueLoanDetails } from '@/app/dashboard/cartera-vencida/page';
+import type { OverdueLoanDetails } from '@/app/inicio/cartera-vencida/page';
 import { RegisterPaymentDialog } from './register-payment-dialog';
 import type { Client, LoanPlan, AppConfig } from '@/lib/types';
 import { useAuth } from '@/hooks/use-auth';

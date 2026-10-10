@@ -48,7 +48,7 @@ export function LoginForm() {
 
     try {
       await signIn(email, values.password);
-      router.push('/dashboard');
+      router.push('/inicio');
     } catch (error: any) {
         let errorMessage = error.message;
         if (error.code === 'auth/user-not-found' || error.code === 'auth/invalid-credential') {

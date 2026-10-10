@@ -6,7 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button';
 import { Printer, RefreshCw, Maximize2, Minimize2, AlertCircle, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import Loading from '@/app/dashboard/loading';
+import Loading from '@/app/inicio/loading';
 
 interface ImprentaClientPageProps {
   initialIframeUrl?: string;

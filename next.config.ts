@@ -16,6 +16,20 @@ const nextConfig: NextConfig = {
       },
     ],
   },
+  async redirects() {
+    return [
+      {
+        source: '/dashboard',
+        destination: '/inicio',
+        permanent: false,
+      },
+      {
+        source: '/dashboard/:path*',
+        destination: '/inicio/:path*',
+        permanent: false,
+      },
+    ];
+  },
 };
 
 export default nextConfig;

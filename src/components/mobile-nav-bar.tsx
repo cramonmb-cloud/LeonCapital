@@ -8,15 +8,15 @@ import { useState, useEffect, useRef } from 'react';
 import { LayoutDashboard, Users, Landmark, FileWarning, Wallet, Settings, Activity, Search, History, type LucideIcon } from 'lucide-react';
 
 const allLinks: { href: string; label: string; id: string, icon: LucideIcon, color: string }[] = [
-  { href: '/dashboard', label: 'Inicio', id: 'dashboard', icon: LayoutDashboard, color: '#3b82f6' },
-  { href: '/dashboard/clientes', label: 'Clientes', id: 'clients', icon: Users, color: '#3b82f6' },
-  { href: '/dashboard/consultar-cliente', label: 'Buscar', id: 'consultarCliente', icon: Search, color: '#3b82f6' },
-  { href: '/dashboard/prestamos', label: 'Pagos', id: 'loans', icon: Landmark, color: '#3b82f6' },
-  { href: '/dashboard/pendientes', label: 'Pendientes', id: 'overduePortfolio', icon: FileWarning, color: '#f97316' },
-  { href: '/dashboard/cartera-vencida', label: 'Vencida', id: 'carteraVencida', icon: History, color: '#dc2626' },
-  { href: '/dashboard/bitacora', label: 'Bitacora', id: 'wallet', icon: Wallet, color: '#3b82f6' },
-  { href: '/dashboard/control', label: 'Control', id: 'control', icon: Activity, color: '#2563eb' },
-  { href: '/dashboard/ajustes', label: 'Ajustes', id: 'settings', icon: Settings, color: '#3b82f6' },
+  { href: '/inicio', label: 'Inicio', id: 'dashboard', icon: LayoutDashboard, color: '#3b82f6' },
+  { href: '/inicio/clientes', label: 'Clientes', id: 'clients', icon: Users, color: '#3b82f6' },
+  { href: '/inicio/consultar-cliente', label: 'Buscar', id: 'consultarCliente', icon: Search, color: '#3b82f6' },
+  { href: '/inicio/prestamos', label: 'Pagos', id: 'loans', icon: Landmark, color: '#3b82f6' },
+  { href: '/inicio/pendientes', label: 'Pendientes', id: 'overduePortfolio', icon: FileWarning, color: '#f97316' },
+  { href: '/inicio/cartera-vencida', label: 'Vencida', id: 'carteraVencida', icon: History, color: '#dc2626' },
+  { href: '/inicio/bitacora', label: 'Bitacora', id: 'wallet', icon: Wallet, color: '#3b82f6' },
+  { href: '/inicio/control', label: 'Control', id: 'control', icon: Activity, color: '#2563eb' },
+  { href: '/inicio/ajustes', label: 'Ajustes', id: 'settings', icon: Settings, color: '#3b82f6' },
 ];
 
 export function MobileNavBar() {
@@ -81,7 +81,7 @@ export function MobileNavBar() {
     >
       <nav className="relative flex items-center justify-around px-2.5 py-2 rounded-[2.5rem] liquid-glass-dock border border-white/70 dark:border-white/15 shadow-[0_16px_40px_-8px_rgba(0,0,0,0.15),_inset_0_1px_1.5px_rgba(255,255,255,0.9)]">
         {linksToShow.map((link) => {
-          const isActive = pathname === link.href || (link.href !== '/dashboard' && pathname.startsWith(link.href));
+          const isActive = pathname === link.href || (link.href !== '/inicio' && link.href !== '/dashboard' && pathname.startsWith(link.href));
           return (
             <Link
               key={link.href}

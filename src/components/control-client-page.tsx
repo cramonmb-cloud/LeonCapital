@@ -22,7 +22,7 @@ import { Separator } from './ui/separator';
 import { useRealtimeData } from '@/hooks/use-realtime-data';
 import { query, where, collection } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-import Loading from '@/app/dashboard/loading';
+import Loading from '@/app/inicio/loading';
 import { generateColorPalette, cn, getCurrentLoanWeekNumber, getExtraWeekThreshold } from '@/lib/utils';
 
 interface ControlClientPageProps {

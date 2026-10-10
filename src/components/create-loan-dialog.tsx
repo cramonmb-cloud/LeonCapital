@@ -46,7 +46,7 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import type { Client, Loan, LoanPlan, Promotora, Plaza, Localidad } from '@/lib/types';
 import { PlusCircle, Loader2, AlertTriangle, BadgeDollarSign, Calendar, CheckCircle2, X } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import { createLoanAction, payOffLoanAction } from '@/app/dashboard/actions';
+import { createLoanAction, payOffLoanAction } from '@/app/inicio/actions';
 import { useRouter } from 'next/navigation';
 import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent } from '@/components/ui/card';
@@ -176,7 +176,7 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
   const router = useRouter();
   const { appUser } = useAuth();
   const { data: realtimeData } = useRealtimeData(undefined, {
-    enabledCollections: ['config']
+    enabledCollections: ['config', 'personal']
   });
   const maxGuarantorClients = realtimeData?.config?.maxGuarantorClients || 0;
 
@@ -319,14 +319,16 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
   const currentHierarchy = useMemo(() => {
     const currentPromotoraId = watchPromotoraId || initialSelection?.promotoraId;
     const promotora = promotoras.find(p => p.id === currentPromotoraId);
+    const assigned = realtimeData?.personal?.find(per => per.id === promotora?.personalId);
     const localidad = localidades.find(l => l.id === promotora?.localidadId);
     const plaza = plazas.find(p => p.id === localidad?.plazaId);
     return {
       promotoraName: promotora?.name || 'N/A',
+      personalName: assigned ? `${assigned.nombre} ${assigned.apellidoPaterno}` : undefined,
       localidadName: localidad?.name || 'N/A',
       plazaName: plaza?.name || 'N/A',
     };
-  }, [watchPromotoraId, initialSelection, promotoras, localidades, plazas]);
+  }, [watchPromotoraId, initialSelection, promotoras, localidades, plazas, realtimeData]);
 
   const handleGuaranteeKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>, fieldName: 'guarantee' | 'endorsementGuarantee') => {
     if (e.key === 'Enter') {
@@ -1124,6 +1126,11 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
                   </Badge>
                   <Badge variant="secondary" className="text-[9px] font-extrabold uppercase bg-white border border-zinc-200 text-zinc-700 shadow-sm">
                     Promotora: {currentHierarchy.promotoraName}
+                    {currentHierarchy.personalName && (
+                      <span className="text-emerald-700 dark:text-emerald-400 font-bold ml-1">
+                        ({currentHierarchy.personalName})
+                      </span>
+                    )}
                   </Badge>
                 </div>
 

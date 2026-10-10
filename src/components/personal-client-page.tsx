@@ -14,7 +14,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
-import Loading from '@/app/dashboard/loading';
+import Loading from '@/app/inicio/loading';
 import {
     Form,
     FormControl,
@@ -79,7 +79,7 @@ import { useRouter } from 'next/navigation';
 import { db } from '@/lib/firebase';
 import { collection, onSnapshot } from 'firebase/firestore';
 import type { Personal } from '@/lib/types';
-import { savePersonalAction, deletePersonalAction } from '@/app/dashboard/personal/actions';
+import { savePersonalAction, deletePersonalAction } from '@/app/inicio/personal/actions';
 import { useRealtimeData } from '@/hooks/use-realtime-data';
 import { MEXICAN_STATES, calculateCurpBase } from '@/lib/curp-helper';
 import { Badge } from '@/components/ui/badge';
@@ -103,6 +103,7 @@ const personalFormSchema = z.object({
   curp: z.string().min(16, 'La CURP debe tener al menos 16 caracteres.').max(18, 'La CURP no puede exceder 18 caracteres.').toUpperCase(),
   entregoDocumentacion: z.boolean().default(false),
   firmoDocumentacion: z.boolean().default(false),
+  promotoraId: z.string().optional(),
 });
 
 type PersonalFormValues = z.infer<typeof personalFormSchema>;
@@ -123,7 +124,7 @@ export function PersonalClientPage() {
     const router = useRouter();
     const { appUser } = useAuth();
     const { data: systemData } = useRealtimeData(undefined, {
-        enabledCollections: ['config']
+        enabledCollections: ['config', 'plazas', 'localidades', 'promotoras']
     });
 
     // Fetch custom staffTypes from config, fallback to default ones
@@ -150,6 +151,7 @@ export function PersonalClientPage() {
             curp: '',
             entregoDocumentacion: false,
             firmoDocumentacion: false,
+            promotoraId: '',
         }
     });
 
@@ -238,6 +240,7 @@ export function PersonalClientPage() {
             curp: '',
             entregoDocumentacion: false,
             firmoDocumentacion: false,
+            promotoraId: '',
         });
         setDialogOpen(true);
     };
@@ -260,6 +263,7 @@ export function PersonalClientPage() {
             curp: employee.curp || '',
             entregoDocumentacion: !!employee.entregoDocumentacion,
             firmoDocumentacion: !!employee.firmoDocumentacion,
+            promotoraId: employee.promotoraId || '',
         });
         setDialogOpen(true);
     };
@@ -466,7 +470,18 @@ export function PersonalClientPage() {
                                     return (
                                         <TableRow key={employee.id} className="hover:bg-muted/15 transition-colors">
                                             <TableCell className="pl-6 py-4">
-                                                {getPuestoBadge(employee.tipoPersonal)}
+                                                <div className="flex flex-col gap-1 items-start">
+                                                    {getPuestoBadge(employee.tipoPersonal)}
+                                                    {employee.promotoraId && (() => {
+                                                        const prom = systemData?.promotoras.find(p => p.id === employee.promotoraId);
+                                                        if (!prom) return null;
+                                                        return (
+                                                            <span className="inline-flex items-center gap-1 text-[10px] font-bold text-blue-700 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/40 px-2 py-0.5 rounded-md border border-blue-200 dark:border-blue-900/50">
+                                                                <MapPin className="h-2.5 w-2.5 shrink-0" /> {prom.name}
+                                                            </span>
+                                                        );
+                                                    })()}
+                                                </div>
                                             </TableCell>
                                             <TableCell className="font-bold text-sm uppercase text-foreground">
                                                 {employee.nombre} {employee.apellidoPaterno} {employee.apellidoMaterno}
@@ -795,6 +810,43 @@ export function PersonalClientPage() {
                                                         className="h-9 border border-border focus:ring-primary rounded-lg bg-card font-medium text-xs" 
                                                     />
                                                 </FormControl>
+                                                <FormMessage className="text-[10px]" />
+                                            </FormItem>
+                                        )}
+                                    />
+                                </div>
+
+                                {/* Promotora / Grupo Asignado */}
+                                <div className="md:col-span-6">
+                                    <FormField
+                                        control={form.control}
+                                        name="promotoraId"
+                                        render={({ field }) => (
+                                            <FormItem className="space-y-1">
+                                                <FormLabel className="font-bold text-[10px] uppercase text-muted-foreground flex items-center gap-1.5">
+                                                    <MapPin className="h-3 w-3 text-primary" /> Promotora / Grupo Asignado
+                                                </FormLabel>
+                                                <Select onValueChange={(val) => field.onChange(val === 'NONE' ? '' : val)} value={field.value || 'NONE'}>
+                                                    <FormControl>
+                                                        <SelectTrigger className="h-9 border border-border focus:ring-primary rounded-lg bg-card uppercase font-semibold text-xs">
+                                                            <SelectValue placeholder="Sin grupo asignado" />
+                                                        </SelectTrigger>
+                                                    </FormControl>
+                                                    <SelectContent className="max-h-60">
+                                                        <SelectItem value="NONE" className="text-muted-foreground italic text-xs">
+                                                            -- Sin grupo asignado --
+                                                        </SelectItem>
+                                                        {systemData?.promotoras.map((prom) => {
+                                                            const loc = systemData.localidades.find(l => l.id === prom.localidadId);
+                                                            const plaza = systemData.plazas.find(pl => pl.id === loc?.plazaId);
+                                                            return (
+                                                                <SelectItem key={prom.id} value={prom.id} className="uppercase font-semibold text-xs">
+                                                                    {prom.name} {loc ? `• ${loc.name}${plaza ? ` (${plaza.name})` : ''}` : ''}
+                                                                </SelectItem>
+                                                            );
+                                                        })}
+                                                    </SelectContent>
+                                                </Select>
                                                 <FormMessage className="text-[10px]" />
                                             </FormItem>
                                         )}

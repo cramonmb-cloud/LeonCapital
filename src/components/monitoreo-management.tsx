@@ -50,14 +50,31 @@ import { useToast } from '@/hooks/use-toast';
 
 // Mapping of system paths to friendly Spanish names
 const sectionMapping: Record<string, string> = {
-  '/dashboard': 'Dashboard Principal',
+  '/inicio': 'Inicio Principal',
+  '/inicio/clientes': 'Directorio de Clientes',
+  '/inicio/consultar-cliente': 'Consulta Rápida',
+  '/inicio/prestamos': 'Cobranza Semanal',
+  '/inicio/pendientes': 'Pagos Pendientes',
+  '/inicio/cartera-vencida': 'Cartera Vencida',
+  '/inicio/debes': 'Liquidación Semanal',
+  '/inicio/bitacora': 'Bitácora',
+  '/inicio/control': 'Control de Capital',
+  '/inicio/avales': 'Módulo de Avales',
+  '/inicio/ajustes': 'Ajustes del Sistema',
+  '/inicio/personal': 'Gestión de Personal',
+  '/inicio/imprenta': 'Servicio de Imprenta',
+  '/dashboard': 'Inicio Principal',
   '/dashboard/clientes': 'Directorio de Clientes',
   '/dashboard/consultar-cliente': 'Consulta Rápida',
   '/dashboard/loans': 'Cobranza Semanal',
+  '/dashboard/prestamos': 'Cobranza Semanal',
   '/dashboard/overduePortfolio': 'Pagos Pendientes',
+  '/dashboard/pendientes': 'Pagos Pendientes',
   '/dashboard/carteraVencida': 'Cartera Vencida',
+  '/dashboard/cartera-vencida': 'Cartera Vencida',
   '/dashboard/debes': 'Liquidación Semanal',
-  '/dashboard/wallet': 'Bitácora de Caja',
+  '/dashboard/wallet': 'Bitácora',
+  '/dashboard/bitacora': 'Bitácora',
   '/dashboard/control': 'Control de Capital',
   '/dashboard/avales': 'Módulo de Avales',
   '/dashboard/ajustes': 'Ajustes del Sistema',
@@ -75,12 +92,12 @@ const getFriendlySection = (path?: string): string => {
   // Try prefix match for sub-routes, sorted by length descending
   const sortedKeys = Object.keys(sectionMapping).sort((a, b) => b.length - a.length);
   for (const key of sortedKeys) {
-    if (key !== '/dashboard' && path.startsWith(key)) {
+    if (key !== '/inicio' && key !== '/dashboard' && path.startsWith(key)) {
       return sectionMapping[key];
     }
   }
   
-  if (path.startsWith('/dashboard')) return 'Dashboard Principal';
+  if (path.startsWith('/inicio') || path.startsWith('/dashboard')) return 'Inicio Principal';
   return path;
 };
 

@@ -12,7 +12,7 @@ import {
 } from 'firebase/auth';
 import { doc, getDoc, setDoc, onSnapshot, updateDoc } from 'firebase/firestore';
 import { useRouter } from 'next/navigation';
-import { saveUserAction } from '@/app/dashboard/ajustes/actions';
+import { saveUserAction } from '@/app/inicio/ajustes/actions';
 import type { AppUser, UserPermissions } from '@/lib/types';
 import { errorEmitter } from '@/firebase/error-emitter';
 import { FirestorePermissionError, type SecurityRuleContext } from '@/firebase/errors';

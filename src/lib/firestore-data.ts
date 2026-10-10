@@ -1,6 +1,6 @@
 import { collection, getDocs, doc, getDoc, addDoc, updateDoc, writeBatch, query, where, Timestamp, orderBy, limit } from 'firebase/firestore';
 import { db } from './firebase';
-import type { Client, Loan, LoanPlan, Plaza, Localidad, Promotora, Wallet, WalletTransaction, AppUser, AppConfig } from './types';
+import type { Client, Loan, LoanPlan, Plaza, Localidad, Promotora, Wallet, WalletTransaction, AppUser, AppConfig, Personal } from './types';
 import { errorEmitter } from '@/firebase/error-emitter';
 import { FirestorePermissionError, type SecurityRuleContext } from '@/firebase/errors';
 
@@ -185,22 +185,50 @@ export async function getWallet(): Promise<Wallet> {
     }
 }
 
-// Fetch all wallet transactions
+// Fetch all wallet transactions (supports cutoffDate, e.g. last 4 months for high performance)
 export async function getWalletTransactions(cutoffDate?: Date): Promise<WalletTransaction[]> {
     const transactionsCol = collection(db, 'walletTransactions');
-    let q = query(transactionsCol, orderBy('date', 'desc'));
-    if (cutoffDate) {
-        q = query(transactionsCol, where('date', '>=', cutoffDate), orderBy('date', 'desc'));
-    }
     try {
+        let q = query(transactionsCol, orderBy('date', 'desc'));
+        if (cutoffDate) {
+            const cutoffTimestamp = Timestamp.fromDate(cutoffDate);
+            q = query(transactionsCol, where('date', '>=', cutoffTimestamp), orderBy('date', 'desc'));
+        }
         const transactionSnapshot = await getDocs(q);
-        return transactionSnapshot.docs.map(doc => {
+        const results = transactionSnapshot.docs.map(doc => {
             const data = doc.data();
             const date = data.date instanceof Timestamp ? data.date.toDate().toISOString() : data.date;
             return { id: doc.id, ...data, date } as WalletTransaction;
         });
+
+        if (cutoffDate) {
+            const cutoffTime = cutoffDate.getTime();
+            return results.filter(t => {
+                const time = new Date(t.date).getTime();
+                return isNaN(time) || time >= cutoffTime;
+            });
+        }
+        return results;
     } catch (err) {
-        return handleFirestoreError(err, transactionsCol.path, 'list');
+        console.warn('Fallback querying walletTransactions:', err);
+        try {
+            const fallbackSnapshot = await getDocs(query(transactionsCol, orderBy('date', 'desc'), limit(1500)));
+            const fallbackResults = fallbackSnapshot.docs.map(doc => {
+                const data = doc.data();
+                const date = data.date instanceof Timestamp ? data.date.toDate().toISOString() : data.date;
+                return { id: doc.id, ...data, date } as WalletTransaction;
+            });
+            if (cutoffDate) {
+                const cutoffTime = cutoffDate.getTime();
+                return fallbackResults.filter(t => {
+                    const time = new Date(t.date).getTime();
+                    return isNaN(time) || time >= cutoffTime;
+                });
+            }
+            return fallbackResults;
+        } catch (fallbackErr) {
+            return handleFirestoreError(fallbackErr, transactionsCol.path, 'list');
+        }
     }
 }
 
@@ -232,6 +260,17 @@ export async function getPromotoras(): Promise<Promotora[]> {
   try {
     const snapshot = await getDocs(col);
     return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Promotora));
+  } catch (err) {
+    return handleFirestoreError(err, col.path, 'list');
+  }
+}
+
+// Fetch all personal
+export async function getPersonal(): Promise<Personal[]> {
+  const col = collection(db, 'personal');
+  try {
+    const snapshot = await getDocs(col);
+    return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Personal));
   } catch (err) {
     return handleFirestoreError(err, col.path, 'list');
   }

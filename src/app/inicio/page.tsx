@@ -17,13 +17,11 @@ import { useAuth } from '@/hooks/use-auth';
 import { getAppConfig } from '@/lib/firestore-data';
 import { Users, Landmark, Banknote, TrendingUp, Receipt, Calendar, ChevronLeft, ChevronRight, RotateCcw, KeyRound, Copy, Check, ShieldCheck } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import Image from 'next/image';
-import { Logo } from '@/components/logo';
 import { useEffect, useState, useMemo } from 'react';
 import Loading from './loading';
-import { getSaturdayOfWeek, getMexicoNow } from '@/lib/utils';
+import { getSaturdayOfWeek, getMexicoNow, parseLocalDate } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
-import { getOrRotateGuarantorAuthCodeAction } from '@/app/dashboard/ajustes/actions';
+import { getOrRotateGuarantorAuthCodeAction } from '@/app/inicio/ajustes/actions';
 import type { AppConfig } from '@/lib/types';
 
 export default function DashboardPage() {
@@ -78,7 +76,7 @@ export default function DashboardPage() {
         let minTime = Infinity;
         loans.forEach(loan => {
             if (loan.startDate) {
-                const time = new Date(loan.startDate.includes('T') ? loan.startDate : loan.startDate + 'T00:00:00').getTime();
+                const time = parseLocalDate(loan.startDate).getTime();
                 if (!isNaN(time) && time < minTime) {
                     minTime = time;
                 }
@@ -135,7 +133,10 @@ export default function DashboardPage() {
 
         const totalClients = clients.length;
         const activeLoansCount = loans.filter((loan) => loan.status === 'Active' || loan.status === 'Overdue').length;
-        const totalLoaned = loans.reduce((acc, loan) => acc + loan.amount, 0);
+        const totalLoaned = loans.reduce((acc, loan) => {
+            const val = Number(loan.amount);
+            return acc + (!isNaN(val) && isFinite(val) ? val : 0);
+        }, 0);
 
         // Calculate defaults if activeWeek is not loaded yet
         const mexicoNow = getMexicoNow();
@@ -153,9 +154,15 @@ export default function DashboardPage() {
 
         loans.forEach(loan => {
             (loan.payments || []).forEach(payment => {
-                const paymentDate = new Date(payment.date);
+                if (!payment || payment.isReverted) return;
+                
+                const rawAmount = Number(payment.amount);
+                const safeAmount = !isNaN(rawAmount) && isFinite(rawAmount) ? rawAmount : 0;
+                if (safeAmount <= 0) return;
+
+                const paymentDate = parseLocalDate(payment.date);
                 if (paymentDate >= weekStart && paymentDate <= weekEnd) {
-                    totalCollectedThisWeek += payment.amount;
+                    totalCollectedThisWeek += safeAmount;
                     totalPaymentsThisWeek += 1;
                 }
             });
@@ -164,9 +171,7 @@ export default function DashboardPage() {
         let newLoansCountThisWeek = 0;
         loans.forEach(loan => {
             if (loan.startDate) {
-                const loanDate = loan.startDate.includes('T') 
-                    ? new Date(loan.startDate) 
-                    : new Date(loan.startDate + 'T00:00:00');
+                const loanDate = parseLocalDate(loan.startDate);
                 if (loanDate >= weekStart && loanDate <= weekEnd) {
                     newLoansCountThisWeek += 1;
                 }
@@ -220,17 +225,18 @@ export default function DashboardPage() {
     }
 
     const formatCurrency = (amount: number) => {
+        const safeAmount = typeof amount === 'number' && !isNaN(amount) && isFinite(amount) ? amount : 0;
         return new Intl.NumberFormat('es-MX', {
             style: 'currency',
             currency: 'MXN',
-        }).format(amount);
+        }).format(safeAmount);
     };
 
     return (
         <div className="flex flex-col gap-5">
-            {/* Clave de Autorización para CRISTOBAL (Arriba del logotipo con botón de copiar) */}
+            {/* Clave de Autorización para CRISTOBAL */}
             {isCristobal && guarantorAuthCode && (
-                <div className="flex justify-center mt-2 -mb-2 z-10 animate-in fade-in slide-in-from-top-2 duration-500">
+                <div className="flex justify-center mt-1 mb-1 z-10 animate-in fade-in slide-in-from-top-2 duration-500">
                     <div className="inline-flex items-center gap-2.5 px-4 py-1.5 rounded-full bg-slate-900/95 dark:bg-zinc-900/95 text-white shadow-xl border border-amber-500/40 backdrop-blur-md">
                         <div className="flex items-center gap-1.5 text-[10px] font-black tracking-wider uppercase text-zinc-300">
                             <KeyRound className="h-3.5 w-3.5 text-amber-400 animate-pulse" />
@@ -270,21 +276,6 @@ export default function DashboardPage() {
                                 {daysRemaining <= 1 ? 'Rotación hoy' : `Rota en ${daysRemaining}d`}
                             </span>
                         )}
-                    </div>
-                </div>
-            )}
-
-            {activeConfig?.logoUrl && (
-                <div className="flex justify-center mt-3 md:mt-2">
-                    <div className="relative animate-in fade-in zoom-in duration-700 flex items-center justify-center">
-                        <Logo 
-                            logoUrl={activeConfig.logoUrl} 
-                            logoFormat={activeConfig.logoFormat} 
-                            size="xl" 
-                            customHeight={activeConfig.logoHeightDashboard}
-                            customWidth={activeConfig.logoWidthDashboard}
-                            showText={false}
-                        />
                     </div>
                 </div>
             )}

@@ -31,7 +31,7 @@ import {
 import { ArrowRightLeft, Loader2, Building, MapPin, AlertCircle } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import type { Plaza, Localidad, Promotora } from '@/lib/types';
-import { migrateLocalidadAction } from '@/app/dashboard/ajustes/actions';
+import { migrateLocalidadAction } from '@/app/inicio/ajustes/actions';
 import { useRealtimeData } from '@/hooks/use-realtime-data';
 
 interface MigrationManagementProps {

@@ -7,6 +7,6 @@ export default function RootPage() {
   // La mejor práctica es redirigir a una página de carga o directamente a login,
   // y dejar que el lado del cliente maneje la redirección si el usuario ya está logueado.
   // El `DashboardLayout` ya se encarga de redirigir a `/login` si no hay usuario.
-  // Así que redirigir a `/dashboard` es seguro.
-  redirect('/dashboard');
+  // Así que redirigir a `/inicio` es seguro.
+  redirect('/inicio');
 }

@@ -25,7 +25,7 @@ import { Input } from '@/components/ui/input';
 import type { Client, Loan, LoanPlan } from '@/lib/types';
 import { Loader2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import { registerPaymentAction } from '@/app/dashboard/actions';
+import { registerPaymentAction } from '@/app/inicio/actions';
 import { useAuth } from '@/hooks/use-auth';
 import { cn } from '@/lib/utils';
 

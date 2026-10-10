@@ -14,10 +14,10 @@ export async function deleteLoanPlanAction(planId: string) {
     const planRef = doc(db, 'loanPlans', planId);
     await deleteDoc(planRef);
 
-    revalidatePath('/dashboard/planes');
-    revalidatePath('/dashboard/ajustes');
-    revalidatePath('/dashboard/control');
-    revalidatePath('/dashboard/prestamos');
+    revalidatePath('/inicio/planes');
+    revalidatePath('/inicio/ajustes');
+    revalidatePath('/inicio/control');
+    revalidatePath('/inicio/prestamos');
     
     return { success: true, message: 'Plan eliminado con éxito.' };
   } catch (error: any) {
@@ -58,12 +58,12 @@ export async function saveLoanPlanAction(planData: Omit<LoanPlan, 'id'>, planId?
             }
         }
 
-        revalidatePath('/dashboard/planes');
-        revalidatePath('/dashboard/ajustes');
-        revalidatePath('/dashboard/control');
-        revalidatePath('/dashboard/prestamos');
+        revalidatePath('/inicio/planes');
+        revalidatePath('/inicio/ajustes');
+        revalidatePath('/inicio/control');
+        revalidatePath('/inicio/prestamos');
         if (planId) {
-            revalidatePath(`/dashboard/planes/${planId}/edit`);
+            revalidatePath(`/inicio/planes/${planId}/edit`);
         }
 
         return { success: true, message: `Plan "${planData.name}" guardado con éxito.` };
@@ -100,10 +100,10 @@ export async function setDefaultLoanPlanAction(targetPlanId: string) {
 
     await batch.commit();
 
-    revalidatePath('/dashboard/planes');
-    revalidatePath('/dashboard/ajustes');
-    revalidatePath('/dashboard/control');
-    revalidatePath('/dashboard/prestamos');
+    revalidatePath('/inicio/planes');
+    revalidatePath('/inicio/ajustes');
+    revalidatePath('/inicio/control');
+    revalidatePath('/inicio/prestamos');
 
     return { success: true, message: 'Plan establecido como predeterminado para nuevos préstamos.' };
   } catch (error: any) {

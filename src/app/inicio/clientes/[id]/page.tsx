@@ -1,6 +1,6 @@
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
-import { getClient, getLoans, getLoanPlans, getUsers, getPlazas, getLocalidades, getPromotoras, getAppConfig } from '@/lib/firestore-data';
+import { getClient, getLoans, getLoanPlans, getUsers, getPlazas, getLocalidades, getPromotoras, getAppConfig, getPersonal } from '@/lib/firestore-data';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -27,7 +27,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
     notFound();
   }
 
-  const [clientLoans, loanPlans, allLoans, users, plazas, localidades, promotoras, appConfig] = await Promise.all([
+  const [clientLoans, loanPlans, allLoans, users, plazas, localidades, promotoras, appConfig, personalList] = await Promise.all([
       getLoans(id),
       getLoanPlans(),
       getLoans(),
@@ -36,6 +36,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
       getLocalidades(),
       getPromotoras(),
       getAppConfig(),
+      getPersonal(),
   ]);
 
   const fullAddress = [
@@ -103,6 +104,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
   // Localidad y Promotora más representativa (del préstamo activo o reciente)
   const referenceLoan = activeLoans[0] || clientLoans[0];
   const refPromotora = referenceLoan ? promotoras.find(p => p.id === referenceLoan.promotoraId) : null;
+  const refPersonal = refPromotora?.personalId ? personalList.find(p => p.id === refPromotora.personalId) : null;
   const refLocalidad = refPromotora ? localidades.find(l => l.id === refPromotora.localidadId) : null;
   const refPlaza = refLocalidad ? plazas.find(p => p.id === refLocalidad.plazaId) : null;
 
@@ -120,7 +122,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-zinc-200/80 dark:border-zinc-800 pb-3">
         <div className="flex items-center gap-2">
           <Button asChild variant="ghost" size="sm" className="h-8 px-2 text-xs text-muted-foreground hover:text-foreground">
-            <Link href="/dashboard/clientes">
+            <Link href="/inicio/clientes">
               <ArrowLeft className="h-3.5 w-3.5 mr-1.5" />
               Volver a Clientes
             </Link>
@@ -180,6 +182,11 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
                     <span className="flex items-center gap-1 font-medium text-zinc-600 dark:text-zinc-400">
                       <UserCheck className="h-3 w-3 text-indigo-500 shrink-0" />
                       Promotora: <strong className="text-zinc-800 dark:text-zinc-200">{refPromotora.name}</strong>
+                      {refPersonal && (
+                        <span className="text-emerald-700 dark:text-emerald-400 font-semibold text-xs ml-1">
+                          ({refPersonal.nombre} {refPersonal.apellidoPaterno})
+                        </span>
+                      )}
                     </span>
                   )}
                 </div>

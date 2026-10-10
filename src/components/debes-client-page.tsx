@@ -12,7 +12,7 @@ import { collection, query, where } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { cn, getSaturdayOfWeek, getMexicoNow, getExtraWeekThreshold, getLoanAbonoSalienteForWeek, isLoanInSemanaExtraForWeek, getLoanSemanaExtraPaidAmountForWeek } from '@/lib/utils';
 import type { Client, LoanPlan, Loan, Plaza, Localidad, Promotora, PromotoraSettlement } from '@/lib/types';
-import { saveSettlementAction, deleteSettlementAction, deleteGroupSettlementsAction } from '@/app/dashboard/debes/actions';
+import { saveSettlementAction, deleteSettlementAction, deleteGroupSettlementsAction } from '@/app/inicio/debes/actions';
 import { useAuth } from '@/hooks/use-auth';
 import { Coins, Download, Save, Loader2, Building, MapPin, Calendar, AlertCircle, Lock, Unlock, RotateCcw, Printer } from 'lucide-react';
 import { BorradorDebeModal } from '@/components/borrador-debe-modal';
@@ -123,7 +123,7 @@ export function DebesClientPage({
     localidades: initialLocalidades,
     promotoras: initialPromotoras
   }, {
-    enabledCollections: ['loans', 'loanPlans', 'plazas', 'localidades', 'promotoras', 'promotoraSettlements', 'config'],
+    enabledCollections: ['loans', 'loanPlans', 'plazas', 'localidades', 'promotoras', 'promotoraSettlements', 'config', 'personal'],
     queries: {
       loans: dynamicLoansQuery,
       promotoraSettlements: dynamicSettlementsQuery
@@ -973,8 +973,18 @@ export function DebesClientPage({
                     return (
                       <TableRow key={row.id} className="hover:bg-muted/10 transition-colors border-b">
                         {/* Grupo */}
-                        <TableCell className="font-bold text-left text-[11px] py-2 px-3 uppercase text-slate-700">
-                          {row.promotoraName}
+                        <TableCell className="text-left text-[11px] py-2 px-3 uppercase">
+                          <div className="font-bold text-slate-700 dark:text-slate-200">{row.promotoraName}</div>
+                          {(() => {
+                            const prom = promotoras.find(p => p.id === row.promotoraId);
+                            const assigned = realtime?.personal?.find(per => per.id === prom?.personalId);
+                            if (!assigned) return null;
+                            return (
+                              <div className="text-[10px] font-semibold text-emerald-700 dark:text-emerald-400 mt-0.5 normal-case">
+                                {assigned.nombre} {assigned.apellidoPaterno}
+                              </div>
+                            );
+                          })()}
                         </TableCell>
 
                         {/* % Com */}

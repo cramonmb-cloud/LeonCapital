@@ -1,7 +1,7 @@
 'use server';
 
 import { db } from '@/lib/firebase';
-import { collection, getDocs, writeBatch, doc, getDoc, addDoc, deleteDoc, setDoc, increment, Timestamp, updateDoc } from 'firebase/firestore';
+import { collection, getDocs, writeBatch, doc, getDoc, addDoc, deleteDoc, setDoc, increment, Timestamp, updateDoc, query, where } from 'firebase/firestore';
 import { revalidatePath } from 'next/cache';
 import type { Plaza, Localidad, Promotora, AppUser, AppConfig, Loan, LoanPlan, Client, WalletTransaction, WhatsAppTemplates } from '@/lib/types';
 import { getCurrentLoanWeekNumber, parseLocalDate } from '@/lib/utils';
@@ -41,13 +41,13 @@ export async function deleteAllDataAction() {
         batch.set(walletRef, { balance: 0 });
         await batch.commit();
 
-        revalidatePath('/dashboard');
-        revalidatePath('/dashboard/bitacora');
-        revalidatePath('/dashboard/clientes');
-        revalidatePath('/dashboard/prestamos');
-        revalidatePath('/dashboard/planes');
-        revalidatePath('/dashboard/control');
-        revalidatePath('/dashboard/ajustes');
+        revalidatePath('/inicio');
+        revalidatePath('/inicio/bitacora');
+        revalidatePath('/inicio/clientes');
+        revalidatePath('/inicio/prestamos');
+        revalidatePath('/inicio/planes');
+        revalidatePath('/inicio/control');
+        revalidatePath('/inicio/ajustes');
 
 
         return { success: true, message: 'Todos los datos han sido eliminados exitosamente.' };
@@ -173,7 +173,7 @@ export async function accumulateAllSystemPaymentsAction(userId?: string, onlyPri
             await batch.commit();
         }
 
-        revalidatePath('/dashboard', 'layout');
+        revalidatePath('/inicio', 'layout');
         
         return { 
             success: true, 
@@ -189,7 +189,7 @@ export async function accumulateAllSystemPaymentsAction(userId?: string, onlyPri
 export async function saveUserAction(uid: string, userData: Omit<AppUser, 'id'>) {
     try {
         await setDoc(doc(db, 'users', uid), userData, { merge: true });
-        revalidatePath('/dashboard/ajustes');
+        revalidatePath('/inicio/ajustes');
         return { success: true, message: 'Usuario guardado en Firestore.' };
     } catch (error: any) {
         return { success: false, message: `Error al guardar usuario en Firestore: ${error.message}` };
@@ -199,7 +199,7 @@ export async function saveUserAction(uid: string, userData: Omit<AppUser, 'id'>)
 export async function deleteUserAction(uid: string) {
     try {
         await deleteDoc(doc(db, 'users', uid));
-        revalidatePath('/dashboard/ajustes');
+        revalidatePath('/inicio/ajustes');
         return { success: true, message: 'Usuario eliminado de Firestore.' };
     } catch (error: any) {
         // Note: This does not delete the user from Firebase Auth
@@ -216,7 +216,7 @@ export async function savePlazaAction(name: string, highlight?: boolean, id?: st
         } else {
             await addDoc(collection(db, 'plazas'), data);
         }
-        revalidatePath('/dashboard/ajustes');
+        revalidatePath('/inicio/ajustes');
         return { success: true, message: id ? 'Plaza actualizada con éxito.' : 'Plaza guardada con éxito.' };
     } catch (error: any) {
         return { success: false, message: `Error al guardar plaza: ${error.message}` };
@@ -226,7 +226,7 @@ export async function savePlazaAction(name: string, highlight?: boolean, id?: st
 export async function deletePlazaAction(id: string) {
     try {
         await deleteDoc(doc(db, 'plazas', id));
-        revalidatePath('/dashboard/ajustes');
+        revalidatePath('/inicio/ajustes');
         return { success: true, message: 'Plaza eliminada con éxito.' };
     } catch (error: any) {
         return { success: false, message: `Error al eliminar plaza: ${error.message}` };
@@ -241,7 +241,7 @@ export async function saveLocalidadAction(data: Omit<Localidad, 'id'>, id?: stri
         } else {
             await addDoc(collection(db, 'localidades'), data);
         }
-        revalidatePath('/dashboard/ajustes');
+        revalidatePath('/inicio/ajustes');
         return { success: true, message: id ? 'Localidad actualizada con éxito.' : 'Localidad guardada con éxito.' };
     } catch (error: any) {
         return { success: false, message: `Error al guardar localidad: ${error.message}` };
@@ -251,7 +251,7 @@ export async function saveLocalidadAction(data: Omit<Localidad, 'id'>, id?: stri
 export async function deleteLocalidadAction(id: string) {
     try {
         await deleteDoc(doc(db, 'localidades', id));
-        revalidatePath('/dashboard/ajustes');
+        revalidatePath('/inicio/ajustes');
         return { success: true, message: 'Localidad eliminada con éxito.' };
     } catch (error: any) {
         return { success: false, message: `Error al eliminar localidad: ${error.message}` };
@@ -261,12 +261,40 @@ export async function deleteLocalidadAction(id: string) {
 // Promotora Actions
 export async function savePromotoraAction(data: Omit<Promotora, 'id'>, id?: string) {
     try {
+        let targetId = id;
         if (id) {
             await setDoc(doc(db, 'promotoras', id), data, { merge: true });
         } else {
-            await addDoc(collection(db, 'promotoras'), data);
+            const docRef = await addDoc(collection(db, 'promotoras'), data);
+            targetId = docRef.id;
         }
-        revalidatePath('/dashboard/ajustes');
+
+        // Synchronize with Personal
+        if (targetId) {
+            if (data.personalId) {
+                // Link this personal to the promotora
+                await setDoc(doc(db, 'personal', data.personalId), { promotoraId: targetId }, { merge: true });
+                
+                // Clear any other personal previously linked to this promotora
+                const prevQuery = query(collection(db, 'personal'), where('promotoraId', '==', targetId));
+                const prevSnap = await getDocs(prevQuery);
+                for (const d of prevSnap.docs) {
+                    if (d.id !== data.personalId) {
+                        await setDoc(doc(db, 'personal', d.id), { promotoraId: '' }, { merge: true });
+                    }
+                }
+            } else {
+                // If personalId is empty/cleared, clear any personal that had this promotoraId
+                const prevQuery = query(collection(db, 'personal'), where('promotoraId', '==', targetId));
+                const prevSnap = await getDocs(prevQuery);
+                for (const d of prevSnap.docs) {
+                    await setDoc(doc(db, 'personal', d.id), { promotoraId: '' }, { merge: true });
+                }
+            }
+        }
+
+        revalidatePath('/inicio/ajustes');
+        revalidatePath('/inicio/personal');
         return { success: true, message: id ? 'Promotora actualizada con éxito.' : 'Promotora guardada con éxito.' };
     } catch (error: any) {
         return { success: false, message: `Error al guardar promotora: ${error.message}` };
@@ -276,7 +304,15 @@ export async function savePromotoraAction(data: Omit<Promotora, 'id'>, id?: stri
 export async function deletePromotoraAction(id: string) {
     try {
         await deleteDoc(doc(db, 'promotoras', id));
-        revalidatePath('/dashboard/ajustes');
+        // Also clear any personal linked to this promotora
+        const prevQuery = query(collection(db, 'personal'), where('promotoraId', '==', id));
+        const prevSnap = await getDocs(prevQuery);
+        for (const d of prevSnap.docs) {
+            await setDoc(doc(db, 'personal', d.id), { promotoraId: '' }, { merge: true });
+        }
+
+        revalidatePath('/inicio/ajustes');
+        revalidatePath('/inicio/personal');
         return { success: true, message: 'Promotora eliminada con éxito.' };
     } catch (error: any) {
         return { success: false, message: `Error al eliminar promotora: ${error.message}` };
@@ -314,7 +350,7 @@ export async function saveLogoAction(
             imgbbApiKey: imgbbApiKey || '',
             ...sizes
         }, { merge: true });
-        revalidatePath('/dashboard', 'layout');
+        revalidatePath('/inicio', 'layout');
         revalidatePath('/login');
         return { success: true, message: 'Identidad visual y logotipo actualizados con éxito.' };
     } catch (error: any) {
@@ -326,7 +362,7 @@ export async function saveAppNameAction(appName: string) {
     try {
         const configRef = doc(db, 'config', 'main');
         await setDoc(configRef, { appName }, { merge: true });
-        revalidatePath('/dashboard', 'layout');
+        revalidatePath('/inicio', 'layout');
         return { success: true, message: 'Nombre de la aplicación actualizado con éxito.' };
     } catch (error: any) {
         return { success: false, message: `Error al guardar el nombre de la aplicación: ${error.message}` };
@@ -341,7 +377,7 @@ export async function saveGuarantorLimitAction(limit: number, authCode: string) 
             guarantorAuthCode: authCode,
             guarantorAuthCodeUpdatedAt: new Date().toISOString()
         }, { merge: true });
-        revalidatePath('/dashboard', 'layout');
+        revalidatePath('/inicio', 'layout');
         return { success: true, message: 'Configuración de límite y clave de aval guardados con éxito.' };
     } catch (error: any) {
         return { success: false, message: `Error al guardar la configuración de avales: ${error.message}` };
@@ -358,7 +394,7 @@ export async function saveExtraWeekThresholdAction(threshold: number) {
         await setDoc(configRef, { 
             extraWeekMissedThreshold: Math.floor(val)
         }, { merge: true });
-        revalidatePath('/dashboard', 'layout');
+        revalidatePath('/inicio', 'layout');
         return { 
             success: true, 
             message: `Regla actualizada: La semana extra se habilitará a partir de ${Math.floor(val)} fallo${Math.floor(val) === 1 ? '' : 's'}.` 
@@ -388,7 +424,7 @@ export async function getOrRotateGuarantorAuthCodeAction(): Promise<{ code: stri
                 guarantorAuthCode: newCode,
                 guarantorAuthCodeUpdatedAt: newUpdatedAt
             }, { merge: true });
-            revalidatePath('/dashboard', 'layout');
+            revalidatePath('/inicio', 'layout');
             return { code: newCode, updatedAt: newUpdatedAt, rotated: true };
         }
 
@@ -408,7 +444,7 @@ export async function rotateGuarantorAuthCodeNowAction(): Promise<{ success: boo
             guarantorAuthCode: newCode,
             guarantorAuthCodeUpdatedAt: newUpdatedAt
         }, { merge: true });
-        revalidatePath('/dashboard', 'layout');
+        revalidatePath('/inicio', 'layout');
         return { success: true, code: newCode, message: `Nueva clave de autorización generada: ${newCode}` };
     } catch (error: any) {
         return { success: false, message: `Error al generar la clave: ${error.message}` };
@@ -419,7 +455,7 @@ export async function saveWhatsAppTemplateAction(template: string) {
     try {
         const configRef = doc(db, 'config', 'main');
         await setDoc(configRef, { whatsappTemplate: template }, { merge: true });
-        revalidatePath('/dashboard', 'layout');
+        revalidatePath('/inicio', 'layout');
         return { success: true, message: 'Plantilla de WhatsApp guardada con éxito.' };
     } catch (error: any) {
         return { success: false, message: `Error al guardar la plantilla: ${error.message}` };
@@ -435,7 +471,7 @@ export async function savePlazaWhatsAppTemplatesAction(plazaId: string, template
                 [plazaId]: templates 
             } 
         }, { merge: true });
-        revalidatePath('/dashboard', 'layout');
+        revalidatePath('/inicio', 'layout');
         return { success: true, message: 'Plantillas de la plaza actualizadas correctamente.' };
     } catch (error: any) {
         return { success: false, message: `Error al guardar plantillas por plaza: ${error.message}` };
@@ -451,7 +487,7 @@ export async function migrateLocalidadAction(localidadId: string, targetPlazaId:
         const localidadRef = doc(db, 'localidades', localidadId);
         await updateDoc(localidadRef, { plazaId: targetPlazaId });
         
-        revalidatePath('/dashboard', 'layout');
+        revalidatePath('/inicio', 'layout');
         
         return { 
             success: true, 
@@ -543,7 +579,7 @@ export async function revertExtraWeekPaymentsAction() {
             await batch.commit();
         }
 
-        revalidatePath('/dashboard', 'layout');
+        revalidatePath('/inicio', 'layout');
 
         return { 
             success: true, 
@@ -622,7 +658,7 @@ export async function importBackupAction(backupData: any) {
             await batch.commit();
         }
 
-        revalidatePath('/dashboard', 'layout');
+        revalidatePath('/inicio', 'layout');
 
         return { success: true, message: 'El respaldo ha sido restaurado exitosamente.' };
     } catch (error: any) {
@@ -725,7 +761,7 @@ export async function syncWithSupervisorAppAction(
             await batch.commit();
         }
 
-        revalidatePath('/dashboard', 'layout');
+        revalidatePath('/inicio', 'layout');
 
         return { 
             success: true, 
@@ -745,7 +781,7 @@ export async function saveMenuConfigAction(
     try {
         const configRef = doc(db, 'config', 'main');
         await setDoc(configRef, { menuConfig, menuOrder: menuOrder || null }, { merge: true });
-        revalidatePath('/dashboard', 'layout');
+        revalidatePath('/inicio', 'layout');
         return { success: true, message: 'Distribución del menú guardada con éxito.' };
     } catch (error: any) {
         return { success: false, message: `Error al guardar la distribución del menú: ${error.message}` };
@@ -756,7 +792,7 @@ export async function saveMenuColorsAction(operacionColor: string, administracio
     try {
         const configRef = doc(db, 'config', 'main');
         await setDoc(configRef, { operacionColor, administracionColor }, { merge: true });
-        revalidatePath('/dashboard', 'layout');
+        revalidatePath('/inicio', 'layout');
         return { success: true, message: 'Colores de los menús guardados con éxito.' };
     } catch (error: any) {
         return { success: false, message: `Error al guardar los colores: ${error.message}` };
@@ -767,8 +803,8 @@ export async function saveStaffTypesAction(staffTypes: string[]) {
     try {
         const configRef = doc(db, 'config', 'main');
         await setDoc(configRef, { staffTypes }, { merge: true });
-        revalidatePath('/dashboard', 'layout');
-        revalidatePath('/dashboard/ajustes');
+        revalidatePath('/inicio', 'layout');
+        revalidatePath('/inicio/ajustes');
         return { success: true, message: 'Tipos de personal guardados con éxito.' };
     } catch (error: any) {
         return { success: false, message: `Error al guardar los tipos de personal: ${error.message}` };
@@ -779,8 +815,8 @@ export async function saveImprentaUrlAction(imprentaIframeUrl: string) {
     try {
         const configRef = doc(db, 'config', 'main');
         await setDoc(configRef, { imprentaIframeUrl }, { merge: true });
-        revalidatePath('/dashboard', 'layout');
-        revalidatePath('/dashboard/imprenta');
+        revalidatePath('/inicio', 'layout');
+        revalidatePath('/inicio/imprenta');
         return { success: true, message: 'URL del iframe de Imprenta guardada con éxito.' };
     } catch (error: any) {
         return { success: false, message: `Error al guardar la URL del iframe: ${error.message}` };
@@ -899,9 +935,9 @@ export async function mergeDuplicateClientsAction() {
             await batch.commit();
         }
 
-        revalidatePath('/dashboard/clientes');
-        revalidatePath('/dashboard/prestamos');
-        revalidatePath('/dashboard/ajustes');
+        revalidatePath('/inicio/clientes');
+        revalidatePath('/inicio/prestamos');
+        revalidatePath('/inicio/ajustes');
 
         return {
             success: true,

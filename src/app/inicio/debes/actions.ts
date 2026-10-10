@@ -14,7 +14,7 @@ export async function saveSettlementAction(settlement: PromotoraSettlement) {
             updatedAt: new Date().toISOString()
         }, { merge: true });
 
-        revalidatePath('/dashboard/debes');
+        revalidatePath('/inicio/debes');
         return { success: true, message: 'Liquidación guardada correctamente.' };
     } catch (err: any) {
         console.error('Error saving promotora settlement:', err);
@@ -26,7 +26,7 @@ export async function deleteSettlementAction(id: string) {
     try {
         const docRef = doc(db, 'promotoraSettlements', id);
         await deleteDoc(docRef);
-        revalidatePath('/dashboard/debes');
+        revalidatePath('/inicio/debes');
         return { success: true, message: 'Liquidación restablecida correctamente.' };
     } catch (err: any) {
         console.error('Error deleting promotora settlement:', err);
@@ -43,7 +43,7 @@ export async function deleteGroupSettlementsAction(promotoraId: string) {
             batch.delete(doc.ref);
         });
         await batch.commit();
-        revalidatePath('/dashboard/debes');
+        revalidatePath('/inicio/debes');
         return { success: true, message: 'Todo el historial del grupo fue restablecido correctamente.' };
     } catch (err: any) {
         console.error('Error deleting group settlements:', err);

@@ -31,7 +31,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
 import { updatePassword } from 'firebase/auth';
-import { saveUserAction } from '@/app/dashboard/ajustes/actions';
+import { saveUserAction } from '@/app/inicio/ajustes/actions';
 
 export function UserNav() {
   const { user, signOut, appUser } = useAuth();
@@ -142,7 +142,7 @@ export function UserNav() {
             <span className="text-xs font-medium">Mi Perfil</span>
           </DropdownMenuItem>
           <DropdownMenuItem asChild className="rounded-lg cursor-pointer">
-            <Link href="/dashboard/ajustes" className="flex items-center w-full">
+            <Link href="/inicio/ajustes" className="flex items-center w-full">
                 <Settings2 className="mr-2 h-4 w-4" />
                 <span className="text-xs font-medium">Preferencias</span>
             </Link>

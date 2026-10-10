@@ -16,9 +16,9 @@ export async function saveClientAction(clientId: string, clientData: Omit<Client
         const { id, ...dataToSave } = clientData as Client;
         await updateDoc(clientRef, dataToSave);
 
-        revalidatePath('/dashboard/clientes');
-        revalidatePath(`/dashboard/clientes/${clientId}`);
-        revalidatePath(`/dashboard/clientes/${clientId}/edit`);
+        revalidatePath('/inicio/clientes');
+        revalidatePath(`/inicio/clientes/${clientId}`);
+        revalidatePath(`/inicio/clientes/${clientId}/edit`);
 
         return { success: true, message: 'Cliente actualizado con éxito.' };
     } catch (error: any) {
@@ -50,9 +50,9 @@ export async function deleteClientAction(clientId: string) {
         
         await batch.commit();
 
-        revalidatePath('/dashboard/clientes');
-        revalidatePath('/dashboard/control');
-        revalidatePath('/dashboard');
+        revalidatePath('/inicio/clientes');
+        revalidatePath('/inicio/control');
+        revalidatePath('/inicio');
 
         return { success: true, message: 'Cliente y toda su información financiera eliminados con éxito.' };
     } catch (error: any) {

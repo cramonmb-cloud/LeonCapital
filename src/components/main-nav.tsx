@@ -10,20 +10,20 @@ import { LayoutDashboard, Users, Landmark, FileWarning, Wallet, Settings, Activi
 import { useState, useEffect, useMemo } from 'react';
 
 export const allLinks: { href: string; label: string; id: string, icon: LucideIcon }[] = [
-  { href: '/dashboard', label: 'Dashboard', id: 'dashboard', icon: LayoutDashboard },
-  { href: '/dashboard/clientes', label: 'Clientes', id: 'clients', icon: Users },
-  { href: '/dashboard/consultar-cliente', label: 'Consultar', id: 'consultarCliente', icon: Search },
-  { href: '/dashboard/prestamos', label: 'Préstamos', id: 'loans', icon: Landmark },
-  { href: '/dashboard/pendientes', label: 'Pendientes', id: 'overduePortfolio', icon: FileWarning },
-  { href: '/dashboard/cartera-vencida', label: 'Vencida', id: 'carteraVencida', icon: History },
-  { href: '/dashboard/debes', label: 'Debes', id: 'debes', icon: Coins },
-  { href: '/dashboard/bitacora', label: 'Bitacora', id: 'wallet', icon: Wallet },
-  { href: '/dashboard/control', label: 'Control', id: 'control', icon: Activity },
-  { href: '/dashboard/personal', label: 'Personal', id: 'personal', icon: UserCheck },
-  { href: '/dashboard/avales', label: 'Avales', id: 'avales', icon: ShieldCheck },
-  { href: '/dashboard/ajustes', label: 'Ajustes', id: 'settings', icon: Settings },
-  { href: '/dashboard/avisos', label: 'Avisos', id: 'avisos', icon: Megaphone },
-  { href: '/dashboard/imprenta', label: 'Imprenta', id: 'imprenta', icon: Printer },
+  { href: '/inicio', label: 'Inicio', id: 'dashboard', icon: LayoutDashboard },
+  { href: '/inicio/clientes', label: 'Clientes', id: 'clients', icon: Users },
+  { href: '/inicio/consultar-cliente', label: 'Consultar', id: 'consultarCliente', icon: Search },
+  { href: '/inicio/prestamos', label: 'Préstamos', id: 'loans', icon: Landmark },
+  { href: '/inicio/pendientes', label: 'Pendientes', id: 'overduePortfolio', icon: FileWarning },
+  { href: '/inicio/cartera-vencida', label: 'Vencida', id: 'carteraVencida', icon: History },
+  { href: '/inicio/debes', label: 'Debes', id: 'debes', icon: Coins },
+  { href: '/inicio/bitacora', label: 'Bitacora', id: 'wallet', icon: Wallet },
+  { href: '/inicio/control', label: 'Control', id: 'control', icon: Activity },
+  { href: '/inicio/personal', label: 'Personal', id: 'personal', icon: UserCheck },
+  { href: '/inicio/avales', label: 'Avales', id: 'avales', icon: ShieldCheck },
+  { href: '/inicio/ajustes', label: 'Ajustes', id: 'settings', icon: Settings },
+  { href: '/inicio/avisos', label: 'Avisos', id: 'avisos', icon: Megaphone },
+  { href: '/inicio/imprenta', label: 'Imprenta', id: 'imprenta', icon: Printer },
 ];
 
 interface MainNavProps {
@@ -173,7 +173,7 @@ export function MainNav({
             <div key={activeTab} className="flex flex-col gap-2 px-3 py-1 animate-in fade-in slide-in-from-left-3 duration-300">
                 {filteredLinks.length > 0 ? (
                   filteredLinks.map((link) => {
-                    const isActive = pathname === link.href || (link.href !== '/dashboard' && pathname.startsWith(link.href));
+                    const isActive = pathname === link.href || (link.href !== '/inicio' && link.href !== '/dashboard' && pathname.startsWith(link.href));
                     return (
                         <Link
                             key={link.href}
@@ -242,7 +242,7 @@ export function MainNav({
             <div key={activeTab} className="flex items-center gap-1.5 h-full animate-in fade-in slide-in-from-bottom-2 duration-300">
                 {filteredLinks.length > 0 ? (
                   filteredLinks.map((link) => {
-                    const isActive = pathname === link.href || (link.href !== '/dashboard' && pathname.startsWith(link.href));
+                    const isActive = pathname === link.href || (link.href !== '/inicio' && link.href !== '/dashboard' && pathname.startsWith(link.href));
                     return (
                         <Link
                             key={link.href}

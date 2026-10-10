@@ -1073,7 +1073,7 @@ export function AvalesClientPage({
                                         <div className="space-y-0.5">
                                           <div className="flex flex-wrap items-center gap-x-2">
                                             <Link 
-                                              href={`/dashboard/clientes/${client.id}`} 
+                                              href={`/inicio/clientes/${client.id}`} 
                                               className="text-xs font-black text-indigo-600 hover:underline uppercase tracking-tight flex items-center gap-1"
                                               onClick={(e) => e.stopPropagation()}
                                             >
@@ -1142,7 +1142,7 @@ export function AvalesClientPage({
                                     <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between p-2.5 rounded-xl border border-zinc-100 bg-orange-50/10 gap-2">
                                       <div className="space-y-0.5">
                                         <Link 
-                                          href={`/dashboard/clientes/${endorser.selfClientId}`} 
+                                          href={`/inicio/clientes/${endorser.selfClientId}`} 
                                           className="text-xs font-black text-orange-600 hover:underline uppercase tracking-tight"
                                           onClick={(e) => e.stopPropagation()}
                                         >

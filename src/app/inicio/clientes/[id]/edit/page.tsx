@@ -20,7 +20,7 @@ export default async function EditClientPage({ params }: { params: Promise<{ id:
       <div className="flex items-center justify-between border-b border-zinc-200/80 dark:border-zinc-800 pb-3">
         <div className="flex items-center gap-2">
           <Button asChild variant="ghost" size="sm" className="h-8 px-2 text-xs text-muted-foreground hover:text-foreground">
-            <Link href={`/dashboard/clientes/${client.id}`}>
+            <Link href={`/inicio/clientes/${client.id}`}>
               <ArrowLeft className="h-3.5 w-3.5 mr-1.5" />
               Volver al Detalle
             </Link>

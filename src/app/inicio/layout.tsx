@@ -64,7 +64,7 @@ export default function DashboardLayout({
   // Sync activeTab with current pathname
   useEffect(() => {
     const matchingLink = allLinks.find(link => 
-      pathname === link.href || (link.href !== '/dashboard' && pathname.startsWith(link.href))
+      pathname === link.href || (link.href !== '/inicio' && link.href !== '/dashboard' && pathname.startsWith(link.href))
     );
     if (matchingLink) {
       const category = mergedMenuConfig[matchingLink.id] || 'operacion';
@@ -81,7 +81,7 @@ export default function DashboardLayout({
     }
     
     if (appUser) {
-        const isDashboardPage = pathname === '/dashboard';
+        const isDashboardPage = pathname === '/inicio' || pathname === '/dashboard';
         const hasDashboardAccess = appUser.role === 'admin' || (appUser.permissions && appUser.permissions.dashboard);
 
         if (isDashboardPage && !hasDashboardAccess) {
@@ -184,7 +184,7 @@ export default function DashboardLayout({
     );
   }
   
-  const isDashboardPage = pathname === '/dashboard';
+  const isDashboardPage = pathname === '/inicio' || pathname === '/dashboard';
   const hasDashboardAccess = appUser.role === 'admin' || (appUser.permissions && appUser.permissions.dashboard);
   if (isDashboardPage && !hasDashboardAccess) {
       return (
@@ -235,7 +235,7 @@ export default function DashboardLayout({
                   
                   {/* Logo escritorio */}
                   <Link
-                      href="/dashboard"
+                      href="/inicio"
                       className="hidden items-center gap-2 md:flex mr-4 transition-transform active:scale-95"
                   >
                       <Logo logoUrl={logoUrl} logoFormat={logoFormat} appName={appName} size="md" customHeight={logoHeightHeader} customWidth={logoWidthHeader} />
@@ -244,7 +244,7 @@ export default function DashboardLayout({
 
               {/* Logo centrado en móvil */}
               <div className="absolute left-1/2 -translate-x-1/2 top-1/2 -translate-y-1/2 md:hidden">
-                  <Link href="/dashboard" className="transition-transform active:scale-95">
+                  <Link href="/inicio" className="transition-transform active:scale-95">
                       <Logo logoUrl={logoUrl} logoFormat={logoFormat} appName={appName} size="md" customHeight={logoHeightHeader} customWidth={logoWidthHeader} />
                   </Link>
               </div>
@@ -294,7 +294,7 @@ export default function DashboardLayout({
               <div className="flex items-center gap-3">
                   <div className="hidden sm:flex items-center gap-1">
                      <Button variant="ghost" size="icon" className="rounded-full h-9 w-9 text-muted-foreground hover:bg-muted/50 transition-colors [&_svg]:size-[18px]" asChild>
-                        <Link href="/dashboard/consultar-cliente">
+                        <Link href="/inicio/consultar-cliente">
                             <Search />
                         </Link>
                      </Button>

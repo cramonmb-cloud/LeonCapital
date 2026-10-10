@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { collection, onSnapshot, QuerySnapshot, DocumentData, Timestamp, Query } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-import type { Loan, Client, LoanPlan, Plaza, Localidad, Promotora, AppUser, AppConfig, PromotoraSettlement } from '@/lib/types';
+import type { Loan, Client, LoanPlan, Plaza, Localidad, Promotora, AppUser, AppConfig, PromotoraSettlement, Personal } from '@/lib/types';
 import { errorEmitter } from '@/firebase/error-emitter';
 import { FirestorePermissionError, type SecurityRuleContext } from '@/firebase/errors';
 
@@ -16,6 +16,7 @@ interface RealtimeData {
     promotoras: Promotora[];
     promotoraSettlements: PromotoraSettlement[];
     users: AppUser[];
+    personal: Personal[];
     config: AppConfig | null;
 }
 
@@ -56,6 +57,7 @@ const initialData: RealtimeData = {
     promotoras: [],
     promotoraSettlements: [],
     users: [],
+    personal: [],
     config: null,
 };
 
@@ -91,6 +93,7 @@ export function useRealtimeData(
         promotoras: collection(db, 'promotoras'),
         promotoraSettlements: collection(db, 'promotoraSettlements'),
         users: collection(db, 'users'),
+        personal: collection(db, 'personal'),
         config: collection(db, 'config'),
     };
 
@@ -112,6 +115,7 @@ export function useRealtimeData(
                   if (key === 'promotoras') newData.promotoras = processSnapshot<Promotora>(snapshot);
                   if (key === 'promotoraSettlements') newData.promotoraSettlements = processSnapshot<PromotoraSettlement>(snapshot);
                   if (key === 'users') newData.users = processSnapshot<AppUser>(snapshot);
+                  if (key === 'personal') newData.personal = processSnapshot<Personal>(snapshot);
                   if (key === 'config') {
                       const configDoc = snapshot.docs.find(doc => doc.id === 'main');
                       newData.config = configDoc ? configDoc.data() as AppConfig : null;

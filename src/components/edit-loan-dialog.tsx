@@ -56,8 +56,9 @@ import {
   Save
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import { updateLoanAction, deleteLoanAction } from '@/app/dashboard/actions';
+import { updateLoanAction, deleteLoanAction } from '@/app/inicio/actions';
 import { useAuth } from '@/hooks/use-auth';
+import { useRealtimeData } from '@/hooks/use-realtime-data';
 import { cn, getSaturdayOfWeek } from '@/lib/utils';
 
 const formSchema = z.object({
@@ -98,6 +99,7 @@ export function EditLoanDialog({
   const [deleteAuthCode, setDeleteAuthCode] = useState('');
   const { toast } = useToast();
   const { appUser } = useAuth();
+  const { data: realtimeData } = useRealtimeData(undefined, { enabledCollections: ['personal'] });
 
   const [selectedPlaza, setSelectedPlaza] = useState('');
   const [selectedLocalidad, setSelectedLocalidad] = useState('');
@@ -472,11 +474,14 @@ export function EditLoanDialog({
                             </SelectTrigger>
                           </FormControl>
                           <SelectContent>
-                            {filteredPromotoras.map((promotora) => (
-                              <SelectItem key={promotora.id} value={promotora.id} className="text-xs font-medium">
-                                {promotora.name}
-                              </SelectItem>
-                            ))}
+                            {filteredPromotoras.map((promotora) => {
+                              const assigned = realtimeData?.personal?.find(p => p.id === promotora.personalId);
+                              return (
+                                <SelectItem key={promotora.id} value={promotora.id} className="text-xs font-medium">
+                                  {promotora.name}{assigned ? ` (${assigned.nombre} ${assigned.apellidoPaterno})` : ''}
+                                </SelectItem>
+                              );
+                            })}
                           </SelectContent>
                         </Select>
                         <FormMessage className="text-[10px]" />

@@ -17,7 +17,7 @@ import { cn } from "@/lib/utils";
 
 export default function SettingsPage() {
     const { data, loading } = useRealtimeData(undefined, {
-        enabledCollections: ['plazas', 'localidades', 'promotoras', 'users', 'config', 'loanPlans']
+        enabledCollections: ['plazas', 'localidades', 'promotoras', 'users', 'config', 'loanPlans', 'personal']
     });
     const { appUser } = useAuth();
 
@@ -119,7 +119,7 @@ export default function SettingsPage() {
         return <Loading />;
     }
 
-    const { plazas, localidades, promotoras, users, config, loanPlans } = data;
+    const { plazas, localidades, promotoras, users, config, loanPlans, personal } = data;
 
     // Find the first allowed tab to set as default
     const defaultTab = permissions.users ? "users" : 
@@ -169,6 +169,7 @@ export default function SettingsPage() {
                                 initialPlazas={plazas} 
                                 initialLocalidades={localidades} 
                                 initialPromotoras={promotoras} 
+                                initialPersonal={personal}
                             />
                         </div>
                     </TabsContent>

@@ -81,6 +81,7 @@ export type Promotora = {
     id: string;
     name: string;
     localidadId: string;
+    personalId?: string;
     highlight?: boolean;
 };
 
@@ -212,4 +213,5 @@ export type Personal = {
   curp: string; // CURP de 18 caracteres
   createdAt: string; // ISO String
   registeredBy?: string; // Username of the user who registered this employee
+  promotoraId?: string; // ID de la promotora asignada
 };

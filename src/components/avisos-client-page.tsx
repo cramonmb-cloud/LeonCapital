@@ -14,7 +14,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/hooks/use-toast';
-import Loading from '@/app/dashboard/loading';
+import Loading from '@/app/inicio/loading';
 import {
   AlertDialog,
   AlertDialogAction,

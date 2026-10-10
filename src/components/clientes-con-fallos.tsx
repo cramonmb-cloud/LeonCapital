@@ -154,7 +154,7 @@ export function ClientesConFallos({ loans, clients, loanPlans }: ClientesConFall
                                     <TableCell className="text-destructive">{formatCurrency(item.totalFailureAmount)}</TableCell>
                                     <TableCell className="text-right">
                                     <Button asChild variant="ghost" size="icon">
-                                        <Link href={`/dashboard/clientes/${item.clientId}`}>
+                                        <Link href={`/inicio/clientes/${item.clientId}`}>
                                         <ArrowRight className="h-4 w-4" />
                                         </Link>
                                     </Button>
@@ -191,7 +191,7 @@ export function ClientesConFallos({ loans, clients, loanPlans }: ClientesConFall
                             <TableCell className="text-destructive">{formatCurrency(item.totalFailureAmount)}</TableCell>
                             <TableCell className="text-right">
                             <Button asChild variant="ghost" size="icon">
-                                <Link href={`/dashboard/clientes/${item.clientId}`}>
+                                <Link href={`/inicio/clientes/${item.clientId}`}>
                                 <ArrowRight className="h-4 w-4" />
                                 </Link>
                             </Button>

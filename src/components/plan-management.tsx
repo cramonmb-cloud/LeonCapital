@@ -21,7 +21,7 @@ import {
     DialogHeader,
     DialogTitle,
 } from '@/components/ui/dialog';
-import { setDefaultLoanPlanAction } from '@/app/dashboard/planes/actions';
+import { setDefaultLoanPlanAction } from '@/app/inicio/planes/actions';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
 

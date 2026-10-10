@@ -31,7 +31,7 @@ import {
 } from '@/components/ui/select';
 import { CloudDownload, Loader2, KeyRound, CalendarDays, CheckCircle2, ShieldCheck, Database, Info, Landmark, Route, MapPin, Building, Sparkles } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import { syncWithSupervisorAppAction } from '@/app/dashboard/ajustes/actions';
+import { syncWithSupervisorAppAction } from '@/app/inicio/ajustes/actions';
 import { Alert, AlertDescription, AlertTitle } from './ui/alert';
 import { getSaturdayOfWeek, getMexicoNow } from '@/lib/utils';
 import { Badge } from './ui/badge';

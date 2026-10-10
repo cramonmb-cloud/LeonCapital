@@ -4,7 +4,7 @@ import { useState, useMemo, useEffect } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import type { OverdueLoanDetails } from '@/app/dashboard/cartera-vencida/page';
+import type { OverdueLoanDetails } from '@/app/inicio/cartera-vencida/page';
 import { Input } from '@/components/ui/input';
 import { OverdueCard } from '@/components/overdue-card';
 import type { Client, LoanPlan, Plaza, Localidad, Promotora } from '@/lib/types';

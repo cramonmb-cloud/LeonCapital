@@ -26,7 +26,7 @@ import { Input } from '@/components/ui/input';
 import type { Loan, AppConfig } from '@/lib/types';
 import { Loader2, ShieldCheck, AlertCircle } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import { registerPaymentAction } from '@/app/dashboard/actions';
+import { registerPaymentAction } from '@/app/inicio/actions';
 import { useAuth } from '@/hooks/use-auth';
 import { Alert, AlertDescription, AlertTitle } from './ui/alert';
 import { getExtraWeekThreshold } from '@/lib/utils';

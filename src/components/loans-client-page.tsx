@@ -75,12 +75,12 @@ import 'jspdf-autotable';
 import type { UserOptions } from 'jspdf-autotable';
 import { useAuth } from '@/hooks/use-auth';
 import { useToast } from '@/hooks/use-toast';
-import { accumulateAssumedPaymentsAction, changeLoansDateAction, changeLoansPromotoraAction, payOffLoanAction, revertPaymentsForWeekAction, applyCarteraVencidaAbonoAction } from '@/app/dashboard/actions';
+import { accumulateAssumedPaymentsAction, changeLoansDateAction, changeLoansPromotoraAction, payOffLoanAction, revertPaymentsForWeekAction, applyCarteraVencidaAbonoAction } from '@/app/inicio/actions';
 import { format as formatDateFns } from 'date-fns';
 import { useRealtimeData } from '@/hooks/use-realtime-data';
 import { query, where, collection } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-import Loading from '../app/dashboard/loading';
+import Loading from '../app/inicio/loading';
 import { Checkbox } from './ui/checkbox';
 import { Input } from './ui/input';
 import { Label } from '@/components/ui/label';
@@ -112,7 +112,7 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
     localidades: initialLocalidades,
     promotoras: initialPromotoras
   }, {
-    enabledCollections: ['loans', 'clients', 'loanPlans', 'plazas', 'localidades', 'promotoras', 'config'],
+    enabledCollections: ['loans', 'clients', 'loanPlans', 'plazas', 'localidades', 'promotoras', 'config', 'personal'],
     queries: {
       loans: activeLoansQuery
     }
@@ -188,20 +188,23 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
     return promotoras.map(p => {
       const loc = localidades.find(l => l.id === p.localidadId);
       const plaza = loc ? plazas.find(pl => pl.id === loc.plazaId) : null;
+      const assigned = data?.personal?.find(per => per.id === p.personalId);
       return {
         ...p,
+        personalName: assigned ? `${assigned.nombre} ${assigned.apellidoPaterno}` : '',
         localidadName: loc?.name || 'N/A',
         plazaName: plaza?.name || 'N/A',
         plazaId: loc?.plazaId || '',
       };
     }).sort((a, b) => (a?.name || '').localeCompare(b?.name || ''));
-  }, [promotoras, localidades, plazas]);
+  }, [promotoras, localidades, plazas, data?.personal]);
 
   const searchedPromotoras = useMemo(() => {
     if (!searchTerm.trim()) return [];
     const query = searchTerm.toLowerCase();
     return allPromotorasWithDetails.filter(p => 
       (p.name || '').toLowerCase().includes(query) ||
+      (p.personalName || '').toLowerCase().includes(query) ||
       (p.localidadName || '').toLowerCase().includes(query) ||
       (p.plazaName || '').toLowerCase().includes(query)
     ).slice(0, 8);
@@ -1497,7 +1500,14 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
                                             className="w-full flex items-center justify-between px-3 py-2 hover:bg-primary/5 active:bg-primary/10 rounded-lg text-left transition-colors"
                                         >
                                             <div>
-                                                <span className="font-bold text-slate-800 uppercase text-xs">{p.name}</span>
+                                                <div className="flex items-center gap-1.5">
+                                                    <span className="font-bold text-slate-800 uppercase text-xs">{p.name}</span>
+                                                    {p.personalName && (
+                                                        <span className="text-[10px] font-semibold text-emerald-700 dark:text-emerald-400 uppercase">
+                                                            • {p.personalName}
+                                                        </span>
+                                                    )}
+                                                </div>
                                                 <div className="text-[9px] uppercase font-semibold text-muted-foreground mt-0.5">
                                                     {p.localidadName} ({p.plazaName})
                                                 </div>
@@ -1583,7 +1593,14 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
                 <Select value={selectedPromotora} onValueChange={handlePromotoraChange} disabled={!selectedLocalidad}>
                     <SelectTrigger className="w-full md:w-[180px]"><SelectValue placeholder="Selecciona Promotora" /></SelectTrigger>
                     <SelectContent>
-                        {filteredPromotoras.map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
+                        {filteredPromotoras.map(p => {
+                            const assigned = data?.personal?.find(per => per.id === p.personalId);
+                            return (
+                                <SelectItem key={p.id} value={p.id}>
+                                    {p.name}{assigned ? ` (${assigned.nombre} ${assigned.apellidoPaterno})` : ''}
+                                </SelectItem>
+                            );
+                        })}
                     </SelectContent>
                 </Select>
             </div>
@@ -1708,7 +1725,19 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
           <Card>
           <CardHeader className="flex flex-col sm:flex-row justify-between items-start sm:items-center p-4 gap-2">
             <div>
-                <CardTitle>Préstamos de la Semana</CardTitle>
+                <div className="flex items-center gap-2 flex-wrap">
+                    <CardTitle>Préstamos de la Semana</CardTitle>
+                    {selectedPromotora && (() => {
+                        const prom = promotoras.find(p => p.id === selectedPromotora);
+                        const assigned = data?.personal?.find(per => per.id === prom?.personalId);
+                        if (!assigned) return null;
+                        return (
+                            <span className="text-[11px] font-bold text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 px-2.5 py-0.5 rounded-full border border-emerald-200 dark:border-emerald-800/60">
+                                Promotora: {assigned.nombre} {assigned.apellidoPaterno}
+                            </span>
+                        );
+                    })()}
+                </div>
                 <CardDescription>
                 {selectedWeek
                     ? `Mostrando ${filteredLoans.length} préstamos para la semana del ${formatDate(selectedWeek)}.`
@@ -1808,7 +1837,7 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
                               </TableCell>
                           )}
                           <TableCell className={cn("font-extrabold sticky z-10 w-[150px] py-1 px-2 bg-inherit text-[11px] leading-tight text-slate-800 uppercase truncate", isCristobal ? "left-10" : "left-0")}>
-                            <Link href={`/dashboard/clientes/${loan.clientId}`} className="hover:underline">
+                            <Link href={`/inicio/clientes/${loan.clientId}`} className="hover:underline">
                               {getClientName(loan.clientId)}
                             </Link>
                           </TableCell>
@@ -1931,7 +1960,7 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
                               <DropdownMenuContent align="end">
                                 <DropdownMenuLabel>Acciones</DropdownMenuLabel>
                                  <DropdownMenuItem asChild>
-                                    <Link href={`/dashboard/clientes/${loan.clientId}`}>Ver Detalles del Cliente</Link>
+                                    <Link href={`/inicio/clientes/${loan.clientId}`}>Ver Detalles del Cliente</Link>
                                 </DropdownMenuItem>
                                 {isCristobal && (
                                     <>
@@ -2110,7 +2139,7 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
                         <TableRow key={loanId} className="h-9 hover:bg-muted/30 transition-colors">
                           <TableCell className="py-1 px-2 font-bold text-xs truncate max-w-[200px]">
                             <Link 
-                              href={`/dashboard/clientes/${item.loan.clientId}`}
+                              href={`/inicio/clientes/${item.loan.clientId}`}
                               className="text-foreground hover:text-primary hover:underline uppercase tracking-wide font-black truncate block"
                               title={item.clientName}
                             >

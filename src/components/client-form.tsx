@@ -29,7 +29,7 @@ import {
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { saveClientAction } from '@/app/dashboard/clientes/actions';
+import { saveClientAction } from '@/app/inicio/clientes/actions';
 import { parseEndorsement } from '@/lib/utils';
 
 const formSchema = z.object({
@@ -128,7 +128,7 @@ export function ClientForm({ client }: ClientFormProps) {
           title: 'Cliente Actualizado',
           description: `Los datos de ${values.name} se han guardado correctamente.`,
         });
-        router.push(`/dashboard/clientes/${client.id}`);
+        router.push(`/inicio/clientes/${client.id}`);
         router.refresh();
       } else {
         throw new Error(result.message);
@@ -521,7 +521,7 @@ export function ClientForm({ client }: ClientFormProps) {
               variant="outline" 
               size="sm"
               className="h-9 text-xs font-semibold px-4"
-              onClick={() => router.push(`/dashboard/clientes/${client.id}`)}
+              onClick={() => router.push(`/inicio/clientes/${client.id}`)}
               disabled={isSubmitting}
             >
               Cancelar

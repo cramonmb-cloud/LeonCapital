@@ -141,10 +141,10 @@ export async function createLoanAction(input: CreateLoanInput) {
         
         await addDoc(collection(db, 'loans'), newLoan);
 
-        revalidatePath('/dashboard/prestamos');
-        revalidatePath('/dashboard/clientes');
+        revalidatePath('/inicio/prestamos');
+        revalidatePath('/inicio/clientes');
         if (clientId) {
-            revalidatePath(`/dashboard/clientes/${clientId}`);
+            revalidatePath(`/inicio/clientes/${clientId}`);
         }
         
         return { success: true, message: 'Préstamo creado con éxito.' };
@@ -165,8 +165,8 @@ export async function updateLoanAction(loanId: string, data: { loanPlanId: strin
             status: data.status
         });
 
-        revalidatePath('/dashboard/prestamos');
-        revalidatePath('/dashboard/clientes');
+        revalidatePath('/inicio/prestamos');
+        revalidatePath('/inicio/clientes');
         return { success: true, message: 'Préstamo actualizado con éxito.' };
     } catch (error: any) {
         console.error('Error updating loan:', error);
@@ -195,9 +195,9 @@ export async function deleteLoanAction(loanId: string) {
             transaction.delete(loanRef);
         });
 
-        revalidatePath('/dashboard/prestamos');
-        revalidatePath('/dashboard/bitacora');
-        revalidatePath('/dashboard/clientes');
+        revalidatePath('/inicio/prestamos');
+        revalidatePath('/inicio/bitacora');
+        revalidatePath('/inicio/clientes');
 
         return { success: true, message: 'Préstamo eliminado y saldo de cartera ajustado correctamente.' };
     } catch (error: any) {
@@ -217,7 +217,7 @@ export async function changeLoansDateAction(loanIds: string[], targetDateIso: st
         });
 
         await batch.commit();
-        revalidatePath('/dashboard/prestamos');
+        revalidatePath('/inicio/prestamos');
         return { success: true, message: `Se actualizó la fecha de inicio de ${loanIds.length} préstamos correctamente.` };
     } catch (error: any) {
         console.error('Error changing loans dates:', error);
@@ -235,9 +235,9 @@ export async function changeLoansPromotoraAction(loanIds: string[], targetPromot
         });
 
         await batch.commit();
-        revalidatePath('/dashboard/prestamos');
-        revalidatePath('/dashboard/clientes');
-        revalidatePath('/dashboard/control');
+        revalidatePath('/inicio/prestamos');
+        revalidatePath('/inicio/clientes');
+        revalidatePath('/inicio/control');
         return { success: true, message: `Se movieron ${loanIds.length} préstamo(s) a la nueva promotora correctamente.` };
     } catch (error: any) {
         console.error('Error changing loans promotora:', error);
@@ -468,7 +468,7 @@ export async function registerPaymentAction(loanId: string, paymentStartDate: Da
             }));
         });
 
-        revalidatePath('/dashboard', 'layout');
+        revalidatePath('/inicio', 'layout');
         
         return { success: true, message: amountPaid < 0 ? 'Pago eliminado con éxito.' : 'Pago registrado con éxito.' };
 
@@ -622,7 +622,7 @@ export async function payOffLoanAction(loanId: string, userId?: string) {
             return { success: true, message: "Préstamo liquidado con éxito." };
         });
 
-        revalidatePath('/dashboard', 'layout');
+        revalidatePath('/inicio', 'layout');
 
         return result;
 
@@ -914,7 +914,7 @@ export async function accumulateAssumedPaymentsAction(
             }
         });
 
-        revalidatePath('/dashboard', 'layout');
+        revalidatePath('/inicio', 'layout');
         let message = `Se formalizaron ${count} abonos asumidos`;
         if (overdueCount > 0) {
             message += ` y se descontaron ${overdueCount} abonos de Cartera Vencida`;
@@ -997,7 +997,7 @@ export async function revertPaymentsForWeekAction(loanIds: string[], weekNumber:
             }
         });
 
-        revalidatePath('/dashboard', 'layout');
+        revalidatePath('/inicio', 'layout');
         return { success: true, message: `Se revirtieron ${count} abonos. Saldo de cartera ajustado en -${new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(totalToSubtract)}.` };
     } catch (error: any) {
         console.error('Error reverting payments:', error);

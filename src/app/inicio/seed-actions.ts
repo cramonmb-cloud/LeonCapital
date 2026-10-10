@@ -63,7 +63,7 @@ export async function seedDatabaseAction() {
     await batch.commit();
     
     // Revalidate all dashboard paths
-    revalidatePath('/dashboard', 'layout');
+    revalidatePath('/inicio', 'layout');
 
     return { success: true, message: 'La base de datos ha sido poblada con éxito.' };
   } catch (error: any) {

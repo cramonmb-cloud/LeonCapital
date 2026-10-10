@@ -52,7 +52,7 @@ import { useToast } from '@/hooks/use-toast';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/hooks/use-auth';
 import type { AppUser, UserPermissions, Plaza, Localidad, Personal } from '@/lib/types';
-import { deleteUserAction, saveUserAction } from '@/app/dashboard/ajustes/actions';
+import { deleteUserAction, saveUserAction } from '@/app/inicio/ajustes/actions';
 import { Badge } from './ui/badge';
 import { cn } from '@/lib/utils';
 import { Alert, AlertDescription, AlertTitle } from './ui/alert';
