@@ -366,14 +366,11 @@ export function getLoanAbonoSalienteForWeek(
 
     if (!matchesWeek) return;
 
-    const regTime = p.registeredWeekDate
-      ? getSaturdayOfWeek(parseLocalDate(p.registeredWeekDate)).getTime()
-      : (p.date ? getSaturdayOfWeek(parseLocalDate(p.date)).getTime() : targetSaturdayTime);
+    const collectionDate = p.date ? parseLocalDate(p.date) : (p.registeredWeekDate ? parseLocalDate(p.registeredWeekDate) : null);
+    const collectionSatTime = collectionDate ? getSaturdayOfWeek(collectionDate).getTime() : targetSaturdayTime;
 
-    // Es adelanto si tiene flag de adelanto o si su fecha de registro es estrictamente anterior a la semana actual
-    const isAdvance = p.isAdvance || p.paymentType === 'adelanto_entrante' || (regTime < targetSaturdayTime);
-
-    if (isAdvance) {
+    // Un pago es Abono Saliente para la semana consultada SI Y SOLO SI ingresó en una semana operativa estrictamente ANTERIOR
+    if (collectionSatTime < targetSaturdayTime) {
       abonoSaliente += p.amount;
     }
   });
@@ -463,10 +460,9 @@ export function getLoanSemanaExtraPaidAmountForWeek(
 
     let matchesWeek = false;
 
-    if (p.registeredWeekDate) {
-      matchesWeek = getSaturdayOfWeek(parseLocalDate(p.registeredWeekDate)).getTime() === targetSaturdayTime;
-    } else if (p.date) {
-      matchesWeek = getSaturdayOfWeek(parseLocalDate(p.date)).getTime() === targetSaturdayTime;
+    const pDate = p.date ? parseLocalDate(p.date) : (p.registeredWeekDate ? parseLocalDate(p.registeredWeekDate) : null);
+    if (pDate) {
+      matchesWeek = getSaturdayOfWeek(pDate).getTime() === targetSaturdayTime;
     }
 
     if (!matchesWeek && extraWeekSaturdayTime === targetSaturdayTime) {
@@ -533,16 +529,16 @@ export function calculatePromotoraWeeklyDebeAndAbonosSalientes(
     } else {
       (loan.payments || []).forEach(p => {
         if (p.isReverted) return;
-        if (!p.isAdvance && p.paymentType !== 'adelanto_entrante') return;
 
-        let matchesWeek = false;
-        if (p.registeredWeekDate) {
-          matchesWeek = getSaturdayOfWeek(parseLocalDate(p.registeredWeekDate)).getTime() === weekTime;
-        } else if (p.date) {
-          matchesWeek = getSaturdayOfWeek(parseLocalDate(p.date)).getTime() === weekTime;
-        }
+        // Obtener la semana operativa en la que ingresó el dinero del pago
+        const pDate = p.date ? parseLocalDate(p.date) : (p.registeredWeekDate ? parseLocalDate(p.registeredWeekDate) : null);
+        const pSatTime = pDate ? getSaturdayOfWeek(pDate).getTime() : 0;
+        if (pSatTime !== weekTime) return;
 
-        if (matchesWeek) {
+        const currWeekInDate = getCurrentLoanWeekNumber(loan.startDate, targetDate);
+        const isFutureWeek = (p.weekNumber && currWeekInDate > 0) ? (p.weekNumber > currWeekInDate) : Boolean(p.isAdvance || p.paymentType === 'adelanto_entrante');
+
+        if (isFutureWeek && (p.isAdvance || p.paymentType === 'adelanto_entrante' || (p.weekNumber && p.weekNumber > currWeekInDate))) {
           totalAbonosEntrantes += p.amount;
         }
       });

@@ -295,9 +295,8 @@ export function DebesClientPage({
           const paymentsInWeek = (loan.payments || []).filter(p => {
             if (p.isReverted) return false;
 
-            const regTime = p.registeredWeekDate
-              ? getSaturdayOfWeek(parseLocalDate(p.registeredWeekDate)).getTime()
-              : (p.date ? getSaturdayOfWeek(parseLocalDate(p.date)).getTime() : 0);
+            const pCollectionDate = p.date ? parseLocalDate(p.date) : (p.registeredWeekDate ? parseLocalDate(p.registeredWeekDate) : null);
+            const regTime = pCollectionDate ? getSaturdayOfWeek(pCollectionDate).getTime() : 0;
 
             // Si es un abono que ingresó como adelanto en una semana previa cubriendo esta semana (Abono Saliente),
             // no es cobranza física recaudada en la semana en curso
@@ -336,16 +335,14 @@ export function DebesClientPage({
           } else {
             (loan.payments || []).forEach(p => {
               if (p.isReverted) return;
-              if (!p.isAdvance && p.paymentType !== 'adelanto_entrante') return;
 
-              let matchesWeek = false;
-              if (p.registeredWeekDate) {
-                matchesWeek = getSaturdayOfWeek(parseLocalDate(p.registeredWeekDate)).getTime() === weekTime;
-              } else if (p.date) {
-                matchesWeek = getSaturdayOfWeek(parseLocalDate(p.date)).getTime() === weekTime;
-              }
+              const pCollectionDate = p.date ? parseLocalDate(p.date) : (p.registeredWeekDate ? parseLocalDate(p.registeredWeekDate) : null);
+              const pSatTime = pCollectionDate ? getSaturdayOfWeek(pCollectionDate).getTime() : 0;
+              if (pSatTime !== weekTime) return;
 
-              if (matchesWeek) {
+              const isFutureWeek = (p.weekNumber && targetWeekNumber > 0) ? (p.weekNumber > targetWeekNumber) : Boolean(p.isAdvance || p.paymentType === 'adelanto_entrante');
+
+              if (isFutureWeek && (p.isAdvance || p.paymentType === 'adelanto_entrante' || (p.weekNumber && p.weekNumber > targetWeekNumber))) {
                 realAdelEnt += p.amount;
               }
             });

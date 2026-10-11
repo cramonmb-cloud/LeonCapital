@@ -360,21 +360,23 @@ export async function registerPaymentAction(loanId: string, paymentStartDate: Da
                     while (remaining > 0) {
                         const existingNext = updatedPaymentsMap.get(nextWeek)?.amount || 0;
                         const neededNext = Math.max(0, weeklyPayment - existingNext);
+                        const isAdv = nextWeek > currentLoanWeek;
+                        const isRec = nextWeek < currentLoanWeek;
                         if (remaining >= neededNext) {
                             updatedPaymentsMap.set(nextWeek, { 
                                 amount: weeklyPayment, 
-                                isRecovered: false,
-                                isAdvance: true,
-                                paymentType: 'adelanto_entrante'
+                                isRecovered: isRec,
+                                isAdvance: isAdv,
+                                paymentType: isAdv ? 'adelanto_entrante' : (isRec ? 'recovered' : 'regular')
                             });
                             remaining -= neededNext;
                             nextWeek++;
                         } else {
                             updatedPaymentsMap.set(nextWeek, { 
                                 amount: existingNext + remaining, 
-                                isRecovered: false,
-                                isAdvance: true,
-                                paymentType: 'adelanto_entrante'
+                                isRecovered: isRec,
+                                isAdvance: isAdv,
+                                paymentType: isAdv ? 'adelanto_entrante' : (isRec ? 'recovered' : 'regular')
                             });
                             remaining = 0;
                         }
@@ -382,7 +384,7 @@ export async function registerPaymentAction(loanId: string, paymentStartDate: Da
                 }
 
                 // Convertir el mapa de regreso al arreglo de pagos
-                const paymentWeekDateStr = paymentStartDate ? getSaturdayOfWeek(paymentStartDate).toISOString().split('T')[0] : undefined;
+                const paymentWeekDateStr = getSaturdayOfWeek(getMexicoNow()).toISOString().split('T')[0];
                 updatedPaymentsMap.forEach((val, wk) => {
                     const existingP = currentPayments.find(p => p.weekNumber === wk);
                     const existingDate = existingP?.date || new Date().toISOString();
@@ -692,9 +694,8 @@ export async function accumulateAssumedPaymentsAction(
                 let hasChanges = false;
                 const newPayments = currentPayments.map(p => {
                     const weekSatMs = loanStartSat.getTime() + (p.weekNumber * 7 * 24 * 3600 * 1000);
-                    const regTime = p.registeredWeekDate
-                        ? getSaturdayOfWeek(parseLocalDate(p.registeredWeekDate)).getTime()
-                        : (p.date ? getSaturdayOfWeek(parseLocalDate(p.date)).getTime() : weekSatMs);
+                    const pCollectionDate = p.date ? parseLocalDate(p.date) : (p.registeredWeekDate ? parseLocalDate(p.registeredWeekDate) : null);
+                    const regTime = pCollectionDate ? getSaturdayOfWeek(pCollectionDate).getTime() : weekSatMs;
                     const isAdv = Boolean(p.isAdvance || p.paymentType === 'adelanto_entrante' || regTime < weekSatMs);
 
                     if (p.weekNumber <= currentWeekToFill && !p.isAccumulated && !p.isReverted) {
