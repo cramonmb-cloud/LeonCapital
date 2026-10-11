@@ -503,14 +503,51 @@ export function calculatePromotoraWeeklyDebeAndAbonosSalientes(
   loans: Array<{ promotoraId?: string; startDate: any; amount: number; loanPlanId: string; payments?: any[]; hasPenalty?: boolean; status?: string }>,
   loanPlans: Array<{ id: string; termInWeeks: number; weeklyPaymentRate: number }>,
   config?: { extraWeekMissedThreshold?: number } | null
-): { totalExpectedQuota: number; totalAbonosSalientes: number; totalDebeEntregar: number; totalSemExt: number } {
+): { totalExpectedQuota: number; totalAbonosSalientes: number; totalDebeEntregar: number; totalSemExt: number; totalAbonosEntrantes: number } {
   const pLoans = loans.filter(l => l.promotoraId === promotoraId);
   let totalExpectedQuota = 0;
   let totalAbonosSalientes = 0;
   let totalDebeEntregar = 0;
   let totalSemExt = 0;
+  let totalAbonosEntrantes = 0;
+
+  const targetDate = typeof targetWeekSaturdayDate === 'string'
+    ? parseLocalDate(targetWeekSaturdayDate)
+    : targetWeekSaturdayDate;
+  const weekTime = getSaturdayOfWeek(targetDate).getTime();
 
   pLoans.forEach(loan => {
+    // Cálculo automático de Adelantos Entrantes desde los abonos de los préstamos
+    const loanSaturdayTime = getSaturdayOfWeek(parseLocalDate(loan.startDate)).getTime();
+    const advPayments = (loan.payments || []).filter(p => !p.isReverted && (p.isAdvance || p.paymentType === 'adelanto_entrante'));
+
+    if (loanSaturdayTime === weekTime) {
+      if (advPayments.length > 0) {
+        if (loan.status === 'Paid Off' || loan.status === 'Pagado desde CV') {
+          const totalPaid = (loan.payments || []).filter(p => !p.isReverted).reduce((sum, p) => sum + p.amount, 0);
+          totalAbonosEntrantes += totalPaid;
+        } else {
+          totalAbonosEntrantes += advPayments.reduce((sum, p) => sum + p.amount, 0);
+        }
+      }
+    } else {
+      (loan.payments || []).forEach(p => {
+        if (p.isReverted) return;
+        if (!p.isAdvance && p.paymentType !== 'adelanto_entrante') return;
+
+        let matchesWeek = false;
+        if (p.registeredWeekDate) {
+          matchesWeek = getSaturdayOfWeek(parseLocalDate(p.registeredWeekDate)).getTime() === weekTime;
+        } else if (p.date) {
+          matchesWeek = getSaturdayOfWeek(parseLocalDate(p.date)).getTime() === weekTime;
+        }
+
+        if (matchesWeek) {
+          totalAbonosEntrantes += p.amount;
+        }
+      });
+    }
+
     if (loan.status === 'Paid Off' || loan.status === 'Pagado desde CV') return;
 
     const plan = loanPlans.find(lp => lp.id === loan.loanPlanId);
@@ -528,6 +565,7 @@ export function calculatePromotoraWeeklyDebeAndAbonosSalientes(
     totalExpectedQuota,
     totalAbonosSalientes,
     totalDebeEntregar,
-    totalSemExt
+    totalSemExt,
+    totalAbonosEntrantes
   };
 }

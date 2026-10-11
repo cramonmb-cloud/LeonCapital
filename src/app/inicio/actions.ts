@@ -691,9 +691,28 @@ export async function accumulateAssumedPaymentsAction(
                 const currentPayments = loan.payments || [];
                 let hasChanges = false;
                 const newPayments = currentPayments.map(p => {
+                    const weekSatMs = loanStartSat.getTime() + (p.weekNumber * 7 * 24 * 3600 * 1000);
+                    const regTime = p.registeredWeekDate
+                        ? getSaturdayOfWeek(parseLocalDate(p.registeredWeekDate)).getTime()
+                        : (p.date ? getSaturdayOfWeek(parseLocalDate(p.date)).getTime() : weekSatMs);
+                    const isAdv = Boolean(p.isAdvance || p.paymentType === 'adelanto_entrante' || regTime < weekSatMs);
+
                     if (p.weekNumber <= currentWeekToFill && !p.isAccumulated && !p.isReverted) {
                         hasChanges = true;
-                        return { ...p, isAccumulated: true };
+                        return { 
+                            ...p, 
+                            isAccumulated: true,
+                            isAdvance: isAdv,
+                            paymentType: isAdv ? 'adelanto_entrante' : (p.paymentType || 'regular')
+                        };
+                    }
+                    if (isAdv && (!p.isAdvance || p.paymentType !== 'adelanto_entrante')) {
+                        hasChanges = true;
+                        return {
+                            ...p,
+                            isAdvance: true,
+                            paymentType: 'adelanto_entrante'
+                        };
                     }
                     return p;
                 });

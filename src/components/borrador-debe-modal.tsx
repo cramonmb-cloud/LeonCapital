@@ -88,7 +88,7 @@ export function calculatePromotoraDraftDebe(
   allLoans: Loan[],
   allLoanPlans: LoanPlan[],
   config?: any
-): { debeEntregar: number; abonosSalientes: number; cuotaBase: number; semExt: number } {
+): { debeEntregar: number; abonosSalientes: number; cuotaBase: number; semExt: number; abonosEntrantes: number } {
   const result = calculatePromotoraWeeklyDebeAndAbonosSalientes(
     promotoraId,
     selectedWeekStr,
@@ -101,6 +101,7 @@ export function calculatePromotoraDraftDebe(
     abonosSalientes: result.totalAbonosSalientes,
     cuotaBase: result.totalExpectedQuota,
     semExt: result.totalSemExt,
+    abonosEntrantes: result.totalAbonosEntrantes,
   };
 }
 
@@ -246,9 +247,10 @@ export function BorradorDebeModal({
             abonosSalientes: metrics.abonosSalientes,
             cuotaBase: metrics.cuotaBase,
             semExt: metrics.semExt,
+            abonosEntrantes: metrics.abonosEntrantes,
           };
         })
-        .filter((item) => item.debeEntregar > 0 || item.abonosSalientes > 0 || item.semExt > 0);
+        .filter((item) => item.debeEntregar > 0 || item.abonosSalientes > 0 || item.semExt > 0 || item.abonosEntrantes > 0);
 
       if (calculatedPromotoras.length === 0) {
         toast({
@@ -463,10 +465,12 @@ export function BorradorDebeModal({
         let totalDebePlaza = 0;
         let totalAbonosSalientesPlaza = 0;
         let totalSemExtPlaza = 0;
+        let totalAbonosEntrantesPlaza = 0;
         const pdfRows = calculatedPromotoras.map((item) => {
           totalDebePlaza += item.debeEntregar;
           totalAbonosSalientesPlaza += item.abonosSalientes;
           totalSemExtPlaza += item.semExt;
+          totalAbonosEntrantesPlaza += item.abonosEntrantes;
           return [
             `${item.localidadName.toUpperCase()} - ${item.promotora.name.toUpperCase()}`,
             '',
@@ -480,7 +484,7 @@ export function BorradorDebeModal({
             '',
             '',
             '',
-            '',
+            item.abonosEntrantes > 0 ? formatCurrency(item.abonosEntrantes) : '',
             item.abonosSalientes > 0 ? formatCurrency(item.abonosSalientes) : '',
             item.semExt > 0 ? formatCurrency(item.semExt) : ''
           ];
@@ -499,7 +503,7 @@ export function BorradorDebeModal({
           '',
           '',
           '',
-          '',
+          totalAbonosEntrantesPlaza > 0 ? formatCurrency(totalAbonosEntrantesPlaza) : '',
           totalAbonosSalientesPlaza > 0 ? formatCurrency(totalAbonosSalientesPlaza) : '',
           totalSemExtPlaza > 0 ? formatCurrency(totalSemExtPlaza) : ''
         ]];
@@ -547,10 +551,12 @@ export function BorradorDebeModal({
           let totalDebeLoc = 0;
           let totalAbonosSalientesLoc = 0;
           let totalSemExtLoc = 0;
+          let totalAbonosEntrantesLoc = 0;
           const pdfRows = locPromotoras.map((item) => {
             totalDebeLoc += item.debeEntregar;
             totalAbonosSalientesLoc += item.abonosSalientes;
             totalSemExtLoc += item.semExt;
+            totalAbonosEntrantesLoc += item.abonosEntrantes;
             return [
               item.promotora.name.toUpperCase(),
               '',
@@ -564,7 +570,7 @@ export function BorradorDebeModal({
               '',
               '',
               '',
-              '',
+              item.abonosEntrantes > 0 ? formatCurrency(item.abonosEntrantes) : '',
               item.abonosSalientes > 0 ? formatCurrency(item.abonosSalientes) : '',
               item.semExt > 0 ? formatCurrency(item.semExt) : ''
             ];
@@ -583,7 +589,7 @@ export function BorradorDebeModal({
             '',
             '',
             '',
-            '',
+            totalAbonosEntrantesLoc > 0 ? formatCurrency(totalAbonosEntrantesLoc) : '',
             totalAbonosSalientesLoc > 0 ? formatCurrency(totalAbonosSalientesLoc) : '',
             totalSemExtLoc > 0 ? formatCurrency(totalSemExtLoc) : ''
           ]];

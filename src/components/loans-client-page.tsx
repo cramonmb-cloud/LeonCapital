@@ -716,6 +716,7 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
         const loanStartDate = parseLocalDate(loan.startDate);
         const weekDate = new Date(loanStartDate);
         weekDate.setDate(weekDate.getDate() + (weekNumber * 7));
+        const targetWeekSat = getSaturdayOfWeek(weekDate).getTime();
 
         const weeklyPaymentAmount = getWeeklyPaymentAmount(loan);
         const hasPenalty = loansWithPenalty[loan.id] || false;
@@ -729,7 +730,15 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
         
         if (paymentForWeek) {
             const totalPaidForWeek = paymentForWeek.amount;
-            const isAdvance = paymentForWeek.isAdvance || paymentForWeek.paymentType === 'adelanto_entrante' || (weekNumber > currentLoanWeek && totalPaidForWeek > 0);
+            const regTime = paymentForWeek.registeredWeekDate
+                ? getSaturdayOfWeek(parseLocalDate(paymentForWeek.registeredWeekDate)).getTime()
+                : (paymentForWeek.date ? getSaturdayOfWeek(parseLocalDate(paymentForWeek.date)).getTime() : targetWeekSat);
+            const isAdvance = Boolean(
+                paymentForWeek.isAdvance || 
+                paymentForWeek.paymentType === 'adelanto_entrante' || 
+                (regTime < targetWeekSat) ||
+                (weekNumber > currentLoanWeek && totalPaidForWeek > 0)
+            );
             const isAccumulated = paymentForWeek.isAccumulated || false;
 
             if(totalPaidForWeek >= weeklyPaymentAmount) {
@@ -767,8 +776,16 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
 
         if ((loan.status === 'Paid Off' || loan.status === 'Pagado desde CV') && weekNumber <= termInWeeks) {
             const existingPayment = loan.payments?.find(p => p.weekNumber === weekNumber);
+            const regTime = existingPayment?.registeredWeekDate
+                ? getSaturdayOfWeek(parseLocalDate(existingPayment.registeredWeekDate)).getTime()
+                : (existingPayment?.date ? getSaturdayOfWeek(parseLocalDate(existingPayment.date)).getTime() : targetWeekSat);
             const isAdvance = existingPayment 
-                ? Boolean(existingPayment.isAdvance || existingPayment.paymentType === 'adelanto_entrante' || weekNumber >= currentLoanWeek)
+                ? Boolean(
+                    existingPayment.isAdvance || 
+                    existingPayment.paymentType === 'adelanto_entrante' || 
+                    (regTime < targetWeekSat) ||
+                    weekNumber >= currentLoanWeek
+                  )
                 : (weekNumber >= currentLoanWeek);
             return { 
                 status: 'paid' as const, 
