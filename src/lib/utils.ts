@@ -327,7 +327,7 @@ export function getLoanAbonoSalienteForWeek(
   targetWeekSaturdayDate: Date | string,
   config?: { extraWeekMissedThreshold?: number } | null
 ): LoanWeeklyDebeBreakdown {
-  if (!loanPlan || loan.status === 'Paid Off' || loan.status === 'Pagado desde CV') {
+  if (!loanPlan) {
     return { expectedQuota: 0, abonoSaliente: 0, netDebe: 0, isActive: false, targetWeekNumber: 0 };
   }
 
@@ -379,10 +379,20 @@ export function getLoanAbonoSalienteForWeek(
     }
   });
 
-  const netDebe = Math.max(0, weeklyQuota - abonoSaliente);
+  const isLiquidated = loan.status === 'Paid Off' || loan.status === 'Pagado desde CV';
+
+  // Si el préstamo ya está liquidado (Paid Off o Pagado desde CV) pero NO tiene abono saliente para esta semana, no está activo en esta semana
+  if (isLiquidated && abonoSaliente === 0) {
+    return { expectedQuota: 0, abonoSaliente: 0, netDebe: 0, isActive: false, targetWeekNumber: 0 };
+  }
+
+  // Si está liquidado y tiene abono saliente, la cuota esperada que cubrió es la cuota semanal,
+  // y su netDebe a entregar es 0 (no se le cobra efectivo a la promotora por un préstamo liquidado).
+  const expectedQuota = weeklyQuota;
+  const netDebe = isLiquidated ? 0 : Math.max(0, weeklyQuota - abonoSaliente);
 
   return {
-    expectedQuota: weeklyQuota,
+    expectedQuota,
     abonoSaliente,
     netDebe,
     isActive: true,
@@ -547,8 +557,6 @@ export function calculatePromotoraWeeklyDebeAndAbonosSalientes(
         }
       });
     }
-
-    if (loan.status === 'Paid Off' || loan.status === 'Pagado desde CV') return;
 
     const plan = loanPlans.find(lp => lp.id === loan.loanPlanId);
     const breakdown = getLoanAbonoSalienteForWeek(loan, plan, targetWeekSaturdayDate);
