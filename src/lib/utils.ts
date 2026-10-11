@@ -273,29 +273,26 @@ export function isWeekMissedOrRecovered(
 /**
  * Determina si a un préstamo le aplica la semana extra de penalización (+1 semana).
  * REGLA ESTRICTA:
- * 1. Solo se activa si los fallos registrados como tal y acumulados alcanzan el umbral configurado.
+ * 1. Solo se activa si los fallos registrados como tal y acumulados alcanzan el umbral configurado (missedCount >= threshold).
  * 2. Si el pago está pendiente o asumido, NO es fallo y por tanto no activa la semana extra.
- * 3. Si el préstamo expiró (currentLoanWeek > baseTerm) y no cubrió el total esperado del plazo base.
+ * 3. Si el préstamo está liquidado ('Paid Off'), NO tiene penalización.
  */
 export function doesLoanHavePenalty(
-  loan: { startDate: any; payments?: any[]; hasPenalty?: boolean; amount?: number },
+  loan: { startDate: any; payments?: any[]; hasPenalty?: boolean; amount?: number; status?: string },
   baseTerm: number,
   weeklyPayment: number,
   threshold: number = 2,
   referenceDate: Date = getMexicoNow()
 ): boolean {
-  const currentLoanWeek = Math.max(1, getCurrentLoanWeekNumber(loan.startDate, referenceDate));
-  const isExpired = currentLoanWeek > baseTerm;
+  if (loan.status === 'Paid Off') return false;
 
   const payments = loan.payments || [];
   let missedCount = 0;
-  let totalPaidInBaseTerm = 0;
 
   for (let i = 1; i <= baseTerm; i++) {
     const p = payments.find(pay => pay.weekNumber === i);
     if (p && !p.isReverted) {
       const pAmount = (p.amount === null || p.amount === undefined || isNaN(p.amount)) ? 0 : p.amount;
-      totalPaidInBaseTerm += pAmount;
       if (p.paymentType !== 'assumed') {
         if (pAmount < weeklyPayment && p.isAccumulated) {
           missedCount++;
@@ -307,8 +304,7 @@ export function doesLoanHavePenalty(
     // Si no hay pago (p es undefined o isReverted), está PENDIENTE, NO cuenta como fallo acumulado
   }
 
-  const expiredWithoutFullPayment = isExpired && totalPaidInBaseTerm < (baseTerm * weeklyPayment);
-  return (missedCount >= threshold) || expiredWithoutFullPayment;
+  return missedCount >= threshold;
 }
 
 export interface LoanWeeklyDebeBreakdown {
@@ -376,8 +372,9 @@ export function getLoanAbonoSalienteForWeek(
     const collectionDate = p.date ? parseLocalDate(p.date) : (p.registeredWeekDate ? parseLocalDate(p.registeredWeekDate) : null);
     const collectionSatTime = collectionDate ? getSaturdayOfWeek(collectionDate).getTime() : targetSaturdayTime;
 
-    // Un pago es Abono Saliente para la semana consultada SI Y SOLO SI ingresó en una semana operativa estrictamente ANTERIOR
-    if (collectionSatTime < targetSaturdayTime) {
+    // Un pago es Abono Saliente para la semana consultada si ingresó en una semana operativa estrictamente anterior
+    // o si fue etiquetado/marcado explícitamente como adelanto (isAdvance || paymentType === 'adelanto_entrante')
+    if (p.isAdvance || p.paymentType === 'adelanto_entrante' || collectionSatTime < targetSaturdayTime) {
       abonoSaliente += p.amount;
     }
   });

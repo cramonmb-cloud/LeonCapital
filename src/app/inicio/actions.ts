@@ -479,6 +479,169 @@ export async function registerPaymentAction(loanId: string, paymentStartDate: Da
     }
 }
 
+export async function manualAdjustPaymentAction(
+    loanId: string, 
+    weekNumber: number, 
+    tag: 'pagado' | 'asumido' | 'falla' | 'adelanto', 
+    amountPaid: number, 
+    userId?: string
+) {
+    try {
+        await runTransaction(db, async (transaction) => {
+            const loanRef = doc(db, 'loans', loanId);
+            const loanSnap = await transaction.get(loanRef);
+            const configRef = doc(db, 'config', 'main');
+            const configSnap = await transaction.get(configRef);
+            const configData = configSnap.data() as AppConfig | undefined;
+            const penaltyThreshold = getExtraWeekThreshold(configData);
+
+            if (!loanSnap.exists()) {
+                throw new Error('Préstamo no encontrado');
+            }
+
+            const loan = loanSnap.data() as Loan;
+            const client = await getClient(loan.clientId);
+            const loanPlan = await getLoanPlan(loan.loanPlanId);
+            const walletRef = doc(db, 'wallet', 'main');
+
+            if (!loanPlan) {
+                throw new Error('Plan de préstamo no encontrado');
+            }
+
+            const weeklyPayment = (loan.amount / 1000) * loanPlan.weeklyPaymentRate;
+            const currentPayments = (loan.payments || []).map(p => ({
+                ...p,
+                date: parseFirestoreDate(p.date).toISOString()
+            }));
+
+            let allPayments: Payment[] = [];
+
+            if (amountPaid < 0) {
+                // Modo eliminación: quitar el abono de esa semana
+                allPayments = currentPayments.filter(p => p.weekNumber !== weekNumber);
+            } else {
+                const otherPayments = currentPayments.filter(p => p.weekNumber !== weekNumber);
+                const existingP = currentPayments.find(p => p.weekNumber === weekNumber);
+                const pDate = existingP?.date || new Date().toISOString();
+                const paymentWeekDateStr = getSaturdayOfWeek(getMexicoNow()).toISOString().split('T')[0];
+
+                let newPayment: Payment;
+                if (tag === 'falla') {
+                    newPayment = {
+                        date: pDate,
+                        amount: 0,
+                        weekNumber,
+                        isRecovered: false,
+                        isReverted: false,
+                        isAdvance: false,
+                        isAccumulated: true,
+                        paymentType: 'regular'
+                    };
+                } else if (tag === 'asumido') {
+                    newPayment = {
+                        date: pDate,
+                        amount: amountPaid > 0 ? amountPaid : weeklyPayment,
+                        weekNumber,
+                        isRecovered: false,
+                        isReverted: false,
+                        isAdvance: false,
+                        isAccumulated: true,
+                        paymentType: 'assumed'
+                    };
+                } else if (tag === 'adelanto') {
+                    newPayment = {
+                        date: pDate,
+                        amount: amountPaid > 0 ? amountPaid : weeklyPayment,
+                        weekNumber,
+                        isRecovered: false,
+                        isReverted: false,
+                        isAdvance: true,
+                        isAccumulated: true,
+                        paymentType: 'adelanto_entrante',
+                        registeredWeekDate: paymentWeekDateStr
+                    };
+                } else {
+                    // 'pagado'
+                    newPayment = {
+                        date: pDate,
+                        amount: amountPaid,
+                        weekNumber,
+                        isRecovered: false,
+                        isReverted: false,
+                        isAdvance: false,
+                        isAccumulated: true,
+                        paymentType: 'regular'
+                    };
+                }
+
+                allPayments = [...otherPayments, newPayment].sort((a, b) => a.weekNumber - b.weekNumber);
+            }
+
+            const loanStartDate = parseFirestoreDate(loan.startDate);
+            const currentLoanWeek = Math.max(1, getCurrentLoanWeekNumber(loanStartDate));
+
+            const originalTotalPaid = (loan.payments || []).reduce((acc, p) => acc + p.amount, 0);
+            const newTotalPaid = allPayments.reduce((acc, p) => acc + p.amount, 0);
+            const walletAdjustment = newTotalPaid - originalTotalPaid;
+
+            if (walletAdjustment !== 0) {
+                const walletTransactionRef = doc(collection(db, 'walletTransactions'));
+                transaction.set(walletTransactionRef, {
+                    type: walletAdjustment > 0 ? 'credit' : 'debit',
+                    amount: Math.abs(walletAdjustment),
+                    date: new Date(),
+                    description: amountPaid < 0 
+                        ? `Reversión/Eliminación manual de abono de ${client?.name || 'N/A'} (Semana ${weekNumber}).`
+                        : `Ajuste manual de abono (${tag.toUpperCase()}) de ${client?.name || 'N/A'} (Semana ${weekNumber}).`,
+                    loanId: loanId,
+                    clientId: loan.clientId,
+                    userId: userId || null,
+                });
+                
+                transaction.update(walletRef, { balance: increment(walletAdjustment) });
+            }
+
+            const baseTerm = loanPlan.termInWeeks;
+            const hasPenalty = doesLoanHavePenalty({ ...loan, payments: allPayments }, baseTerm, weeklyPayment, penaltyThreshold);
+            
+            const isExpired = currentLoanWeek > baseTerm;
+            const totalTerm = baseTerm + (hasPenalty ? 1 : 0);
+            const totalExpected = totalTerm * weeklyPayment;
+            const balance = Math.max(0, totalExpected - newTotalPaid);
+
+            const totalPaidInBaseTerm = allPayments
+                .filter(p => p.weekNumber >= 1 && p.weekNumber <= baseTerm && !p.isReverted)
+                .reduce((sum, p) => sum + p.amount, 0);
+
+            let newStatus: Loan['status'] = loan.status;
+            if (balance <= 0) {
+                newStatus = (isExpired && totalPaidInBaseTerm < (baseTerm * weeklyPayment)) ? 'Pagado desde CV' : 'Paid Off';
+            } else {
+                newStatus = (isExpired || currentLoanWeek > totalTerm) ? 'Overdue' : 'Active';
+            }
+
+            transaction.update(loanRef, cleanFirestoreData({
+                payments: allPayments,
+                status: newStatus,
+                hasPenalty: hasPenalty ? true : false
+            }));
+        });
+
+        revalidatePath('/inicio', 'layout');
+        
+        return { 
+            success: true, 
+            message: amountPaid < 0 
+                ? `Abono de semana ${weekNumber} eliminado correctamente.` 
+                : `Ajuste manual (${tag.toUpperCase()}) aplicado correctamente a semana ${weekNumber}.` 
+        };
+
+    } catch (error: any) {
+        console.error('Error in manualAdjustPaymentAction:', error);
+        return { success: false, message: `Error al ajustar el pago: ${error.message}` };
+    }
+}
+
 export async function payOffLoanAction(loanId: string, userId?: string) {
     try {
         const result = await runTransaction(db, async (transaction) => {

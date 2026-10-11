@@ -14,7 +14,7 @@ import {
 } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Edit, ListTodo, PencilLine } from 'lucide-react';
+import { Edit, ListTodo, PencilLine, ArrowUpRight } from 'lucide-react';
 import { EditLoanDialog } from '@/components/edit-loan-dialog';
 import {
     Dialog,
@@ -24,7 +24,7 @@ import {
 } from '@/components/ui/dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn, getSaturdayOfWeek, getCurrentLoanWeekNumber, getExtraWeekThreshold, doesLoanHavePenalty } from '@/lib/utils';
-import { ManualPaymentAdjustmentDialog } from '@/components/manual-payment-adjustment-dialog';
+import { ManualPaymentAdjustmentDialog, type PaymentAdjustmentTag } from '@/components/manual-payment-adjustment-dialog';
 import type { AppConfig } from '@/lib/types';
 
 
@@ -48,7 +48,7 @@ export function ClientLoansTable({ clientLoans, loanPlans, allLoans, users, plaz
   
   // State for manual adjustment
   const [isAdjustDialogOpen, setIsAdjustDialogOpen] = useState(false);
-  const [adjustData, setAdjustData] = useState<{ weekNumber: number, amount: number } | null>(null);
+  const [adjustData, setAdjustData] = useState<{ weekNumber: number, amount: number, tag?: PaymentAdjustmentTag } | null>(null);
 
   const isCristobal = useMemo(() => appUser?.username?.toUpperCase() === 'CRISTOBAL', [appUser]);
   const canEdit = useMemo(() => isCristobal, [isCristobal]);
@@ -171,10 +171,29 @@ export function ClientLoansTable({ clientLoans, loanPlans, allLoans, users, plaz
           
           let received: number | null = isRegistered ? payment.amount : null;
           let note = '';
+          let tag: PaymentAdjustmentTag | 'pendiente' = 'pendiente';
           let dateStr = isRegistered ? formatDate(payment.date) : '';
 
-          if (!isRegistered && isLiquidated) {
+          if (isRegistered) {
+              if (payment.isAdvance || payment.paymentType === 'adelanto_entrante') {
+                  tag = 'adelanto';
+                  note = 'ADELANTO';
+              } else if (payment.paymentType === 'assumed') {
+                  tag = 'asumido';
+                  note = 'ASUMIDO';
+              } else if (payment.amount === 0) {
+                  tag = 'falla';
+                  note = 'FALLA';
+              } else if (payment.amount >= weeklyPayment) {
+                  tag = 'pagado';
+                  note = payment.isRecovered ? 'RECUPERADO' : 'PAGADO';
+              } else {
+                  tag = 'pagado';
+                  note = 'PARCIAL';
+              }
+          } else if (isLiquidated) {
               received = weeklyPayment;
+              tag = 'adelanto';
               note = 'AD';
               dateStr = 'LIQUIDADO';
           }
@@ -185,18 +204,19 @@ export function ClientLoansTable({ clientLoans, loanPlans, allLoans, users, plaz
               importeAbono: weeklyPayment,
               importeRecibido: received,
               fechaAbono: dateStr,
-              note: note
+              note: note,
+              tag: tag
           });
       }
       return rows;
-  }, [loanForDetails, loanPlans]);
+  }, [loanForDetails, loanPlans, appConfig]);
 
   const totalAbono = loanDetailsData.reduce((acc, r) => acc + r.importeAbono, 0);
   const totalRecibido = loanDetailsData.reduce((acc, r) => acc + (r.importeRecibido || 0), 0);
 
-  const handleAdjustClick = (weekNumber: number, currentAmount: number) => {
+  const handleAdjustClick = (weekNumber: number, currentAmount: number, tag?: PaymentAdjustmentTag) => {
     if (!isCristobal) return;
-    setAdjustData({ weekNumber, amount: currentAmount });
+    setAdjustData({ weekNumber, amount: currentAmount, tag });
     setIsAdjustDialogOpen(true);
   };
 
@@ -324,16 +344,39 @@ export function ClientLoansTable({ clientLoans, loanPlans, allLoans, users, plaz
                                         <TableCell 
                                             className={cn(
                                                 "border-r border-blue-100 text-right py-1 font-semibold relative group", 
+                                                row.tag === 'adelanto' ? "bg-blue-50/90 text-blue-900" :
+                                                row.tag === 'asumido' ? "bg-sky-50 text-sky-900" :
+                                                row.tag === 'falla' ? "bg-rose-50 text-rose-800" :
                                                 row.importeRecibido !== null ? (row.importeRecibido >= row.importeAbono ? "bg-green-100 text-green-800" : "bg-orange-50 text-orange-700") : "bg-red-50 text-red-700",
-                                                isCristobal && row.note !== 'AD' && "cursor-pointer hover:bg-green-200 transition-colors"
+                                                isCristobal && "cursor-pointer hover:bg-blue-100 transition-colors"
                                             )}
-                                            onClick={() => isCristobal && row.note !== 'AD' && handleAdjustClick(row.num, row.importeRecibido || 0)}
+                                            onClick={() => isCristobal && handleAdjustClick(row.num, row.importeRecibido !== null ? row.importeRecibido : row.importeAbono, row.tag !== 'pendiente' ? (row.tag as PaymentAdjustmentTag) : undefined)}
                                         >
-                                            <div className="flex items-center justify-end gap-2">
-                                                {row.importeRecibido !== null ? formatCurrency(row.importeRecibido) : formatCurrency(0)}
-                                                {row.note === 'AD' && <Badge variant="secondary" className="bg-blue-200 text-blue-800 text-[10px] h-4">AD</Badge>}
-                                                {isCristobal && row.note !== 'AD' && (
-                                                    <PencilLine className="h-3 w-3 opacity-0 group-hover:opacity-100 text-blue-600 shrink-0" />
+                                            <div className="flex items-center justify-end gap-1.5">
+                                                <span>{row.importeRecibido !== null ? formatCurrency(row.importeRecibido) : formatCurrency(0)}</span>
+                                                {row.tag === 'adelanto' && (
+                                                    <Badge variant="secondary" className="bg-blue-100 text-blue-900 border border-blue-300 text-[10px] h-4 px-1 gap-0.5 flex items-center font-bold">
+                                                        <ArrowUpRight className="h-3 w-3 text-blue-700 stroke-[2.5]" />
+                                                        Adelanto
+                                                    </Badge>
+                                                )}
+                                                {row.tag === 'asumido' && (
+                                                    <Badge variant="secondary" className="bg-sky-100 text-sky-900 border border-sky-300 text-[10px] h-4 px-1 font-bold">
+                                                        Asumido
+                                                    </Badge>
+                                                )}
+                                                {row.tag === 'falla' && (
+                                                    <Badge variant="destructive" className="bg-rose-600 text-white text-[10px] h-4 px-1 font-bold">
+                                                        Falla
+                                                    </Badge>
+                                                )}
+                                                {row.tag === 'pagado' && row.note === 'RECUPERADO' && (
+                                                    <Badge variant="secondary" className="bg-purple-100 text-purple-900 border border-purple-300 text-[10px] h-4 px-1 font-bold">
+                                                        Recup.
+                                                    </Badge>
+                                                )}
+                                                {isCristobal && (
+                                                    <PencilLine className="h-3 w-3 opacity-0 group-hover:opacity-100 text-blue-600 shrink-0 ml-0.5" />
                                                 )}
                                             </div>
                                         </TableCell>
@@ -379,6 +422,7 @@ export function ClientLoansTable({ clientLoans, loanPlans, allLoans, users, plaz
           loan={loanForDetails}
           weekNumber={adjustData.weekNumber}
           currentAmount={adjustData.amount}
+          currentTag={adjustData.tag}
           appConfig={appConfig}
           onSuccess={() => {
               // No es ideal, pero fuerza el refresco de los datos tras el ajuste manual

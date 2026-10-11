@@ -298,9 +298,9 @@ export function DebesClientPage({
             const pCollectionDate = p.date ? parseLocalDate(p.date) : (p.registeredWeekDate ? parseLocalDate(p.registeredWeekDate) : null);
             const regTime = pCollectionDate ? getSaturdayOfWeek(pCollectionDate).getTime() : 0;
 
-            // Si es un abono que ingresó como adelanto en una semana previa cubriendo esta semana (Abono Saliente),
+            // Si es un abono que ingresó como adelanto cubriendo esta semana (Abono Saliente),
             // no es cobranza física recaudada en la semana en curso
-            if (regTime < weekTime && (p.isAdvance || p.paymentType === 'adelanto_entrante' || (p.weekNumber && p.weekNumber === targetWeekNumber))) {
+            if (p.isAdvance || p.paymentType === 'adelanto_entrante' || (regTime < weekTime && (p.weekNumber && p.weekNumber === targetWeekNumber))) {
               return false;
             }
 

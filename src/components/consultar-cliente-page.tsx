@@ -5,7 +5,7 @@ import type { Client, Loan, LoanPlan, Plaza, Localidad, Promotora, AppConfig } f
 import { Input } from '@/components/ui/input';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { Search, Wallet, Calendar, Shield, Phone, Home, X, CircleDollarSign, Building, MapPin, List, ChevronRight, UserCheck, Smartphone, Info, Route, ArrowRight, AlertTriangle, User, Monitor, Filter, ListTodo, History, PencilLine } from 'lucide-react';
+import { Search, Wallet, Calendar, Shield, Phone, Home, X, CircleDollarSign, Building, MapPin, List, ChevronRight, UserCheck, Smartphone, Info, Route, ArrowRight, AlertTriangle, User, Monitor, Filter, ListTodo, History, PencilLine, ArrowUpRight } from 'lucide-react';
 import { Separator } from './ui/separator';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
@@ -15,7 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { ScrollArea } from './ui/scroll-area';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow, TableFooter } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogClose, DialogDescription } from '@/components/ui/dialog';
-import { ManualPaymentAdjustmentDialog } from '@/components/manual-payment-adjustment-dialog';
+import { ManualPaymentAdjustmentDialog, type PaymentAdjustmentTag } from '@/components/manual-payment-adjustment-dialog';
 
 interface ConsultarClientePageProps {
   clients: Client[];
@@ -37,7 +37,7 @@ export function ConsultarClientePage({ clients: allClients, loans: allLoans, loa
   
   // State for manual adjustment
   const [isAdjustDialogOpen, setIsAdjustDialogOpen] = useState(false);
-  const [adjustData, setAdjustData] = useState<{ weekNumber: number, amount: number } | null>(null);
+  const [adjustData, setAdjustData] = useState<{ weekNumber: number, amount: number, tag?: PaymentAdjustmentTag } | null>(null);
 
   // Filtros
   const [filterPlaza, setFilterPlaza] = useState('all');
@@ -289,20 +289,35 @@ export function ConsultarClientePage({ clients: allClients, loans: allLoans, loa
         let statusType: 'PAID' | 'MISSED' | 'PENDING' = 'PENDING';
         let statusText = '';
 
+        const isAdvance = Boolean(payment?.isAdvance || payment?.paymentType === 'adelanto_entrante');
+        const isAssumed = payment?.paymentType === 'assumed';
         const isRecovered = payment?.isRecovered || false;
+        let tag: PaymentAdjustmentTag | 'pendiente' = 'pendiente';
 
         if (isRegistered) {
-            if (payment.amount >= weeklyPayment) {
+            if (isAdvance) {
+                tag = 'adelanto';
+                statusText = 'ADELANTO';
+                statusType = 'PAID';
+            } else if (isAssumed) {
+                tag = 'asumido';
+                statusText = 'ASUMIDO';
+                statusType = 'PAID';
+            } else if (payment.amount === 0) {
+                tag = 'falla';
+                statusText = 'FALLO';
+                statusType = 'MISSED';
+            } else if (payment.amount >= weeklyPayment) {
+                tag = 'pagado';
                 statusText = isRecovered ? 'RECUPERADO' : formatDate(payment.date);
                 statusType = 'PAID';
             } else if (payment.amount > 0) {
+                tag = 'pagado';
                 statusText = isRecovered ? 'RECUPERADO PARCIAL' : 'PARCIAL';
-                statusType = 'MISSED';
-            } else {
-                statusText = 'FALLO';
                 statusType = 'MISSED';
             }
         } else if (isPast) {
+            tag = 'falla';
             statusText = 'FALLO';
             statusType = 'MISSED';
         } else {
@@ -318,7 +333,8 @@ export function ConsultarClientePage({ clients: allClients, loans: allLoans, loa
             statusText: statusText,
             isPenalty: i > loanPlan.termInWeeks,
             status: statusType,
-            isRecovered: isRecovered
+            isRecovered: isRecovered,
+            tag: tag
         });
     }
     return rows;
@@ -329,9 +345,9 @@ export function ConsultarClientePage({ clients: allClients, loans: allLoans, loa
       setIsModalOpen(true);
   };
 
-  const handleAdjustClick = (weekNumber: number, currentAmount: number) => {
+  const handleAdjustClick = (weekNumber: number, currentAmount: number, tag?: PaymentAdjustmentTag) => {
     if (!isCristobal) return;
-    setAdjustData({ weekNumber, amount: currentAmount });
+    setAdjustData({ weekNumber, amount: currentAmount, tag });
     setIsAdjustDialogOpen(true);
   };
 
@@ -757,24 +773,39 @@ export function ConsultarClientePage({ clients: allClients, loans: allLoans, loa
                                             <TableCell 
                                                 className={cn(
                                                     "border-r border-zinc-100 text-right py-1.5 font-black text-[11px] relative group", 
+                                                    row.tag === 'adelanto' ? "bg-blue-50/90 text-blue-900" :
+                                                    row.tag === 'asumido' ? "bg-sky-50 text-sky-900" :
                                                     row.isRecovered ? "bg-purple-50 dark:bg-purple-950/20 text-purple-700 dark:text-purple-400" :
                                                     row.importeRecibido > 0 ? (row.importeRecibido >= row.importeAbono ? "bg-green-50/80 text-green-700" : "bg-amber-50/60 text-amber-700") : "bg-rose-50/60 text-rose-700",
-                                                    isCristobal && !row.isPenalty && "cursor-pointer hover:bg-green-100 transition-colors"
+                                                    isCristobal && "cursor-pointer hover:bg-blue-50 transition-colors"
                                                 )}
-                                                onClick={() => isCristobal && !row.isPenalty && handleAdjustClick(row.num, row.importeRecibido)}
+                                                onClick={() => isCristobal && handleAdjustClick(row.num, row.importeRecibido > 0 ? row.importeRecibido : row.importeAbono, row.tag !== 'pendiente' ? (row.tag as PaymentAdjustmentTag) : undefined)}
                                             >
                                                 <div className="flex items-center justify-end gap-1.5">
-                                                    {formatCurrency(row.importeRecibido)}
+                                                    <span>{formatCurrency(row.importeRecibido)}</span>
+                                                    {row.tag === 'adelanto' && (
+                                                        <Badge variant="secondary" className="bg-blue-100 text-blue-900 border border-blue-300 text-[8px] font-black h-3.5 px-1 uppercase shrink-0 gap-0.5 flex items-center">
+                                                            <ArrowUpRight className="h-2.5 w-2.5 text-blue-700 stroke-[2.5]" />
+                                                            Adelanto
+                                                        </Badge>
+                                                    )}
+                                                    {row.tag === 'asumido' && (
+                                                        <Badge variant="secondary" className="bg-sky-100 text-sky-900 border border-sky-300 text-[8px] font-black h-3.5 px-1 uppercase shrink-0">
+                                                            Asumido
+                                                        </Badge>
+                                                    )}
                                                     {row.isPenalty && (
                                                         <Badge className="bg-amber-600 text-white text-[7px] font-black h-3.5 px-1 uppercase shrink-0">EXTRA</Badge>
                                                     )}
-                                                    {isCristobal && !row.isPenalty && (
+                                                    {isCristobal && (
                                                         <PencilLine className="h-3 w-3 opacity-0 group-hover:opacity-100 text-blue-600 shrink-0 transition-opacity" />
                                                     )}
                                                 </div>
                                             </TableCell>
                                             <TableCell className={cn(
                                                 "text-center py-1.5 text-[9px] font-black uppercase",
+                                                row.tag === 'adelanto' ? "text-blue-700 font-extrabold" :
+                                                row.tag === 'asumido' ? "text-sky-700 font-extrabold" :
                                                 row.isRecovered ? "text-purple-700 dark:text-purple-400" :
                                                 row.status === 'MISSED' ? "text-rose-600" : row.status === 'PAID' ? "text-green-700" : "text-zinc-400"
                                             )}>
@@ -810,6 +841,7 @@ export function ConsultarClientePage({ clients: allClients, loans: allLoans, loa
                 loan={activeLoanDetails.loan}
                 weekNumber={adjustData.weekNumber}
                 currentAmount={adjustData.amount}
+                currentTag={adjustData.tag}
                 appConfig={appConfig}
                 onSuccess={() => {
                     if (typeof window !== 'undefined') window.location.reload();

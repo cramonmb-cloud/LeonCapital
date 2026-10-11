@@ -544,6 +544,10 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
           }
           if (paymentForWeek) {
               const totalPaidForWeek = paymentForWeek.amount;
+              const isAssumed = paymentForWeek.paymentType === 'assumed';
+              if (isAssumed) {
+                  return { status: 'paid' as const, date: weekDate, amountPaid: totalPaidForWeek > 0 ? totalPaidForWeek : weeklyPaymentAmount, isAssumedPaid: true, isRecovered: false };
+              }
               if (totalPaidForWeek >= weeklyPaymentAmount) {
                   return { status: 'paid' as const, date: weekDate, amountPaid: totalPaidForWeek, isAssumedPaid: false, isRecovered: paymentForWeek.isRecovered };
               } else {
@@ -669,6 +673,19 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
                 (weekNumber > currentLoanWeek && totalPaidForWeek > 0)
             );
             const isAccumulated = paymentForWeek.isAccumulated || false;
+            const isAssumed = paymentForWeek.paymentType === 'assumed';
+
+            if (isAssumed) {
+                return { 
+                    status: 'paid' as const, 
+                    date: weekDate, 
+                    amountPaid: totalPaidForWeek > 0 ? totalPaidForWeek : weeklyPaymentAmount, 
+                    isAssumedPaid: true, 
+                    isRecovered: false,
+                    isAdvance: false,
+                    isAccumulated
+                };
+            }
 
             if(totalPaidForWeek >= weeklyPaymentAmount) {
                 return { 
@@ -712,9 +729,9 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
                     existingPayment.isAdvance || 
                     existingPayment.paymentType === 'adelanto_entrante' || 
                     (regTime < targetWeekSat) ||
-                    weekNumber >= currentLoanWeek
+                    weekNumber > currentLoanWeek
                   )
-                : (weekNumber >= currentLoanWeek);
+                : (weekNumber > currentLoanWeek);
             return { 
                 status: 'paid' as const, 
                 date: weekDate, 
