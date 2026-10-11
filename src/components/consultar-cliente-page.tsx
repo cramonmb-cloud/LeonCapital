@@ -9,7 +9,7 @@ import { Search, Wallet, Calendar, Shield, Phone, Home, X, CircleDollarSign, Bui
 import { Separator } from './ui/separator';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
-import { cn, getCurrentLoanWeekNumber, getExtraWeekThreshold } from '@/lib/utils';
+import { cn, getCurrentLoanWeekNumber, getExtraWeekThreshold, doesLoanHavePenalty, isWeekMissedOrRecovered } from '@/lib/utils';
 import { useAuth } from '@/hooks/use-auth';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { ScrollArea } from './ui/scroll-area';
@@ -216,20 +216,18 @@ export function ConsultarClientePage({ clients: allClients, loans: allLoans, loa
         const p = (activeLoan.payments || []).find(pay => pay.weekNumber === i);
         if (p && !p.isReverted) {
             totalPaidInBaseTerm += p.amount;
-            if (p.amount < weeklyPayment || p.isRecovered || p.paymentType === 'recovered') {
+            if (isWeekMissedOrRecovered(p, weeklyPayment)) {
                 missedCount++;
             }
             if (p.amount < weeklyPayment) {
                 baseArrears += (weeklyPayment - p.amount);
             }
         } else if (i < currentLoanWeek) {
-            missedCount++;
             baseArrears += weeklyPayment;
         }
     }
 
-    // REGLA DINÁMICA: Penalización según umbral de fallos configurado o venció debiendo del base
-    const hasPenalty = activeLoan.hasPenalty || (missedCount >= penaltyThreshold) || (isExpired && totalPaidInBaseTerm < (baseTerm * weeklyPayment));
+    const hasPenalty = doesLoanHavePenalty(activeLoan, baseTerm, weeklyPayment, penaltyThreshold);
     const totalTerm = baseTerm + (hasPenalty ? 1 : 0);
 
     const actualTotalPaid = (activeLoan.payments || []).reduce((acc, p) => acc + p.amount, 0);

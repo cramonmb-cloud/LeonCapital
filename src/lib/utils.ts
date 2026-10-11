@@ -245,32 +245,37 @@ export function getExtraWeekThreshold(config?: { extraWeekMissedThreshold?: numb
 
 /**
  * Determina si una semana específica contó como fallo u omisión en el historial del préstamo:
- * 1. Tuvo pago pero fue parcial (< weeklyPayment).
- * 2. Tuvo pago pero fue registrado como Recuperado (isRecovered o paymentType === 'recovered').
- *    Incluso si el cliente regularizó el abono después, la falta queda asentada para efectos
- *    de la regla de penalización de semana extra.
- * 3. No tiene pago registrado y la semana ya transcurrió (i < currentLoanWeek).
+ * REGLA ESTRICTA:
+ * - Si el pago está PENDIENTE o ASUMIDO, NO es fallo.
+ * - Solo es fallo si quedó registrado como tal como fallo y acumulado.
  */
 export function isWeekMissedOrRecovered(
-  payment: { amount?: number; isReverted?: boolean; isRecovered?: boolean; paymentType?: string } | undefined | null,
-  weekNumber: number,
-  currentLoanWeek: number,
-  weeklyPayment: number
+  payment: { amount?: number; isReverted?: boolean; isRecovered?: boolean; paymentType?: string; isAccumulated?: boolean } | undefined | null,
+  weeklyPayment: number,
+  weekNumber?: number,
+  currentLoanWeek?: number
 ): boolean {
   if (payment && !payment.isReverted) {
+    if (payment.paymentType === 'assumed') return false;
     const pAmount = (payment.amount === null || payment.amount === undefined || isNaN(payment.amount)) ? 0 : payment.amount;
-    if (pAmount < weeklyPayment || payment.isRecovered || payment.paymentType === 'recovered') {
+    if (pAmount < weeklyPayment && payment.isAccumulated) {
+      return true;
+    }
+    if ((payment.isRecovered || payment.paymentType === 'recovered') && payment.isAccumulated) {
       return true;
     }
     return false;
   }
-  return weekNumber < currentLoanWeek;
+  // Si no tiene pago, está PENDIENTE, NO es fallo
+  return false;
 }
 
 /**
  * Determina si a un préstamo le aplica la semana extra de penalización (+1 semana).
- * Una vez alcanzado el umbral de fallos (omisiones, parciales o recuperados), la semana extra
- * se activa de manera definitiva e irrevocable.
+ * REGLA ESTRICTA:
+ * 1. Solo se activa si los fallos registrados como tal y acumulados alcanzan el umbral configurado.
+ * 2. Si el pago está pendiente o asumido, NO es fallo y por tanto no activa la semana extra.
+ * 3. Si el préstamo expiró (currentLoanWeek > baseTerm) y no cubrió el total esperado del plazo base.
  */
 export function doesLoanHavePenalty(
   loan: { startDate: any; payments?: any[]; hasPenalty?: boolean; amount?: number },
@@ -279,8 +284,6 @@ export function doesLoanHavePenalty(
   threshold: number = 2,
   referenceDate: Date = getMexicoNow()
 ): boolean {
-  if (loan.hasPenalty) return true;
-
   const currentLoanWeek = Math.max(1, getCurrentLoanWeekNumber(loan.startDate, referenceDate));
   const isExpired = currentLoanWeek > baseTerm;
 
@@ -293,15 +296,19 @@ export function doesLoanHavePenalty(
     if (p && !p.isReverted) {
       const pAmount = (p.amount === null || p.amount === undefined || isNaN(p.amount)) ? 0 : p.amount;
       totalPaidInBaseTerm += pAmount;
-      if (pAmount < weeklyPayment || p.isRecovered || p.paymentType === 'recovered') {
-        missedCount++;
+      if (p.paymentType !== 'assumed') {
+        if (pAmount < weeklyPayment && p.isAccumulated) {
+          missedCount++;
+        } else if ((p.isRecovered || p.paymentType === 'recovered') && p.isAccumulated) {
+          missedCount++;
+        }
       }
-    } else if (i < currentLoanWeek) {
-      missedCount++;
     }
+    // Si no hay pago (p es undefined o isReverted), está PENDIENTE, NO cuenta como fallo acumulado
   }
 
-  return (missedCount >= threshold) || (isExpired && totalPaidInBaseTerm < (baseTerm * weeklyPayment));
+  const expiredWithoutFullPayment = isExpired && totalPaidInBaseTerm < (baseTerm * weeklyPayment);
+  return (missedCount >= threshold) || expiredWithoutFullPayment;
 }
 
 export interface LoanWeeklyDebeBreakdown {

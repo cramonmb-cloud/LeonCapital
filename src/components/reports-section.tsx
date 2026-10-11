@@ -13,7 +13,7 @@ import 'jspdf-autotable';
 import type { UserOptions } from 'jspdf-autotable';
 import { useToast } from '@/hooks/use-toast';
 import type { DateRange } from 'react-day-picker';
-import { getCurrentLoanWeekNumber, getExtraWeekThreshold } from '@/lib/utils';
+import { getCurrentLoanWeekNumber, getExtraWeekThreshold, doesLoanHavePenalty, isWeekMissedOrRecovered } from '@/lib/utils';
 
 interface jsPDFWithAutoTable extends jsPDF {
   autoTable: (options: UserOptions) => jsPDF;
@@ -126,19 +126,18 @@ export function ReportsSection({ loans, clients, loanPlans, plazas, localidades,
             const p = currentPayments.find(pay => pay.weekNumber === i);
             if (p && !p.isReverted) {
               totalPaidInBaseTerm += p.amount;
-              if (p.amount < weeklyPayment || p.isRecovered || p.paymentType === 'recovered') {
+              if (isWeekMissedOrRecovered(p, weeklyPayment)) {
                 missedCount++;
               }
               if (p.amount < weeklyPayment) {
                 baseArrears += (weeklyPayment - p.amount);
               }
             } else if (i < currentLoanWeek) {
-              missedCount++;
               baseArrears += weeklyPayment;
             }
           }
 
-          const hasPenalty = loan.hasPenalty || (missedCount >= penaltyThreshold) || (isExpired && totalPaidInBaseTerm < (baseTerm * weeklyPayment));
+          const hasPenalty = doesLoanHavePenalty(loan, baseTerm, weeklyPayment, penaltyThreshold);
           let penaltyArrear = 0;
           if (hasPenalty) {
               const penaltyWeekNum = baseTerm + 1;
@@ -185,19 +184,18 @@ export function ReportsSection({ loans, clients, loanPlans, plazas, localidades,
             const p = currentPayments.find(pay => pay.weekNumber === i);
             if (p && !p.isReverted) {
               totalPaidInBaseTerm += p.amount;
-              if (p.amount < weeklyPayment || p.isRecovered || p.paymentType === 'recovered') {
+              if (isWeekMissedOrRecovered(p, weeklyPayment)) {
                 missedCount++;
               }
               if (p.amount < weeklyPayment) {
                 baseArrears += (weeklyPayment - p.amount);
               }
             } else if (i < currentLoanWeek) {
-              missedCount++;
               baseArrears += weeklyPayment;
             }
           }
 
-          const hasPenalty = loan.hasPenalty || (missedCount >= penaltyThreshold) || (currentLoanWeek > baseTerm && totalPaidInBaseTerm < (baseTerm * weeklyPayment));
+          const hasPenalty = doesLoanHavePenalty(loan, baseTerm, weeklyPayment, penaltyThreshold);
           let penaltyArrear = 0;
           if (hasPenalty) {
               const penaltyWeekNum = baseTerm + 1;
@@ -303,21 +301,9 @@ export function ReportsSection({ loans, clients, loanPlans, plazas, localidades,
           
           const currentLoanWeek = Math.max(1, getCurrentLoanWeekNumber(loan.startDate));
 
-          let missedCount = 0;
           const currentPayments = loan.payments || [];
           const actualTotalPaid = currentPayments.reduce((acc, p) => acc + p.amount, 0);
-
-          for (let i = 1; i <= baseTerm; i++) {
-            const p = currentPayments.find(pay => pay.weekNumber === i);
-            if (p && !p.isReverted) {
-              if (p.amount < weeklyPayment || p.isRecovered || p.paymentType === 'recovered') {
-                missedCount++;
-              }
-            } else if (i < currentLoanWeek) {
-              missedCount++;
-            }
-          }
-          const hasPenalty = loan.hasPenalty || (missedCount >= penaltyThreshold) || (currentLoanWeek > baseTerm && (actualTotalPaid < baseTerm * weeklyPayment));
+          const hasPenalty = doesLoanHavePenalty(loan, baseTerm, weeklyPayment, penaltyThreshold);
           const totalTerm = baseTerm + (hasPenalty ? 1 : 0);
           totalDebt += Math.max(0, (totalTerm * weeklyPayment) - actualTotalPaid);
         });

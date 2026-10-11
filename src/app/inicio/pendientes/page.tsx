@@ -2,7 +2,7 @@ import { getClients, getLoanPlans, getActiveLoans, getPlazas, getLocalidades, ge
 import type { Client, Loan, LoanPlan, Plaza, Localidad, Promotora } from '@/lib/types';
 import { OverduePortfolioClientPage } from '@/components/overdue-portfolio-client-page';
 import type { OverdueLoanDetails } from '../cartera-vencida/page';
-import { getCurrentLoanWeekNumber, getExtraWeekThreshold } from '@/lib/utils';
+import { getCurrentLoanWeekNumber, getExtraWeekThreshold, doesLoanHavePenalty, isWeekMissedOrRecovered } from '@/lib/utils';
 
 export default async function OverduePortfolioPage() {
     const [loans, clients, loanPlans, plazas, localidades, promotoras, config] = await Promise.all([
@@ -42,19 +42,17 @@ export default async function OverduePortfolioPage() {
                 const p = loan.payments.find(pay => pay.weekNumber === i);
                 if (p && !p.isReverted) {
                     totalPaidInBaseTerm += p.amount;
-                    if (p.amount < weeklyPayment || p.isRecovered || p.paymentType === 'recovered') {
+                    if (isWeekMissedOrRecovered(p, weeklyPayment)) {
                         missedCount++;
                     }
                     if (p.amount < weeklyPayment) {
                         baseArrears += (weeklyPayment - p.amount);
                     }
                 } else if (i < currentLoanWeek) {
-                    missedCount++;
                     baseArrears += weeklyPayment;
                 }
             }
-            // REGLA DINÁMICA: Penalización según umbral de fallos configurado o venció debiendo del base
-            const hasPenalty = loan.hasPenalty || (missedCount >= penaltyThreshold) || (isExpired && totalPaidInBaseTerm < (baseTerm * weeklyPayment));
+            const hasPenalty = doesLoanHavePenalty(loan, baseTerm, weeklyPayment, penaltyThreshold);
 
             let penaltyArrear = 0;
             if (hasPenalty) {

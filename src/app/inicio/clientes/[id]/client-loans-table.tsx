@@ -23,7 +23,7 @@ import {
     DialogTitle,
 } from '@/components/ui/dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { cn, getSaturdayOfWeek, getCurrentLoanWeekNumber, getExtraWeekThreshold } from '@/lib/utils';
+import { cn, getSaturdayOfWeek, getCurrentLoanWeekNumber, getExtraWeekThreshold, doesLoanHavePenalty } from '@/lib/utils';
 import { ManualPaymentAdjustmentDialog } from '@/components/manual-payment-adjustment-dialog';
 import type { AppConfig } from '@/lib/types';
 
@@ -144,22 +144,8 @@ export function ClientLoansTable({ clientLoans, loanPlans, allLoans, users, plaz
       const currentLoanWeek = Math.max(1, getCurrentLoanWeekNumber(loanForDetails.startDate));
 
       const baseTerm = plan.termInWeeks;
-      const isExpired = currentLoanWeek > baseTerm;
-
-      let missedCount = 0;
-      let totalPaidInBaseTerm = 0;
-      for (let i = 1; i <= baseTerm; i++) {
-          const p = loanForDetails.payments.find(pay => pay.weekNumber === i);
-          if (p && !p.isReverted) {
-              totalPaidInBaseTerm += p.amount;
-              if (p.amount < weeklyPayment || p.isRecovered || p.paymentType === 'recovered') missedCount++;
-          } else if (i < currentLoanWeek) {
-              missedCount++;
-          }
-      }
-      
       const penaltyThreshold = getExtraWeekThreshold(appConfig);
-      const hasPenalty = loanForDetails.hasPenalty || (missedCount >= penaltyThreshold) || (isExpired && totalPaidInBaseTerm < (baseTerm * weeklyPayment));
+      const hasPenalty = doesLoanHavePenalty(loanForDetails, baseTerm, weeklyPayment, penaltyThreshold);
       const termInWeeks = baseTerm + (hasPenalty ? 1 : 0);
       const isLiquidated = loanForDetails.status === 'Paid Off' || loanForDetails.status === 'Pagado desde CV';
       

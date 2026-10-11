@@ -23,7 +23,7 @@ import {
     DialogDescription,
 } from '@/components/ui/dialog';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { cn, getSaturdayOfWeek, getCurrentLoanWeekNumber, getExtraWeekThreshold } from '@/lib/utils';
+import { cn, getSaturdayOfWeek, getCurrentLoanWeekNumber, getExtraWeekThreshold, doesLoanHavePenalty, isWeekMissedOrRecovered } from '@/lib/utils';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import {
     Table,
@@ -104,21 +104,20 @@ export function OverdueCard({
             const p = (loan.payments || []).find(pay => pay.weekNumber === i);
             if (p && !p.isReverted) {
                 totalPaidInBaseTerm += p.amount;
-                if (p.amount < weeklyPayment || p.isRecovered || p.paymentType === 'recovered') {
+                if (isWeekMissedOrRecovered(p, weeklyPayment)) {
                     missedCount++;
                 }
                 if (p.amount < weeklyPayment) {
                     sumMissedAmount += (weeklyPayment - p.amount);
                 }
             } else if (i < currentLoanWeek) {
-                missedCount++;
                 sumMissedAmount += weeklyPayment;
             }
         }
 
         // REGLA DINÁMICA: Penalización según umbral de fallos configurado o venció debiendo del base
         const penaltyThreshold = getExtraWeekThreshold(appConfig);
-        const hasPenalty = loan.hasPenalty || (missedCount >= penaltyThreshold) || (isExpired && totalPaidInBaseTerm < (baseTerm * weeklyPayment));
+        const hasPenalty = doesLoanHavePenalty(loan, baseTerm, weeklyPayment, penaltyThreshold);
         
         const totalPaid = (loan.payments || []).reduce((acc, p) => acc + p.amount, 0);
         const totalExpected = (baseTerm + (hasPenalty ? 1 : 0)) * weeklyPayment;

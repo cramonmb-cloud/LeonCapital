@@ -69,7 +69,7 @@ import { Tooltip, TooltipProvider, TooltipContent, TooltipTrigger } from '@/comp
 import type { Client, Loan, LoanPlan, Payment, Plaza, Localidad, Promotora, AppUser, AppConfig } from '@/lib/types';
 import { RegisterPaymentDialog } from './register-payment-dialog';
 import { useRouter } from 'next/navigation';
-import { cn, getSaturdayOfWeek, getMexicoNow, getCurrentLoanWeekNumber, parseLocalDate, getExtraWeekThreshold } from '@/lib/utils';
+import { cn, getSaturdayOfWeek, getMexicoNow, getCurrentLoanWeekNumber, parseLocalDate, getExtraWeekThreshold, doesLoanHavePenalty } from '@/lib/utils';
 import jsPDF from 'jspdf';
 import 'jspdf-autotable';
 import type { UserOptions } from 'jspdf-autotable';
@@ -225,13 +225,8 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
     const currentLoanWeek = getCurrentLoanWeekNumber(loan.startDate);
 
     const weeklyPayment = (loan.amount / 1000) * plan.weeklyPaymentRate;
-    let missedWeeksCount = 0;
-    for (let i = 1; i < currentLoanWeek; i++) {
-        const p = loan.payments?.find(pay => pay.weekNumber === i);
-        if (p && !p.isReverted && p.amount < weeklyPayment) missedWeeksCount++;
-    }
-
-    const term = plan.termInWeeks + (missedWeeksCount >= penaltyThreshold ? 1 : 0);
+    const hasPenalty = doesLoanHavePenalty(loan, plan.termInWeeks, weeklyPayment, penaltyThreshold);
+    const term = plan.termInWeeks + (hasPenalty ? 1 : 0);
     return currentLoanWeek <= term;
   };
 
@@ -306,17 +301,8 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
       if (!loanPlan) return false;
 
       const currentLoanWeek = getCurrentLoanWeekNumber(loan.startDate, mexicoNow);
-      let missedCount = 0;
       const wp = getWeeklyPaymentAmount(loan);
-      for (let i = 1; i < currentLoanWeek; i++) {
-        const p = loan.payments.find(pay => pay.weekNumber === i);
-        if (p && !p.isReverted) {
-          if (p.amount < wp || p.isRecovered || p.paymentType === 'recovered') missedCount++;
-        } else {
-          missedCount++;
-        }
-      }
-      const hasPenalty = loan.hasPenalty || (missedCount >= penaltyThreshold);
+      const hasPenalty = doesLoanHavePenalty(loan, loanPlan.termInWeeks, wp, penaltyThreshold, mexicoNow);
       const term = loanPlan.termInWeeks + (hasPenalty ? 1 : 0);
       const currentWeek = Math.min(currentLoanWeek, term);
 
@@ -352,17 +338,8 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
       if (!plan) return;
 
       const targetLoanWeek = getCurrentLoanWeekNumber(loan.startDate, cutoffSat);
-      let missedCount = 0;
       const wp = getWeeklyPaymentAmount(loan);
-      for (let i = 1; i < targetLoanWeek; i++) {
-        const p = (loan.payments || []).find(pay => pay.weekNumber === i);
-        if (p && !p.isReverted) {
-          if (p.amount < wp || p.isRecovered || p.paymentType === 'recovered') missedCount++;
-        } else {
-          missedCount++;
-        }
-      }
-      const hasPenalty = loan.hasPenalty || (missedCount >= penaltyThreshold);
+      const hasPenalty = doesLoanHavePenalty(loan, plan.termInWeeks, wp, penaltyThreshold, cutoffSat);
       const term = plan.termInWeeks + (hasPenalty ? 1 : 0);
       const maxWeekToFill = Math.min(targetLoanWeek, term);
 
@@ -407,19 +384,7 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
       const currentPayments = loan.payments || [];
       const actualTotalPaid = currentPayments.filter(p => !p.isReverted).reduce((acc, p) => acc + p.amount, 0);
 
-      let missedCount = 0;
-      let totalPaidInBaseTerm = 0;
-      for (let i = 1; i <= baseTerm; i++) {
-        const p = currentPayments.find(pay => pay.weekNumber === i);
-        if (p && !p.isReverted) {
-          totalPaidInBaseTerm += p.amount;
-          if (p.amount < weeklyPayment || p.isRecovered || p.paymentType === 'recovered') missedCount++;
-        } else {
-          missedCount++;
-        }
-      }
-
-      const hasPenalty = loan.hasPenalty || (missedCount >= penaltyThreshold) || (isExpired && totalPaidInBaseTerm < (baseTerm * weeklyPayment));
+      const hasPenalty = doesLoanHavePenalty(loan, baseTerm, weeklyPayment, penaltyThreshold);
       const totalExpected = (baseTerm + (hasPenalty ? 1 : 0)) * weeklyPayment;
       const balance = Math.max(0, totalExpected - actualTotalPaid);
 
@@ -434,19 +399,7 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
       const currentPayments = loan.payments || [];
       const actualTotalPaid = currentPayments.filter(p => !p.isReverted).reduce((acc, p) => acc + p.amount, 0);
 
-      let missedCount = 0;
-      let totalPaidInBaseTerm = 0;
-      for (let i = 1; i <= baseTerm; i++) {
-        const p = currentPayments.find(pay => pay.weekNumber === i);
-        if (p && !p.isReverted) {
-          totalPaidInBaseTerm += p.amount;
-          if (p.amount < weeklyPayment || p.isRecovered || p.paymentType === 'recovered') missedCount++;
-        } else {
-          missedCount++;
-        }
-      }
-
-      const hasPenalty = loan.hasPenalty || (missedCount >= penaltyThreshold) || (isExpired && totalPaidInBaseTerm < (baseTerm * weeklyPayment));
+      const hasPenalty = doesLoanHavePenalty(loan, baseTerm, weeklyPayment, penaltyThreshold);
       const totalExpected = (baseTerm + (hasPenalty ? 1 : 0)) * weeklyPayment;
       const saldo = Math.max(0, totalExpected - actualTotalPaid);
 
@@ -606,24 +559,10 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
         };
 
         filteredLoans.forEach(loan => {
-            if (loan.hasPenalty) {
-                newLoansWithPenalty[loan.id] = true;
-                return;
-            }
-            const currentLoanWeek = getCurrentLoanWeekNumber(loan.startDate, mexicoNow);
-            let missedWeeksCount = 0;
+            const plan = loanPlans.find(p => p.id === loan.loanPlanId);
+            if (!plan) return;
             const weeklyPayment = getWeeklyPaymentAmount(loan);
-            for (let i = 1; i < currentLoanWeek; i++) {
-                const paymentForWeek = loan.payments.find(p => p.weekNumber === i);
-                if (paymentForWeek && !paymentForWeek.isReverted) {
-                    if (paymentForWeek.amount < weeklyPayment || paymentForWeek.isRecovered || paymentForWeek.paymentType === 'recovered') {
-                        missedWeeksCount++;
-                    }
-                } else {
-                    missedWeeksCount++;
-                }
-            }
-            if (missedWeeksCount >= penaltyThreshold) {
+            if (doesLoanHavePenalty(loan, plan.termInWeeks, weeklyPayment, penaltyThreshold, mexicoNow)) {
                 newLoansWithPenalty[loan.id] = true;
             }
         });
@@ -670,17 +609,8 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
             
             const currentLoanWeek = getCurrentLoanWeekNumber(loan.startDate, mexicoNow);
             
-            let missedCount = 0;
             const wp = getWeeklyPaymentAmount(loan);
-            for (let i = 1; i < currentLoanWeek; i++) {
-                const p = loan.payments.find(pay => pay.weekNumber === i);
-                if (p && !p.isReverted) {
-                    if (p.amount < wp || p.isRecovered || p.paymentType === 'recovered') missedCount++;
-                } else {
-                    missedCount++;
-                }
-            }
-            const hasPenalty = loan.hasPenalty || (missedCount >= penaltyThreshold);
+            const hasPenalty = doesLoanHavePenalty(loan, loanPlan.termInWeeks, wp, penaltyThreshold, mexicoNow);
             const term = loanPlan.termInWeeks + (hasPenalty ? 1 : 0);
             const currentWeek = Math.min(currentLoanWeek, term);
 

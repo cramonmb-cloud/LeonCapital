@@ -74,7 +74,7 @@ import {
   Home
 } from 'lucide-react';
 import Link from 'next/link';
-import { cn, getCurrentLoanWeekNumber, getExtraWeekThreshold } from '@/lib/utils';
+import { cn, getCurrentLoanWeekNumber, getExtraWeekThreshold, doesLoanHavePenalty, isWeekMissedOrRecovered } from '@/lib/utils';
 
 interface jsPDFWithAutoTable extends jsPDF {
   autoTable: (options: UserOptions) => jsPDF;
@@ -1217,20 +1217,19 @@ export function AvalesClientPage({
               const p = (currentSelectedLoan.payments || []).find(pay => pay.weekNumber === i);
               if (p && !p.isReverted) {
                 totalPaidInBaseTerm += p.amount;
-                if (p.amount < weeklyPayment || p.isRecovered || p.paymentType === 'recovered') {
+                if (isWeekMissedOrRecovered(p, weeklyPayment)) {
                   missedCount++;
                 }
                 if (p.amount < weeklyPayment) {
                   baseArrears += (weeklyPayment - p.amount);
                 }
               } else if (i < currentLoanWeek) {
-                missedCount++;
                 baseArrears += weeklyPayment;
               }
             }
 
             const penaltyThreshold = getExtraWeekThreshold(realtimeData?.config);
-            const hasPenalty = currentSelectedLoan.hasPenalty || (missedCount >= penaltyThreshold) || (isExpired && totalPaidInBaseTerm < (baseTerm * weeklyPayment));
+            const hasPenalty = doesLoanHavePenalty(currentSelectedLoan, baseTerm, weeklyPayment, penaltyThreshold);
             const totalTerm = baseTerm + (hasPenalty ? 1 : 0);
 
             const actualTotalPaid = (currentSelectedLoan.payments || []).reduce((acc, p) => acc + p.amount, 0);

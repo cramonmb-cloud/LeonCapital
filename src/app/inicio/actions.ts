@@ -5,7 +5,7 @@ import { collection, doc, addDoc, serverTimestamp, updateDoc, runTransaction, in
 import { db } from '@/lib/firebase';
 import { revalidatePath } from 'next/cache';
 import { getLoanPlan, getClient, getLoan } from '@/lib/firestore-data';
-import { getSaturdayOfWeek, getMexicoNow, getCurrentLoanWeekNumber, parseLocalDate, getExtraWeekThreshold } from '@/lib/utils';
+import { getSaturdayOfWeek, getMexicoNow, getCurrentLoanWeekNumber, parseLocalDate, getExtraWeekThreshold, doesLoanHavePenalty } from '@/lib/utils';
 
 // Helper to handle Firestore dates consistently in server actions
 const parseFirestoreDate = (date: any): Date => parseLocalDate(date);
@@ -314,8 +314,11 @@ export async function registerPaymentAction(loanId: string, paymentStartDate: Da
 
                 // 1. Cubrir la semana en curso (startingWeekNumber)
                 const isStartAdvance = startingWeekNumber > currentLoanWeek;
-                const isPastWeek = startingWeekNumber < currentLoanWeek;
-                const isRecoveredStart = isPastWeek || (currentPayments.find(p => p.weekNumber === startingWeekNumber)?.isRecovered ?? false);
+                const existingStartP = currentPayments.find(p => p.weekNumber === startingWeekNumber);
+                const isRecoveredStart = Boolean(
+                    existingStartP?.isRecovered || 
+                    (existingStartP && existingStartP.isAccumulated && existingStartP.amount < weeklyPayment && existingStartP.paymentType !== 'assumed')
+                );
                 const neededStart = weeklyPayment;
                 if (remaining <= neededStart) {
                     updatedPaymentsMap.set(startingWeekNumber, { 
@@ -338,18 +341,23 @@ export async function registerPaymentAction(loanId: string, paymentStartDate: Da
                     for (const mw of missedWeeks) {
                         if (remaining <= 0) break;
                         const needed = weeklyPayment - mw.paidSoFar;
+                        const existingMwP = currentPayments.find(p => p.weekNumber === mw.weekNumber);
+                        const isActuallyRec = Boolean(
+                            existingMwP?.isRecovered || 
+                            (existingMwP && existingMwP.isAccumulated && existingMwP.amount < weeklyPayment && existingMwP.paymentType !== 'assumed')
+                        );
                         if (remaining >= needed) {
                             updatedPaymentsMap.set(mw.weekNumber, { 
                                 amount: weeklyPayment, 
-                                isRecovered: true,
-                                paymentType: 'recovered'
+                                isRecovered: isActuallyRec,
+                                paymentType: isActuallyRec ? 'recovered' : 'regular'
                             });
                             remaining -= needed;
                         } else {
                             updatedPaymentsMap.set(mw.weekNumber, { 
                                 amount: mw.paidSoFar + remaining, 
-                                isRecovered: true,
-                                paymentType: 'recovered'
+                                isRecovered: isActuallyRec,
+                                paymentType: isActuallyRec ? 'recovered' : 'regular'
                             });
                             remaining = 0;
                         }
@@ -361,22 +369,21 @@ export async function registerPaymentAction(loanId: string, paymentStartDate: Da
                         const existingNext = updatedPaymentsMap.get(nextWeek)?.amount || 0;
                         const neededNext = Math.max(0, weeklyPayment - existingNext);
                         const isAdv = nextWeek > currentLoanWeek;
-                        const isRec = nextWeek < currentLoanWeek;
                         if (remaining >= neededNext) {
                             updatedPaymentsMap.set(nextWeek, { 
                                 amount: weeklyPayment, 
-                                isRecovered: isRec,
+                                isRecovered: false,
                                 isAdvance: isAdv,
-                                paymentType: isAdv ? 'adelanto_entrante' : (isRec ? 'recovered' : 'regular')
+                                paymentType: isAdv ? 'adelanto_entrante' : 'regular'
                             });
                             remaining -= neededNext;
                             nextWeek++;
                         } else {
                             updatedPaymentsMap.set(nextWeek, { 
                                 amount: existingNext + remaining, 
-                                isRecovered: isRec,
+                                isRecovered: false,
                                 isAdvance: isAdv,
-                                paymentType: isAdv ? 'adelanto_entrante' : (isRec ? 'recovered' : 'regular')
+                                paymentType: isAdv ? 'adelanto_entrante' : 'regular'
                             });
                             remaining = 0;
                         }
@@ -437,28 +444,20 @@ export async function registerPaymentAction(loanId: string, paymentStartDate: Da
             const baseTerm = loanPlan.termInWeeks;
             
             // REGLA DINÁMICA DE CARTERA VENCIDA Y PENALIZACIÓN
-            let missedCount = 0;
-            let totalPaidInBaseTerm = 0;
-            for (let i = 1; i <= baseTerm; i++) {
-                const p = allPayments.find(pay => pay.weekNumber === i);
-                if (p && !p.isReverted) {
-                    totalPaidInBaseTerm += p.amount;
-                    if (p.amount < weeklyPayment || p.isRecovered || p.paymentType === 'recovered') missedCount++;
-                } else if (i < currentLoanWeek) {
-                    missedCount++;
-                }
-            }
-
-            const isExpired = currentLoanWeek > baseTerm;
-            const hasPenalty = loan.hasPenalty || (missedCount >= penaltyThreshold) || (isExpired && totalPaidInBaseTerm < (baseTerm * weeklyPayment));
+            const hasPenalty = doesLoanHavePenalty({ ...loan, payments: allPayments }, baseTerm, weeklyPayment, penaltyThreshold);
             
+            const isExpired = currentLoanWeek > baseTerm;
             const totalTerm = baseTerm + (hasPenalty ? 1 : 0);
             const totalExpected = totalTerm * weeklyPayment;
             const balance = Math.max(0, totalExpected - newTotalPaid);
 
+            const totalPaidInBaseTerm = allPayments
+                .filter(p => p.weekNumber >= 1 && p.weekNumber <= baseTerm && !p.isReverted)
+                .reduce((sum, p) => sum + p.amount, 0);
+
             let newStatus: Loan['status'] = loan.status;
             if (balance <= 0) {
-                newStatus = (isExpired || hasPenalty) ? 'Pagado desde CV' : 'Paid Off';
+                newStatus = (isExpired && totalPaidInBaseTerm < (baseTerm * weeklyPayment)) ? 'Pagado desde CV' : 'Paid Off';
             } else {
                 newStatus = (isExpired || currentLoanWeek > totalTerm) ? 'Overdue' : 'Active';
             }
@@ -466,7 +465,7 @@ export async function registerPaymentAction(loanId: string, paymentStartDate: Da
             transaction.update(loanRef, cleanFirestoreData({
                 payments: allPayments,
                 status: newStatus,
-                ...(hasPenalty ? { hasPenalty: true } : {})
+                hasPenalty: hasPenalty ? true : false
             }));
         });
 
@@ -514,26 +513,17 @@ export async function payOffLoanAction(loanId: string, userId?: string) {
                 date: parseFirestoreDate(p.date).toISOString()
             }));
 
-            let missedCount = 0;
-            let totalPaidInBaseTerm = 0;
-            for (let i = 1; i <= baseTerm; i++) {
-                const p = currentPayments.find(pay => pay.weekNumber === i);
-                if (p && !p.isReverted) {
-                    totalPaidInBaseTerm += p.amount;
-                    if (p.amount < weeklyPayment || p.isRecovered || p.paymentType === 'recovered') missedCount++;
-                } else if (i < currentLoanWeek) {
-                    missedCount++;
-                }
-            }
-
-            const hasPenalty = loan.hasPenalty || (missedCount >= penaltyThreshold) || (isExpired && totalPaidInBaseTerm < (baseTerm * weeklyPayment));
+            const hasPenalty = doesLoanHavePenalty({ ...loan, payments: currentPayments }, baseTerm, weeklyPayment, penaltyThreshold);
             const totalTerm = baseTerm + (hasPenalty ? 1 : 0);
             
             const totalExpected = totalTerm * weeklyPayment;
             const totalPaid = currentPayments.reduce((acc, p) => acc + p.amount, 0);
             const settlementAmount = Math.max(0, totalExpected - totalPaid);
             
-            const finalStatus: Loan['status'] = (isExpired || hasPenalty) ? 'Pagado desde CV' : 'Paid Off';
+            const totalPaidInBaseTerm = currentPayments
+                .filter(p => p.weekNumber >= 1 && p.weekNumber <= baseTerm && !p.isReverted)
+                .reduce((sum, p) => sum + p.amount, 0);
+            const finalStatus: Loan['status'] = (isExpired && totalPaidInBaseTerm < (baseTerm * weeklyPayment)) ? 'Pagado desde CV' : 'Paid Off';
 
             if (settlementAmount <= 0) {
                 transaction.update(loanRef, { status: finalStatus });
@@ -619,6 +609,7 @@ export async function payOffLoanAction(loanId: string, userId?: string) {
             transaction.update(loanRef, cleanFirestoreData({
                 payments: newPayments,
                 status: finalStatus,
+                hasPenalty: hasPenalty ? true : false,
             }));
             
             return { success: true, message: "Préstamo liquidado con éxito." };
@@ -769,41 +760,33 @@ export async function accumulateAssumedPaymentsAction(
 
                 // REGLA DINÁMICA DE CARTERA VENCIDA Y LIQUIDACIÓN AUTOMÁTICA
                 const baseTerm = plan.termInWeeks;
-                let missedCount = 0;
-                let totalPaidInBaseTerm = 0;
-                for (let i = 1; i <= baseTerm; i++) {
-                    const p = newPayments.find(pay => pay.weekNumber === i);
-                    if (p && !p.isReverted) {
-                        totalPaidInBaseTerm += p.amount;
-                        if (p.amount < weeklyPayment || p.isRecovered || p.paymentType === 'recovered') missedCount++;
-                    } else if (i < realCurrentLoanWeek) {
-                        missedCount++;
-                    }
-                }
-
-                const isExpired = realCurrentLoanWeek > baseTerm + 1;
-                const hasPenalty = loan.hasPenalty || (missedCount >= penaltyThreshold) || (isExpired && totalPaidInBaseTerm < (baseTerm * weeklyPayment));
+                const hasPenalty = doesLoanHavePenalty({ ...loan, payments: newPayments }, baseTerm, weeklyPayment, penaltyThreshold, mexicoNow);
                 
                 const totalTerm = baseTerm + (hasPenalty ? 1 : 0);
                 const totalExpected = totalTerm * weeklyPayment;
                 const newTotalPaid = newPayments.reduce((acc, p) => acc + p.amount, 0);
                 const balance = Math.max(0, totalExpected - newTotalPaid);
 
+                const isExpired = realCurrentLoanWeek > baseTerm + 1;
+                const totalPaidInBaseTerm = newPayments
+                    .filter(p => p.weekNumber >= 1 && p.weekNumber <= baseTerm && !p.isReverted)
+                    .reduce((sum, p) => sum + p.amount, 0);
+
                 let newStatus = loan.status;
                 if (balance <= 0) {
-                    newStatus = (isExpired || hasPenalty) ? 'Pagado desde CV' : 'Paid Off';
+                    newStatus = (isExpired && totalPaidInBaseTerm < (baseTerm * weeklyPayment)) ? 'Pagado desde CV' : 'Paid Off';
                 } else {
                     newStatus = (isExpired || realCurrentLoanWeek > totalTerm + 1) ? 'Overdue' : 'Active';
                 }
 
-                const penaltyChanged = hasPenalty && !loan.hasPenalty;
+                const penaltyChanged = (hasPenalty ? true : false) !== (loan.hasPenalty ? true : false);
                 if (hasChanges || newStatus !== loan.status || penaltyChanged) {
                     updateOps.push({ 
                         ref: loanSnap.ref, 
                         data: { 
                             payments: newPayments, 
                             status: newStatus,
-                            ...(hasPenalty ? { hasPenalty: true } : {})
+                            hasPenalty: hasPenalty ? true : false
                         } 
                     });
                 }
@@ -881,18 +864,7 @@ export async function accumulateAssumedPaymentsAction(
 
                     // 3. Recalcular saldo y status
                     const newTotalPaid = updatedPayments.filter(p => !p.isReverted).reduce((sum, p) => sum + p.amount, 0);
-                    let missedCount = 0;
-                    let totalPaidInBaseTerm = 0;
-                    for (let w = 1; w <= baseTerm; w++) {
-                        const p = updatedPayments.find(pay => pay.weekNumber === w);
-                        if (p && !p.isReverted) {
-                            totalPaidInBaseTerm += p.amount;
-                            if (p.amount < wp || p.isRecovered || p.paymentType === 'recovered') missedCount++;
-                        } else {
-                            missedCount++;
-                        }
-                    }
-                    const hasPenalty = oLoan.hasPenalty || (missedCount >= penaltyThreshold) || (totalPaidInBaseTerm < (baseTerm * wp));
+                    const hasPenalty = doesLoanHavePenalty({ ...oLoan, payments: updatedPayments }, baseTerm, wp, penaltyThreshold, mexicoNow);
                     const totalExpected = (baseTerm + (hasPenalty ? 1 : 0)) * wp;
                     const newBalance = Math.max(0, totalExpected - newTotalPaid);
                     const newStatus: Loan['status'] = newBalance <= 0 ? 'Pagado desde CV' : 'Overdue';
@@ -900,7 +872,7 @@ export async function accumulateAssumedPaymentsAction(
                     const updateData: any = {
                         payments: updatedPayments,
                         status: newStatus,
-                        ...(hasPenalty ? { hasPenalty: true } : {})
+                        hasPenalty: hasPenalty ? true : false
                     };
                     if (abonoItem.gestor) {
                         updateData.gestor = abonoItem.gestor;

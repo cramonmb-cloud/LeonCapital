@@ -54,7 +54,7 @@ import { IdScanner } from './id-scanner';
 import type { IdDataOutput } from '@/ai/flows/extract-id-data-flow';
 import { useAuth } from '@/hooks/use-auth';
 import { useRealtimeData } from '@/hooks/use-realtime-data';
-import { getCurrentLoanWeekNumber, parseEndorsement, getMexicoNow, getSaturdayOfWeek, getExtraWeekThreshold } from '@/lib/utils';
+import { getCurrentLoanWeekNumber, parseEndorsement, getMexicoNow, getSaturdayOfWeek, getExtraWeekThreshold, doesLoanHavePenalty } from '@/lib/utils';
 
 const stepOneSchema = z.object({
   promotoraId: z.string().min(1, 'Debes seleccionar una promotora.'),
@@ -499,18 +499,8 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
             const currentLoanWeek = getCurrentLoanWeekNumber(activeLoan.startDate);
 
             const baseTerm = loanPlan.termInWeeks;
-            let missedWeeksCount = 0;
-            for (let i = 1; i < currentLoanWeek; i++) {
-                const p = activeLoan.payments.find(p => p.weekNumber === i);
-                if (p && !p.isReverted) {
-                    if (p.amount < weeklyPayment || p.isRecovered || p.paymentType === 'recovered') missedWeeksCount++;
-                } else if (!p || p.isReverted) {
-                    missedWeeksCount++;
-                }
-            }
-
             const penaltyThreshold = getExtraWeekThreshold(realtimeData?.config);
-            const hasPenalty = activeLoan.hasPenalty || (missedWeeksCount >= penaltyThreshold);
+            const hasPenalty = doesLoanHavePenalty(activeLoan, baseTerm, weeklyPayment, penaltyThreshold);
             const termInWeeks = baseTerm + (hasPenalty ? 1 : 0);
             
             let effectivePaidBase = 0;
