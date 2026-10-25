@@ -104,6 +104,82 @@ export type PromotoraSettlement = {
     abonoSemanal: number;
     adelEnt: number;
     adelSal: number;
+    semExt?: number;
+    isClosed?: boolean;
+    closedAt?: string;
+    closedBy?: string;
+};
+
+export type PlazaClosureSummary = {
+    closedAt: string;
+    closedBy: string;
+    totalPromotoras: number;
+    totalDebeEntregar: number;
+    totalCobrado: number;
+    totalFalla: number;
+    totalRecuperado: number;
+    totalVenta: number;
+};
+
+export type WeeklyClosure = {
+    id: string; // weekDate (YYYY-MM-DD)
+    weekDate: string; // Saturday date string
+    isGlobalClosed: boolean;
+    closedPlazaIds: string[];
+    plazaClosures?: Record<string, PlazaClosureSummary>;
+    globalClosedAt?: string;
+    globalClosedBy?: string;
+    createdAt?: string;
+    updatedAt?: string;
+    updatedBy?: string;
+};
+
+export type PrecapturaGasto = {
+    id: string;
+    concepto: string;
+    importe: number;
+    observaciones?: string;
+};
+
+export type PrecapturaRow = {
+    promotoraId: string;
+    promotoraName: string;
+    comicionPercent: number; // % Com
+    supervisionPercent: number; // % Sup
+    debeEntregar: number; // Debe Entregar
+    falla: number; // Falla (manual)
+    recuperado: number; // Recuperado (manual)
+    totalEntregar: number; // Total a Entregar: debeEntregar - falla + recuperado
+    diferencia: number; // Diferencia: totalEntregar - debeEntregar
+    porcentajeFalla: number; // % Falla: (falla / debeEntregar) * 100
+    venta: number; // Venta (manual)
+    comision: number; // Comision: venta * (% Com / 100)
+    supervision: number; // Supervision: venta * (% Sup / 100)
+    adelantosEntrantes: number; // Adelantos Entrante
+    adelantosSalientes: number; // Adelantos Saliente
+    semanaExtra: number; // Sem. Extra (manual)
+};
+
+export type Precaptura = {
+    id: string; // `${plazaId}_${weekDate}`
+    plazaId: string;
+    plazaName?: string;
+    weekDate: string; // YYYY-MM-DD
+    isClosed?: boolean; // Pendiente de cierre (false = pendiente, true = cerrado)
+    fondo?: number;
+    acumularSupervision?: boolean;
+    observaciones?: string;
+    rows?: Record<string, Partial<PrecapturaRow>>;
+    gastos?: PrecapturaGasto[];
+    updatedAt?: string;
+    updatedBy?: string;
+};
+
+export type GastoConcept = {
+    id: string;
+    concepto: string;
+    count?: number;
+    lastUsedAt?: string;
 };
 
 export type UserPermissions = {
@@ -121,6 +197,8 @@ export type UserPermissions = {
     debes: boolean;
     imprenta: boolean;
     avales: boolean;
+    precaptura: boolean;
+    cierreSemanal: boolean;
     // Granular settings
     manageUsers: boolean;
     manageZones: boolean;

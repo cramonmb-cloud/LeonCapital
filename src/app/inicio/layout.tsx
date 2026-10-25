@@ -50,6 +50,8 @@ export default function DashboardLayout({
       overduePortfolio: 'operacion',
       carteraVencida: 'operacion',
       debes: 'operacion',
+      precaptura: 'administracion',
+      cierreSemanal: 'administracion',
       wallet: 'administracion',
       control: 'administracion',
       settings: 'administracion',

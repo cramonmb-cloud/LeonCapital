@@ -13,6 +13,7 @@ import { db } from '@/lib/firebase';
 import { cn, getSaturdayOfWeek, getMexicoNow, getExtraWeekThreshold, getLoanAbonoSalienteForWeek, isLoanInSemanaExtraForWeek, getLoanSemanaExtraPaidAmountForWeek } from '@/lib/utils';
 import type { Client, LoanPlan, Loan, Plaza, Localidad, Promotora, PromotoraSettlement } from '@/lib/types';
 import { saveSettlementAction, deleteSettlementAction, deleteGroupSettlementsAction } from '@/app/inicio/debes/actions';
+import { computePromotoraWeekMetrics } from '@/lib/settlement-calculator';
 import { useAuth } from '@/hooks/use-auth';
 import { Coins, Download, Save, Loader2, Building, MapPin, Calendar, AlertCircle, Lock, Unlock, RotateCcw, Printer } from 'lucide-react';
 import { BorradorDebeModal } from '@/components/borrador-debe-modal';
@@ -90,31 +91,38 @@ export function DebesClientPage({
     }
   }, [allAvailableWeeks, selectedWeek]);
 
-  const plazaPromotoraIds = useMemo(() => {
+  const activePromotoraIds = useMemo(() => {
+    if (selectedLocalidad) {
+      return initialPromotoras.filter(p => p.localidadId === selectedLocalidad).map(p => p.id);
+    }
     if (!selectedPlaza) return [];
     const locs = initialLocalidades.filter(l => l.plazaId === selectedPlaza);
     const locIds = locs.map(l => l.id);
     const proms = initialPromotoras.filter(p => locIds.includes(p.localidadId));
     return proms.map(p => p.id);
-  }, [selectedPlaza, initialLocalidades, initialPromotoras]);
+  }, [selectedPlaza, selectedLocalidad, initialLocalidades, initialPromotoras]);
 
   const dynamicLoansQuery = useMemo(() => {
     const loansCol = collection(db, 'loans');
-    if (plazaPromotoraIds.length === 0) {
+    if (activePromotoraIds.length === 0) {
       return query(loansCol, where('status', '==', 'NONE'));
     }
-    const slicedIds = plazaPromotoraIds.slice(0, 30);
-    return query(loansCol, where('promotoraId', 'in', slicedIds));
-  }, [plazaPromotoraIds]);
+    if (activePromotoraIds.length <= 30) {
+      return query(loansCol, where('promotoraId', 'in', activePromotoraIds));
+    }
+    return query(loansCol, where('status', 'in', ['Active', 'Overdue', 'Paid Off']));
+  }, [activePromotoraIds]);
 
   const dynamicSettlementsQuery = useMemo(() => {
     const settlementsCol = collection(db, 'promotoraSettlements');
-    if (plazaPromotoraIds.length === 0) {
-      return query(settlementsCol, where('promotoraId', '==', 'NONE'));
+    if (!selectedWeek) {
+      return query(settlementsCol, where('weekDate', '==', 'NONE'));
     }
-    const slicedIds = plazaPromotoraIds.slice(0, 30);
-    return query(settlementsCol, where('promotoraId', 'in', slicedIds));
-  }, [plazaPromotoraIds]);
+    const prevDate = new Date(selectedWeek + 'T00:00:00');
+    prevDate.setDate(prevDate.getDate() - 7);
+    const prevWeekStr = getSaturdayOfWeek(prevDate).toISOString().split('T')[0];
+    return query(settlementsCol, where('weekDate', 'in', [selectedWeek, prevWeekStr]));
+  }, [selectedWeek]);
 
   const { data: realtime } = useRealtimeData({
     clients: initialClients,
@@ -128,7 +136,7 @@ export function DebesClientPage({
       loans: dynamicLoansQuery,
       promotoraSettlements: dynamicSettlementsQuery
     },
-    deps: [plazaPromotoraIds]
+    deps: [activePromotoraIds, selectedWeek]
   });
 
   // Local overrides for unsaved edits: promotoraId -> overrides
@@ -184,6 +192,99 @@ export function DebesClientPage({
 
     return filteredPromotoras.map(promotora => {
       const pId = promotora.id;
+      const selectedSettlementId = `${pId}_${selectedWeek}`;
+      const directSaved = savedSettlements.find(s => s.id === selectedSettlementId);
+      const local = overrides[pId] || {};
+
+      // 1. Direct saved in database and no local edits: load instantly with zero calculations!
+      if (directSaved && Object.keys(local).length === 0) {
+        return {
+          id: directSaved.id,
+          promotoraId: pId,
+          promotoraName: promotora.name,
+          weekDate: selectedWeek,
+          debeEntregar: directSaved.debeEntregar ?? 0,
+          falla: directSaved.falla ?? 0,
+          efectivo: directSaved.efectivo ?? 0,
+          recuperado: directSaved.recuperado ?? 0,
+          total: directSaved.total ?? 0,
+          diferencia: directSaved.diferencia ?? 0,
+          deuda: directSaved.deuda ?? 0,
+          venta: directSaved.venta ?? 0,
+          comicion: directSaved.comicion ?? 0,
+          comicionPercent: directSaved.comicionPercent ?? 8,
+          supervision: directSaved.supervision ?? 0,
+          supervisionPercent: directSaved.supervisionPercent ?? 0,
+          abonoSemanal: directSaved.abonoSemanal ?? 0,
+          adelEnt: directSaved.adelEnt ?? 0,
+          adelSal: directSaved.adelSal ?? 0,
+          semExt: directSaved.semExt ?? getSemanaExtraCountForPromotora(pId, selectedWeek),
+          isDirty: false,
+          isSavedInDb: true,
+          isClosed: Boolean(directSaved.isClosed),
+        };
+      }
+
+      // 2. Fast-path: If previous week is saved, compute only the single current week!
+      const prevDate = new Date(selectedWeek + 'T00:00:00');
+      prevDate.setDate(prevDate.getDate() - 7);
+      const prevWeekStr = getSaturdayOfWeek(prevDate).toISOString().split('T')[0];
+      const prevSaved = savedSettlements.find(s => s.id === `${pId}_${prevWeekStr}`);
+
+      if (prevSaved) {
+        const computed = computePromotoraWeekMetrics({
+          promotoraId: pId,
+          promotoraName: promotora.name,
+          targetWeekStr: selectedWeek,
+          loans,
+          loanPlans,
+          config: realtime?.config,
+          prevSettlement: prevSaved,
+          savedSettlement: directSaved,
+        });
+
+        const debeEntregar = local.debeEntregar !== undefined ? local.debeEntregar : computed.debeEntregar;
+        const falla = local.falla !== undefined ? local.falla : computed.falla;
+        const recuperado = local.recuperado !== undefined ? local.recuperado : computed.recuperado;
+        const efectivo = local.efectivo !== undefined ? local.efectivo : Math.max(0, debeEntregar - falla);
+        const total = efectivo + recuperado;
+        const diferencia = efectivo - debeEntregar;
+        const deuda = local.deuda !== undefined ? local.deuda : Math.max(0, debeEntregar - efectivo);
+        const venta = local.venta !== undefined ? local.venta : computed.venta;
+        const comicionPercent = local.comicionPercent !== undefined ? local.comicionPercent : (computed.comicionPercent ?? 8);
+        const supervisionPercent = local.supervisionPercent !== undefined ? local.supervisionPercent : (computed.supervisionPercent || 0);
+        const comicion = local.comicion !== undefined ? local.comicion : Math.round(venta * (comicionPercent / 100));
+        const supervision = local.supervision !== undefined ? local.supervision : Math.round(venta * (supervisionPercent / 100));
+        const adelEnt = local.adelEnt !== undefined ? local.adelEnt : computed.adelEnt;
+        const adelSal = local.adelSal !== undefined ? local.adelSal : computed.adelSal;
+
+        return {
+          id: selectedSettlementId,
+          promotoraId: pId,
+          promotoraName: promotora.name,
+          weekDate: selectedWeek,
+          debeEntregar,
+          falla,
+          efectivo,
+          recuperado,
+          total,
+          diferencia,
+          deuda,
+          venta,
+          comicion,
+          comicionPercent,
+          supervision,
+          supervisionPercent,
+          abonoSemanal: computed.abonoSemanal,
+          adelEnt,
+          adelSal,
+          semExt: getSemanaExtraCountForPromotora(pId, selectedWeek),
+          isDirty: Object.keys(local).length > 0,
+          isSavedInDb: Boolean(directSaved),
+          isClosed: Boolean(directSaved?.isClosed),
+        };
+      }
+
       const pLoans = loans.filter(l => 
         l.promotoraId === pId && 
         parseLocalDate(l.startDate) >= new Date('2026-03-01T00:00:00')
@@ -311,11 +412,37 @@ export function DebesClientPage({
             const paymentSaturday = getSaturdayOfWeek(paymentDate);
             return paymentSaturday.getTime() === weekTime;
           });
-          const actualPaidInWeek = paymentsInWeek.reduce((sum, p) => sum + p.amount, 0);
+          // Regla de Negocio CrediControl:
+          // Solo se registra Falla si se capturó MANUALMENTE un abono parcial o en $0.
+          // Si el pago quedó como "asumido" (paymentType === 'assumed') o no hay captura manual de fallo,
+          // se toma como pagado al 100% en efectivo ($0 de falla).
+          let loanFalla = 0;
+          let loanEfectivo = 0;
+          let loanRecuperado = 0;
 
-          const loanFalla = Math.max(0, expectedForLoan - actualPaidInWeek);
-          const loanEfectivo = Math.min(actualPaidInWeek, expectedForLoan);
-          const loanRecuperado = Math.max(0, actualPaidInWeek - expectedForLoan);
+          if (expectedForLoan > 0) {
+            const hasManualPayment = paymentsInWeek.length > 0 && paymentsInWeek.some(p => p.paymentType !== 'assumed');
+
+            if (hasManualPayment) {
+              const manualPayments = paymentsInWeek.filter(p => p.paymentType !== 'assumed');
+              const manualPaid = manualPayments.reduce((sum, p) => sum + p.amount, 0);
+
+              if (manualPaid < expectedForLoan) {
+                loanFalla = expectedForLoan - manualPaid;
+                loanEfectivo = manualPaid;
+                loanRecuperado = 0;
+              } else {
+                loanFalla = 0;
+                loanEfectivo = expectedForLoan;
+                loanRecuperado = manualPaid - expectedForLoan;
+              }
+            } else {
+              // Pago asumido o semana sin captura manual de fallo: cubierto en su totalidad sin falla
+              loanFalla = 0;
+              loanEfectivo = expectedForLoan;
+              loanRecuperado = 0;
+            }
+          }
 
           realFalla += loanFalla;
           realEfectivo += loanEfectivo;

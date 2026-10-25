@@ -308,9 +308,8 @@ export function BorradorDebeModal({
         doc.text('Coordinador', margin, metaY);
         doc.text(coordName.toUpperCase(), margin + 55, metaY);
 
-        // Ejecutivo
+        // Ejecutivo (se deja en blanco para llenado manual)
         doc.text('Ejecutivo', 300, metaY);
-        doc.text(ejecutivoName.toUpperCase(), 345, metaY);
 
         // Plaza
         doc.text('Plaza', 600, metaY);

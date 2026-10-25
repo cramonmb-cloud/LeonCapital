@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { collection, onSnapshot, QuerySnapshot, DocumentData, Timestamp, Query } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-import type { Loan, Client, LoanPlan, Plaza, Localidad, Promotora, AppUser, AppConfig, PromotoraSettlement, Personal } from '@/lib/types';
+import type { Loan, Client, LoanPlan, Plaza, Localidad, Promotora, AppUser, AppConfig, PromotoraSettlement, Personal, WeeklyClosure } from '@/lib/types';
 import { errorEmitter } from '@/firebase/error-emitter';
 import { FirestorePermissionError, type SecurityRuleContext } from '@/firebase/errors';
 
@@ -15,6 +15,7 @@ interface RealtimeData {
     localidades: Localidad[];
     promotoras: Promotora[];
     promotoraSettlements: PromotoraSettlement[];
+    weeklyClosures: WeeklyClosure[];
     users: AppUser[];
     personal: Personal[];
     config: AppConfig | null;
@@ -56,6 +57,7 @@ const initialData: RealtimeData = {
     localidades: [],
     promotoras: [],
     promotoraSettlements: [],
+    weeklyClosures: [],
     users: [],
     personal: [],
     config: null,
@@ -92,6 +94,7 @@ export function useRealtimeData(
         localidades: collection(db, 'localidades'),
         promotoras: collection(db, 'promotoras'),
         promotoraSettlements: collection(db, 'promotoraSettlements'),
+        weeklyClosures: collection(db, 'weeklyClosures'),
         users: collection(db, 'users'),
         personal: collection(db, 'personal'),
         config: collection(db, 'config'),
@@ -114,6 +117,7 @@ export function useRealtimeData(
                   if (key === 'localidades') newData.localidades = processSnapshot<Localidad>(snapshot);
                   if (key === 'promotoras') newData.promotoras = processSnapshot<Promotora>(snapshot);
                   if (key === 'promotoraSettlements') newData.promotoraSettlements = processSnapshot<PromotoraSettlement>(snapshot);
+                  if (key === 'weeklyClosures') newData.weeklyClosures = processSnapshot<WeeklyClosure>(snapshot);
                   if (key === 'users') newData.users = processSnapshot<AppUser>(snapshot);
                   if (key === 'personal') newData.personal = processSnapshot<Personal>(snapshot);
                   if (key === 'config') {

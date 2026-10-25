@@ -113,6 +113,27 @@ service cloud.firestore {
       allow delete: if isAdmin() || isCristobal();
     }
 
+    // Precapturas de Plazas
+    match /precapturas/{id} {
+      allow read: if isStaff();
+      allow create, update: if isStaff();
+      allow delete: if isAdmin() || isCristobal();
+    }
+
+    // Cierres semanales de Plazas / Global
+    match /weeklyClosures/{id} {
+      allow read: if isStaff();
+      allow create, update: if isAdmin() || isCristobal();
+      allow delete: if isAdmin() || isCristobal();
+    }
+
+    // Conceptos frecuentes de gastos
+    match /gastoConcepts/{id} {
+      allow read: if isStaff();
+      allow create, update: if isStaff();
+      allow delete: if isAdmin() || isCristobal();
+    }
+
     // Avisos y Comunicados del Sistema
     match /avisos/{id} {
       allow read: if isStaff();
