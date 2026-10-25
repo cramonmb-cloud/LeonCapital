@@ -88,6 +88,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               avales: true,
               precaptura: true,
               cierreSemanal: true,
+              resumen: true,
               manageUsers: true,
               manageZones: true,
               manageMigration: true,

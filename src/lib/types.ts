@@ -199,6 +199,7 @@ export type UserPermissions = {
     avales: boolean;
     precaptura: boolean;
     cierreSemanal: boolean;
+    resumen: boolean;
     // Granular settings
     manageUsers: boolean;
     manageZones: boolean;

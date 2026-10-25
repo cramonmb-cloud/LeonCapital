@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/hooks/use-auth';
 import type { UserPermissions } from '@/lib/types';
-import { LayoutDashboard, Users, Landmark, FileWarning, Wallet, Settings, Activity, Search, History, Coins, Megaphone, UserCheck, Printer, ShieldCheck, FileSpreadsheet, Lock, type LucideIcon } from 'lucide-react';
+import { LayoutDashboard, Users, Landmark, FileWarning, Wallet, Settings, Activity, Search, History, Coins, Megaphone, UserCheck, Printer, ShieldCheck, FileSpreadsheet, Lock, BarChart3, type LucideIcon } from 'lucide-react';
 
 import { useState, useEffect, useMemo } from 'react';
 
@@ -17,6 +17,7 @@ export const allLinks: { href: string; label: string; id: string, icon: LucideIc
   { href: '/inicio/pendientes', label: 'Pendientes', id: 'overduePortfolio', icon: FileWarning },
   { href: '/inicio/cartera-vencida', label: 'Vencida', id: 'carteraVencida', icon: History },
   { href: '/inicio/debes', label: 'Debes', id: 'debes', icon: Coins },
+  { href: '/inicio/resumen', label: 'Resumen', id: 'resumen', icon: BarChart3 },
   { href: '/inicio/precaptura', label: 'Precaptura', id: 'precaptura', icon: FileSpreadsheet },
   { href: '/inicio/cierre-semanal', label: 'Cierre Semanal', id: 'cierreSemanal', icon: Lock },
   { href: '/inicio/bitacora', label: 'Bitacora', id: 'wallet', icon: Wallet },
@@ -63,6 +64,7 @@ export function MainNav({
       overduePortfolio: 'operacion',
       carteraVencida: 'operacion',
       debes: 'operacion',
+      resumen: 'operacion',
       precaptura: 'administracion',
       cierreSemanal: 'administracion',
       wallet: 'administracion',
