@@ -462,7 +462,7 @@ export function ResumenClientPage({
     toast({ title: 'CSV Generado', description: 'El resumen se descargó en formato CSV.' });
   };
 
-  // Export to PDF
+  // Export to PDF (Diseño Profesional en Tinta Negra para Impresión Oficial)
   const handleExportPDF = () => {
     if (filteredRows.length === 0) {
       toast({ title: 'Sin datos', description: 'No hay filas para imprimir.', variant: 'destructive' });
@@ -478,56 +478,155 @@ export function ResumenClientPage({
 
       const pageWidth = doc.internal.pageSize.getWidth();
       const pageHeight = doc.internal.pageSize.getHeight();
+      const marginX = 28;
 
-      // Header block
-      doc.setFillColor(30, 58, 138); // #1e3a8a Dark Blue
-      doc.rect(0, 0, pageWidth, 54, 'F');
+      // Metadata del documento
+      const fileId = `Resumen_Operativo_${selectedPlazaName.replace(/\s+/g, '_')}_${timeMode === 'single' ? selectedWeek : `${startWeek}_${endWeek}`}`;
+      doc.setProperties({
+        title: fileId,
+        subject: 'Resumen Operativo',
+        author: 'León Capital',
+        creator: 'CrediControl ERP'
+      });
 
-      doc.setTextColor(255, 255, 255);
+      // ─────────────────────────────────────────────────────────────
+      // ENCABEZADO EDITORIAL MINIMALISTA (SOLO TINTA NEGRA)
+      // ─────────────────────────────────────────────────────────────
+      // Línea superior estructural sólida
+      doc.setDrawColor(0, 0, 0);
+      doc.setLineWidth(2.2);
+      doc.line(marginX, 22, pageWidth - marginX, 22);
+
+      // Título Institucional
+      doc.setTextColor(0, 0, 0);
       doc.setFont('helvetica', 'bold');
-      doc.setFontSize(16);
-      doc.text('LEÓN CAPITAL  |  RESUMEN OPERATIVO CONSOLIDADO', 28, 26);
+      doc.setFontSize(14.5);
+      doc.text('LEÓN CAPITAL', marginX, 37);
 
+      const brandWidth = doc.getTextWidth('LEÓN CAPITAL');
       doc.setFont('helvetica', 'normal');
-      doc.setFontSize(10);
-      doc.text(`ZONA / PLAZA: ${selectedPlazaName}    |    PERÍODO: ${periodLabel.toUpperCase()}`, 28, 42);
+      doc.setFontSize(10.5);
+      doc.setTextColor(50, 50, 50);
+      doc.text('  |  RESUMEN OPERATIVO', marginX + brandWidth, 37);
 
+      // Subtítulo y Filtros
+      doc.setFontSize(8);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(0, 0, 0);
+      doc.text('PLAZA: ', marginX, 51);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(40, 40, 40);
+      doc.text(selectedPlazaName.toUpperCase(), marginX + 34, 51);
+
+      const plazaTextWidth = doc.getTextWidth(selectedPlazaName.toUpperCase());
+      const periodStartX = marginX + 34 + plazaTextWidth + 18;
+
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(0, 0, 0);
+      doc.text('PERÍODO: ', periodStartX, 51);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(40, 40, 40);
+      doc.text(periodLabel.toUpperCase(), periodStartX + 44, 51);
+
+      // Metadatos a la derecha (Emisión y Grupos)
       const todayStr = new Date().toLocaleDateString('es-MX', {
         day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit'
       });
-      doc.setFontSize(8.5);
-      doc.text(`Generado: ${todayStr} por ${appUser?.username || 'Sistema'}`, pageWidth - 28, 42, { align: 'right' });
+      const metaRightX = pageWidth - marginX;
 
-      // KPI summary boxes
-      const boxY = 64;
-      const boxWidth = (pageWidth - 56 - 24) / 4;
-      const boxHeight = 42;
+      doc.setFontSize(7.2);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(0, 0, 0);
+      doc.text('EMISIÓN:', metaRightX - 145, 37);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(50, 50, 50);
+      doc.text(todayStr, metaRightX, 37, { align: 'right' });
 
-      const kpis = [
-        { label: 'VENTA TOTAL', val: formatCurrency(totals.venta) },
-        { label: 'DEBE ENTREGAR', val: formatCurrency(totals.debeEntregar) },
-        { label: 'COBRANZA TOTAL', val: formatCurrency(totals.totalCobrado) },
-        { label: 'FALLA TOTAL', val: `${formatCurrency(totals.falla)} (${globalFallaPercent.toFixed(1)}%)` },
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(0, 0, 0);
+      doc.text('GRUPOS:', metaRightX - 145, 51);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(50, 50, 50);
+      doc.text(`${filteredRows.length} grupos / promotoras`, metaRightX, 51, { align: 'right' });
+
+      // Línea divisoria sutil
+      doc.setDrawColor(200, 200, 200);
+      doc.setLineWidth(0.6);
+      doc.line(marginX, 60, pageWidth - marginX, 60);
+
+      // ─────────────────────────────────────────────────────────────
+      // TARJETAS EJECUTIVAS DE KPIS (TINTA NEGRA / ALTO CONTRASTE)
+      // ─────────────────────────────────────────────────────────────
+      const boxY = 67;
+      const totalWidth = pageWidth - (marginX * 2);
+      const gap = 8;
+      const numBoxes = 5;
+      const boxWidth = (totalWidth - (gap * (numBoxes - 1))) / numBoxes;
+      const boxHeight = 38;
+
+      const kpiItems = [
+        {
+          label: 'VENTA TOTAL',
+          val: formatCurrency(totals.venta),
+          sub: 'Colocación bruta'
+        },
+        {
+          label: 'DEBE ENTREGAR',
+          val: formatCurrency(totals.debeEntregar),
+          sub: 'Cobro exigible del período'
+        },
+        {
+          label: 'COBRANZA TOTAL',
+          val: formatCurrency(totals.totalCobrado),
+          sub: `Efec: ${formatCurrency(totals.efectivo)} | Rec: ${formatCurrency(totals.recuperado)}`
+        },
+        {
+          label: 'FALLA TOTAL',
+          val: formatCurrency(totals.falla),
+          sub: `Tasa de mora: ${globalFallaPercent.toFixed(1)}%`
+        },
+        {
+          label: 'BALANCE NETO',
+          val: formatCurrency(balanceNeto),
+          sub: `Dif: ${formatCurrency(totals.diferencia)} | Com: ${formatCurrency(totals.comision)}`
+        }
       ];
 
-      kpis.forEach((kpi, idx) => {
-        const bx = 28 + idx * (boxWidth + 8);
-        doc.setFillColor(248, 250, 252);
-        doc.setDrawColor(203, 213, 225);
-        doc.roundedRect(bx, boxY, boxWidth, boxHeight, 3, 3, 'FD');
+      kpiItems.forEach((kpi, idx) => {
+        const bx = marginX + idx * (boxWidth + gap);
 
-        doc.setTextColor(71, 85, 105);
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(7.5);
-        doc.text(kpi.label, bx + 8, boxY + 14);
+        // Fondo y contorno nítido en escala de grises / negro
+        doc.setFillColor(252, 252, 252);
+        doc.setDrawColor(30, 30, 30);
+        doc.setLineWidth(0.6);
+        doc.roundedRect(bx, boxY, boxWidth, boxHeight, 2, 2, 'FD');
 
-        doc.setTextColor(15, 23, 42);
+        // Línea acento negro puro superior de 2pt
+        doc.setFillColor(0, 0, 0);
+        doc.rect(bx, boxY, boxWidth, 2, 'F');
+
+        // Etiqueta del KPI
         doc.setFont('helvetica', 'bold');
-        doc.setFontSize(12);
-        doc.text(kpi.val, bx + 8, boxY + 32);
+        doc.setFontSize(6.2);
+        doc.setTextColor(70, 70, 70);
+        doc.text(kpi.label, bx + 6, boxY + 11.5);
+
+        // Valor principal en negrita de alto impacto
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(10.5);
+        doc.setTextColor(0, 0, 0);
+        doc.text(kpi.val, bx + 6, boxY + 23.5);
+
+        // Subtítulo contextual
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(5.8);
+        doc.setTextColor(100, 100, 100);
+        doc.text(kpi.sub, bx + 6, boxY + 33);
       });
 
-      // Table preparation
+      // ─────────────────────────────────────────────────────────────
+      // TABLA DE DATOS DETALLADA (AUTOTABLE)
+      // ─────────────────────────────────────────────────────────────
       const tableHead = [[
         'PLAZA',
         'GRUPO',
@@ -587,67 +686,134 @@ export function ResumenClientPage({
         body: tableBody,
         foot: tableFoot,
         startY: 114,
-        margin: { left: 28, right: 28, bottom: 32 },
+        margin: { top: 28, left: marginX, right: marginX, bottom: 32 },
+        showHead: 'everyPage',
+        showFoot: 'lastPage',
         theme: 'grid',
         headStyles: {
-          fillColor: [241, 245, 249],
-          textColor: [15, 23, 42],
-          fontSize: 7.5,
+          fillColor: [15, 15, 15], // Negro puro/azabache profesional
+          textColor: [255, 255, 255],
+          fontSize: 6.8,
           fontStyle: 'bold',
           halign: 'center',
-          cellPadding: 4,
-          lineColor: [203, 213, 225],
+          valign: 'middle',
+          cellPadding: { top: 4, bottom: 4, left: 2.5, right: 2.5 },
+          lineColor: [15, 15, 15],
           lineWidth: 0.5,
+        },
+        alternateRowStyles: {
+          fillColor: [248, 248, 248], // Tinte muy claro para lectura descansada sin gastar tóner
         },
         bodyStyles: {
-          fontSize: 7.5,
-          cellPadding: 3.5,
-          lineColor: [226, 232, 240],
-          lineWidth: 0.5,
-          textColor: [30, 41, 59],
+          fillColor: [255, 255, 255],
+          fontSize: 6.8,
+          cellPadding: { top: 3.2, bottom: 3.2, left: 2.5, right: 2.5 },
+          lineColor: [220, 220, 220],
+          lineWidth: 0.4,
+          textColor: [10, 10, 10], // Negro nítido
         },
         footStyles: {
-          fillColor: [226, 232, 240],
-          textColor: [15, 23, 42],
-          fontSize: 8,
+          fillColor: [230, 230, 230], // Gris neutro distintivo para los totales
+          textColor: [0, 0, 0],
+          fontSize: 7.2,
           fontStyle: 'bold',
-          cellPadding: 4,
-          lineColor: [148, 163, 184],
-          lineWidth: 1,
+          cellPadding: { top: 4, bottom: 4, left: 2.5, right: 2.5 },
+          lineColor: [0, 0, 0],
+          lineWidth: 0.75,
         },
         columnStyles: {
-          0: { cellWidth: 70, halign: 'left' },
-          1: { cellWidth: 95, halign: 'left' },
-          2: { halign: 'right' },
-          3: { halign: 'right', fontStyle: 'bold' },
-          4: { halign: 'right' },
-          5: { halign: 'center' },
-          6: { halign: 'right' },
-          7: { halign: 'right' },
-          8: { halign: 'right', fontStyle: 'bold' },
-          9: { halign: 'right' },
-          10: { halign: 'right' },
-          11: { halign: 'right' },
-          12: { halign: 'right' },
-          13: { halign: 'right' },
-          14: { halign: 'center', cellWidth: 50 },
-        },
-        didDrawPage: (data) => {
-          doc.setFontSize(7.5);
-          doc.setTextColor(148, 163, 184);
-          doc.text(
-            `CrediControl ERP  •  Página ${data.pageNumber} de ${doc.internal.pages.length - 1}`,
-            pageWidth / 2,
-            pageHeight - 16,
-            { align: 'center' }
-          );
+          0: { cellWidth: 62, halign: 'left', fontStyle: 'bold' },
+          1: { cellWidth: 84, halign: 'left' },
+          2: { cellWidth: 44, halign: 'right' },
+          3: { cellWidth: 48, halign: 'right', fontStyle: 'bold' },
+          4: { cellWidth: 44, halign: 'right' },
+          5: { cellWidth: 36, halign: 'center' },
+          6: { cellWidth: 44, halign: 'right' },
+          7: { cellWidth: 42, halign: 'right' },
+          8: { cellWidth: 48, halign: 'right', fontStyle: 'bold' },
+          9: { cellWidth: 44, halign: 'right' },
+          10: { cellWidth: 40, halign: 'right' },
+          11: { cellWidth: 38, halign: 'right' },
+          12: { cellWidth: 40, halign: 'right' },
+          13: { cellWidth: 40, halign: 'right' },
+          14: { cellWidth: 44, halign: 'center', fontStyle: 'bold' },
         }
       });
+
+      // ─────────────────────────────────────────────────────────────
+      // SECCIÓN DE FIRMAS EN LA ÚLTIMA PÁGINA (SI HAY ESPACIO)
+      // ─────────────────────────────────────────────────────────────
+      const finalY = (doc as any).lastAutoTable?.finalY;
+      if (finalY && finalY + 54 <= pageHeight - 34) {
+        const sigY = finalY + 36;
+        const sigWidth = 140;
+        const availableWidth = pageWidth - (marginX * 2);
+        const sigGap = (availableWidth - (3 * sigWidth)) / 2;
+
+        const signatures = [
+          { title: 'ENTREGA / SUPERVISIÓN', desc: 'Firma y Fecha de Emisión' },
+          { title: 'REVISIÓN / AUDITORÍA', desc: 'Conciliación de Cobranza y Falla' },
+          { title: 'AUTORIZACIÓN / GERENCIA', desc: 'Visto Bueno de Cierre Operativo' }
+        ];
+
+        signatures.forEach((sig, idx) => {
+          const sx = marginX + idx * (sigWidth + sigGap);
+          // Línea de firma negra nítida
+          doc.setDrawColor(0, 0, 0);
+          doc.setLineWidth(0.75);
+          doc.line(sx, sigY, sx + sigWidth, sigY);
+
+          doc.setFont('helvetica', 'bold');
+          doc.setFontSize(6.5);
+          doc.setTextColor(0, 0, 0);
+          doc.text(sig.title, sx + (sigWidth / 2), sigY + 8.5, { align: 'center' });
+
+          doc.setFont('helvetica', 'normal');
+          doc.setFontSize(5.5);
+          doc.setTextColor(90, 90, 90);
+          doc.text(sig.desc, sx + (sigWidth / 2), sigY + 16, { align: 'center' });
+        });
+      }
+
+      // ─────────────────────────────────────────────────────────────
+      // PIE DE PÁGINA PROFESIONAL EN TODAS LAS PÁGINAS (DOBLE PASO)
+      // ─────────────────────────────────────────────────────────────
+      const totalPages = doc.getNumberOfPages();
+      for (let i = 1; i <= totalPages; i++) {
+        doc.setPage(i);
+
+        // Línea divisoria superior del pie
+        doc.setDrawColor(210, 210, 210);
+        doc.setLineWidth(0.5);
+        doc.line(marginX, pageHeight - 22, pageWidth - marginX, pageHeight - 22);
+
+        // Identidad y propósito
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(6.5);
+        doc.setTextColor(40, 40, 40);
+        doc.text('LEÓN CAPITAL', marginX, pageHeight - 12);
+
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(110, 110, 110);
+        doc.text('  •  SISTEMA ERP  •  RESUMEN OPERATIVO', marginX + 46, pageHeight - 12);
+
+        // Leyenda central
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(6);
+        doc.setTextColor(130, 130, 130);
+        doc.text('DOCUMENTO OFICIAL PARA USO INTERNO', pageWidth / 2, pageHeight - 12, { align: 'center' });
+
+        // Número de página exacto
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(6.8);
+        doc.setTextColor(0, 0, 0);
+        doc.text(`Página ${i} de ${totalPages}`, pageWidth - marginX, pageHeight - 12, { align: 'right' });
+      }
 
       const blob = doc.output('blob');
       const blobUrl = URL.createObjectURL(blob);
       window.open(blobUrl, '_blank');
-      toast({ title: 'PDF Generado', description: 'El reporte se abrió en una nueva pestaña.' });
+      toast({ title: 'PDF Generado', description: 'El reporte se abrió en una nueva pestaña listo para imprimir.' });
     } catch (err: any) {
       console.error('Error generating PDF:', err);
       toast({ title: 'Error', description: 'No se pudo generar el PDF.', variant: 'destructive' });

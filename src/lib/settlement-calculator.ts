@@ -173,9 +173,9 @@ export function computePromotoraWeekMetrics({
   let adelSal = realAdelSal;
   let semExt = realSemExt;
   let venta = realVenta;
-  let comicionPercent = 8;
+  let comicionPercent = 0;
   let supervisionPercent = 0;
-  let comicion = Math.round(venta * 0.08);
+  let comicion = 0;
   let supervision = 0;
   let efectivo = Math.max(0, debeEntregar - falla);
   let total = efectivo + recuperado;

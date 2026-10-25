@@ -212,7 +212,7 @@ export function DebesClientPage({
           deuda: directSaved.deuda ?? 0,
           venta: directSaved.venta ?? 0,
           comicion: directSaved.comicion ?? 0,
-          comicionPercent: directSaved.comicionPercent ?? 8,
+          comicionPercent: directSaved.comicionPercent ?? 0,
           supervision: directSaved.supervision ?? 0,
           supervisionPercent: directSaved.supervisionPercent ?? 0,
           abonoSemanal: directSaved.abonoSemanal ?? 0,
@@ -251,7 +251,7 @@ export function DebesClientPage({
         const diferencia = efectivo - debeEntregar;
         const deuda = local.deuda !== undefined ? local.deuda : Math.max(0, debeEntregar - efectivo);
         const venta = local.venta !== undefined ? local.venta : computed.venta;
-        const comicionPercent = local.comicionPercent !== undefined ? local.comicionPercent : (computed.comicionPercent ?? 8);
+        const comicionPercent = local.comicionPercent !== undefined ? local.comicionPercent : (computed.comicionPercent ?? 0);
         const supervisionPercent = local.supervisionPercent !== undefined ? local.supervisionPercent : (computed.supervisionPercent || 0);
         const comicion = local.comicion !== undefined ? local.comicion : Math.round(venta * (comicionPercent / 100));
         const supervision = local.supervision !== undefined ? local.supervision : Math.round(venta * (supervisionPercent / 100));
@@ -308,7 +308,7 @@ export function DebesClientPage({
           deuda: 0,
           venta: 0,
           comicion: 0,
-          comicionPercent: 8,
+          comicionPercent: 0,
           abonoSemanal: 0,
           adelEnt: 0,
           adelSal: 0,
@@ -339,7 +339,7 @@ export function DebesClientPage({
           deuda: 0,
           venta: 0,
           comicion: 0,
-          comicionPercent: 8,
+          comicionPercent: 0,
           abonoSemanal: 0,
           adelEnt: 0,
           adelSal: 0,
@@ -501,7 +501,7 @@ export function DebesClientPage({
           }
         }
 
-        const savedComicionPercent = saved?.comicionPercent !== undefined ? saved.comicionPercent : 8;
+        const savedComicionPercent = saved?.comicionPercent !== undefined ? saved.comicionPercent : 0;
         const comicionPercent = local.comicionPercent !== undefined ? local.comicionPercent : savedComicionPercent;
 
         const savedSupervisionPercent = saved?.supervisionPercent !== undefined ? saved.supervisionPercent : 0;
@@ -591,7 +591,7 @@ export function DebesClientPage({
         deuda: 0,
         venta: 0,
         comicion: 0,
-        comicionPercent: 8,
+        comicionPercent: 0,
         supervision: 0,
         supervisionPercent: 0,
         abonoSemanal: 0,
@@ -877,7 +877,7 @@ export function DebesClientPage({
 
     const pdfDataRows = rows.map(r => [
       r.promotoraName.toUpperCase(),
-      `${r.comicionPercent || 8}%`,
+      `${r.comicionPercent || 0}%`,
       `${r.supervisionPercent || 0}%`,
       formatCurrency(r.debeEntregar),
       formatCurrency(r.falla),
@@ -1115,10 +1115,10 @@ export function DebesClientPage({
                         <TableCell className="text-center py-2 px-1">
                           <Input
                             type="number"
-                            value={row.comicionPercent === undefined ? 8 : row.comicionPercent}
+                            value={row.comicionPercent === undefined ? 0 : row.comicionPercent}
                             onChange={(e) => handleCellChange(row.promotoraId, 'comicionPercent', Number(e.target.value), row.debeEntregar)}
                             disabled={isRowDisabled(row)}
-                            placeholder="8"
+                            placeholder="0"
                             className="h-7 w-[46px] px-0.5 text-xs text-center mx-auto rounded-lg font-semibold tracking-tighter border disabled:opacity-85"
                           />
                         </TableCell>

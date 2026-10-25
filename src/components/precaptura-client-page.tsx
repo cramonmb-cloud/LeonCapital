@@ -221,8 +221,25 @@ export function PrecapturaClientPage({
         setAcumularSupervision(!!data.acumularSupervision);
         setObservaciones(data.observaciones || '');
         setGastos(data.gastos || []);
-        if (data.rows && Object.keys(data.rows).length > 0) {
-          setRowsOverrides(data.rows);
+        const savedRows = data.rows;
+        if (savedRows && Object.keys(savedRows).length > 0) {
+          // Si el grupo no está cerrado y todas las filas tenían 8% (antiguo valor default del sistema),
+          // restablecer comicionPercent a 0 para permitir la captura manual como solicitó el usuario
+          const rowsList = Object.values(savedRows);
+          const allEight = rowsList.length > 0 && rowsList.every(r => r.comicionPercent === 8 || r.comicionPercent === undefined);
+          if (allEight && !data.isClosed) {
+            const cleanedRows: Record<string, Partial<PrecapturaRow>> = {};
+            Object.keys(savedRows).forEach(k => {
+              cleanedRows[k] = {
+                ...savedRows[k],
+                comicionPercent: 0,
+                comision: 0,
+              };
+            });
+            setRowsOverrides(cleanedRows);
+          } else {
+            setRowsOverrides(savedRows);
+          }
         }
       } else {
         setIsSavedInDb(false);
@@ -530,9 +547,12 @@ export function PrecapturaClientPage({
       const savedSettlement = savedSettlements.find(s => s.id === `${pId}_${selectedWeek}`);
 
       const debeEntregar = override.debeEntregar !== undefined ? override.debeEntregar : debeData.debeEntregar;
+      // % Com: En precaptura debe ser 0 por defecto para capturar manualmente por grupo
       const comicionPercent = override.comicionPercent !== undefined 
         ? override.comicionPercent 
-        : (savedSettlement?.comicionPercent !== undefined ? savedSettlement.comicionPercent : 0);
+        : (savedSettlement?.comicionPercent !== undefined && savedSettlement.comicionPercent !== 8 
+            ? savedSettlement.comicionPercent 
+            : 0);
       const supervisionPercent = override.supervisionPercent !== undefined 
         ? override.supervisionPercent 
         : (savedSettlement?.supervisionPercent !== undefined ? savedSettlement.supervisionPercent : 0);
@@ -669,7 +689,8 @@ export function PrecapturaClientPage({
       };
 
       const pDebe = updated.debeEntregar !== undefined ? updated.debeEntregar : (computedDebesMap[pId]?.debeEntregar || 0);
-      const pVenta = updated.venta !== undefined ? updated.venta : (current.venta || 0);
+      const currentRow = tableRows.find(r => r.promotoraId === pId);
+      const pVenta = updated.venta !== undefined ? updated.venta : (current.venta !== undefined ? current.venta : (currentRow?.venta || 0));
       const pComPercent = updated.comicionPercent !== undefined ? updated.comicionPercent : (current.comicionPercent || 0);
       const pSupPercent = updated.supervisionPercent !== undefined ? updated.supervisionPercent : (current.supervisionPercent || 0);
       const pFalla = updated.falla !== undefined ? updated.falla : (current.falla || 0);
@@ -1770,7 +1791,7 @@ export function PrecapturaClientPage({
           <Button
             size="sm"
             onClick={() => {
-              setBulkComisionPercent(8);
+              setBulkComisionPercent(0);
               setBulkSupervisionPercent(0);
               setComisionModalOpen(true);
             }}
