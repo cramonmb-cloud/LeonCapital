@@ -96,6 +96,9 @@ export function CierreSemanalClientPage({
   const loanPlans = useMemo(() => realtime?.loanPlans || initialLoanPlans, [realtime?.loanPlans, initialLoanPlans]);
   const settlements = useMemo(() => realtime?.promotoraSettlements || [], [realtime?.promotoraSettlements]);
   const weeklyClosures = useMemo(() => realtime?.weeklyClosures || initialClosures, [realtime?.weeklyClosures, initialClosures]);
+  const appName = useMemo(() => {
+    return (realtime?.config?.appName || initialConfig?.appName || 'León Capital').toUpperCase();
+  }, [realtime?.config?.appName, initialConfig?.appName]);
 
   // Weeks list (20 Saturdays descending)
   const availableWeeks = useMemo(() => {
@@ -346,6 +349,40 @@ export function CierreSemanalClientPage({
     });
   }, [detailPlaza, localidades, promotoras, currentWeekSettlementsByProm, prevWeekSettlementsByProm, selectedWeek, loans, loanPlans, realtime?.config]);
 
+  // Totales de la tabla de detalle modal (estilo precaptura)
+  const detailTotals = useMemo(() => {
+    let debe = 0;
+    let total = 0;
+    let falla = 0;
+    let recuperado = 0;
+    let venta = 0;
+    let comicion = 0;
+    let supervision = 0;
+    let deuda = 0;
+
+    detailPromotoraRows.forEach(r => {
+      debe += r.debeEntregar || 0;
+      total += r.total || 0;
+      falla += r.falla || 0;
+      recuperado += r.recuperado || 0;
+      venta += r.venta || 0;
+      comicion += r.comicion || 0;
+      supervision += r.supervision || 0;
+      deuda += r.deuda || 0;
+    });
+
+    return {
+      debe,
+      total,
+      falla,
+      recuperado,
+      venta,
+      comicion,
+      supervision,
+      deuda,
+    };
+  }, [detailPromotoraRows]);
+
   // Handlers
   const handleConfirmAction = async () => {
     const username = appUser?.username || 'Usuario';
@@ -435,9 +472,6 @@ export function CierreSemanalClientPage({
           <h1 className="text-2xl font-bold tracking-tight text-neutral-900">
             Cierre Semanal
           </h1>
-          <p className="text-sm text-neutral-500">
-            Consolida y congela definitivamente los datos de cobranza, fallas, debes y liquidaciones semanales.
-          </p>
         </div>
 
         <div className="flex items-center gap-3">
@@ -445,7 +479,7 @@ export function CierreSemanalClientPage({
             <Calendar className="h-4 w-4 text-neutral-600" />
             <span className="text-neutral-700">Semana:</span>
             <Select value={selectedWeek} onValueChange={setSelectedWeek}>
-              <SelectTrigger className="h-8 w-[160px] bg-white font-medium">
+              <SelectTrigger className="h-8 min-w-[220px] sm:min-w-[240px] bg-white font-medium">
                 <SelectValue placeholder="Selecciona semana" />
               </SelectTrigger>
               <SelectContent>
@@ -467,7 +501,7 @@ export function CierreSemanalClientPage({
             <div className="space-y-2">
               <div className="flex items-center gap-3">
                 <span className="text-xs font-semibold uppercase tracking-wider text-neutral-500">
-                  Estado Global de la Empresa
+                  ESTADO GLOBAL DE {appName}
                 </span>
                 {isGlobalClosed || companyStats.allPlazasClosed ? (
                   <Badge className="bg-emerald-700 text-white hover:bg-emerald-700 gap-1 font-semibold px-2.5 py-0.5">
@@ -487,11 +521,11 @@ export function CierreSemanalClientPage({
                 )}
               </div>
 
-              <p className="text-sm text-neutral-600 max-w-2xl">
-                {isGlobalClosed || companyStats.allPlazasClosed
-                  ? 'Esta semana está completamente cerrada y congelada en la base de datos. Ninguna sección recalculará sus valores.'
-                  : 'Al cerrar la semana, todos los saldos, abonos, fallas y debes de cada promotora se guardan permanentemente en la base de datos, garantizando consultas instantáneas sin recálculos continuos.'}
-              </p>
+              {(isGlobalClosed || companyStats.allPlazasClosed) && (
+                <p className="text-sm text-neutral-600 max-w-2xl">
+                  Esta semana está completamente cerrada y congelada en la base de datos. Ninguna sección recalculará sus valores.
+                </p>
+              )}
 
               {currentClosure?.globalClosedAt && (
                 <p className="text-xs text-neutral-400">
@@ -594,9 +628,6 @@ export function CierreSemanalClientPage({
             <h2 className="text-lg font-bold text-neutral-900">
               Control de Cierre por Plaza
             </h2>
-            <p className="text-xs text-neutral-500">
-              Puedes cerrar o reabrir cada plaza de forma independiente según el avance de liquidación.
-            </p>
           </div>
         </div>
 
@@ -809,70 +840,188 @@ export function CierreSemanalClientPage({
         </DialogContent>
       </Dialog>
 
-      {/* Promotoras Detail Modal */}
+      {/* Promotoras Detail Modal (Estilo compacto y profesional de Precaptura) */}
       <Dialog open={Boolean(detailPlaza)} onOpenChange={(open) => !open && setDetailPlaza(null)}>
-        <DialogContent className="max-w-4xl max-h-[85vh] flex flex-col p-6">
-          <DialogHeader className="border-b pb-3">
-            <div className="flex items-center justify-between">
+        <DialogContent className="max-w-5xl w-full max-h-[88vh] flex flex-col p-4 sm:p-5 bg-white dark:bg-zinc-950 border border-slate-300 dark:border-zinc-800 shadow-2xl rounded-xl">
+          <DialogHeader className="border-b border-slate-200 dark:border-zinc-800 pb-3">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
               <div>
-                <DialogTitle className="text-xl font-bold text-neutral-900">
-                  Grupos de {detailPlaza?.name}
-                </DialogTitle>
-                <DialogDescription className="text-xs text-neutral-500">
-                  Desglose de promotoras para la semana del sábado {formatDateLabel(selectedWeek)}
+                <div className="flex items-center gap-2">
+                  <DialogTitle className="text-lg font-bold text-slate-900 dark:text-white">
+                    Grupos de {detailPlaza?.name}
+                  </DialogTitle>
+                  <Badge variant="outline" className="text-xs font-semibold px-2 py-0 h-5 border-slate-300 dark:border-zinc-700">
+                    {detailPromotoraRows.length} Grupos
+                  </Badge>
+                </div>
+                <DialogDescription className="text-xs text-slate-500 dark:text-zinc-400 mt-0.5">
+                  Desglose consolidado de la semana del Sábado {formatDateLabel(selectedWeek)}
                 </DialogDescription>
+              </div>
+
+              {/* Quick Summary Chips */}
+              <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap text-xs">
+                <div className="px-2 py-1 rounded bg-slate-100 dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800">
+                  <span className="text-[9.5px] text-slate-500 uppercase font-bold block">Debe</span>
+                  <span className="font-bold text-slate-900 dark:text-white font-mono text-[11px]">{formatMoney(detailTotals.debe)}</span>
+                </div>
+                <div className="px-2 py-1 rounded bg-slate-100 dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800">
+                  <span className="text-[9.5px] text-slate-500 uppercase font-bold block">Cobrado</span>
+                  <span className="font-bold text-slate-900 dark:text-white font-mono text-[11px]">{formatMoney(detailTotals.total)}</span>
+                </div>
+                <div className="px-2 py-1 rounded bg-slate-100 dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800">
+                  <span className="text-[9.5px] text-slate-500 uppercase font-bold block">Falla</span>
+                  <span className="font-bold text-slate-900 dark:text-white font-mono text-[11px]">{formatMoney(detailTotals.falla)}</span>
+                </div>
+                <div className="px-2 py-1 rounded bg-slate-100 dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800">
+                  <span className="text-[9.5px] text-slate-500 uppercase font-bold block">Venta</span>
+                  <span className="font-bold text-slate-900 dark:text-white font-mono text-[11px]">{formatMoney(detailTotals.venta)}</span>
+                </div>
               </div>
             </div>
           </DialogHeader>
 
-          <div className="flex-1 overflow-auto my-3 border rounded-md">
-            <Table>
-              <TableHeader className="bg-neutral-50 sticky top-0">
-                <TableRow>
-                  <TableHead className="font-semibold text-neutral-700">Promotora</TableHead>
-                  <TableHead className="text-right font-semibold text-neutral-700">Debe</TableHead>
-                  <TableHead className="text-right font-semibold text-neutral-700">Cobrado</TableHead>
-                  <TableHead className="text-right font-semibold text-neutral-700">Falla</TableHead>
-                  <TableHead className="text-right font-semibold text-neutral-700">Recup.</TableHead>
-                  <TableHead className="text-right font-semibold text-neutral-700">Venta</TableHead>
-                  <TableHead className="text-right font-semibold text-neutral-700">Comisión</TableHead>
-                  <TableHead className="text-right font-semibold text-neutral-700">Deuda Rest.</TableHead>
-                  <TableHead className="text-center font-semibold text-neutral-700">Estado</TableHead>
+          {/* Tabla de Detalle Compacta Estilo Precaptura */}
+          <div className="flex-1 overflow-x-auto overflow-y-auto my-2 border border-slate-300 dark:border-zinc-800 rounded-lg shadow-sm bg-white dark:bg-zinc-950">
+            <Table className="w-full table-fixed text-[11px] border-collapse">
+              <TableHeader className="bg-slate-100 dark:bg-zinc-900 border-b border-slate-300 dark:border-zinc-700 sticky top-0 z-20">
+                <TableRow className="hover:bg-transparent">
+                  <TableHead className="w-[18%] font-bold text-slate-900 dark:text-zinc-100 py-1.5 px-2 text-left truncate">
+                    Grupo / Promotora
+                  </TableHead>
+                  <TableHead className="w-[10%] font-bold text-slate-900 dark:text-zinc-100 py-1.5 px-1.5 text-right">
+                    Debe
+                  </TableHead>
+                  <TableHead className="w-[10%] font-bold text-slate-900 dark:text-zinc-100 py-1.5 px-1.5 text-right">
+                    Cobrado
+                  </TableHead>
+                  <TableHead className="w-[9%] font-bold text-slate-900 dark:text-zinc-100 py-1.5 px-1.5 text-right">
+                    Falla
+                  </TableHead>
+                  <TableHead className="w-[9%] font-bold text-slate-900 dark:text-zinc-100 py-1.5 px-1.5 text-right">
+                    Recup.
+                  </TableHead>
+                  <TableHead className="w-[9%] font-bold text-slate-900 dark:text-zinc-100 py-1.5 px-1.5 text-right">
+                    Venta
+                  </TableHead>
+                  <TableHead className="w-[9%] font-bold text-slate-900 dark:text-zinc-100 py-1.5 px-1.5 text-right">
+                    Comisión
+                  </TableHead>
+                  <TableHead className="w-[8%] font-bold text-slate-900 dark:text-zinc-100 py-1.5 px-1.5 text-right">
+                    Superv.
+                  </TableHead>
+                  <TableHead className="w-[9.5%] font-bold text-slate-900 dark:text-zinc-100 py-1.5 px-1.5 text-right">
+                    Deuda Rest.
+                  </TableHead>
+                  <TableHead className="w-[8.5%] font-bold text-slate-900 dark:text-zinc-100 py-1.5 px-1 text-center">
+                    Estado
+                  </TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {detailPromotoraRows.map(row => (
-                  <TableRow key={row.id} className="hover:bg-neutral-50/50">
-                    <TableCell className="font-medium text-neutral-900">{row.name}</TableCell>
-                    <TableCell className="text-right font-mono text-neutral-900">{formatMoney(row.debeEntregar)}</TableCell>
-                    <TableCell className="text-right font-mono font-semibold text-neutral-900">{formatMoney(row.total)}</TableCell>
-                    <TableCell className="text-right font-mono text-neutral-600">{formatMoney(row.falla)}</TableCell>
-                    <TableCell className="text-right font-mono text-neutral-600">{formatMoney(row.recuperado)}</TableCell>
-                    <TableCell className="text-right font-mono text-neutral-600">{formatMoney(row.venta)}</TableCell>
-                    <TableCell className="text-right font-mono text-neutral-600">{formatMoney(row.comicion)}</TableCell>
-                    <TableCell className="text-right font-mono text-neutral-800">{formatMoney(row.deuda)}</TableCell>
-                    <TableCell className="text-center">
-                      {row.isFrozen ? (
-                        <Badge className="bg-emerald-700 text-white text-[10px] px-1.5 py-0 font-normal">
-                          Guardado
-                        </Badge>
-                      ) : (
-                        <Badge variant="outline" className="text-neutral-500 text-[10px] px-1.5 py-0 font-normal">
-                          En vivo
-                        </Badge>
-                      )}
+                {detailPromotoraRows.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={10} className="text-center py-8 text-slate-500">
+                      No hay promotoras registradas en esta plaza.
                     </TableCell>
                   </TableRow>
-                ))}
+                ) : (
+                  detailPromotoraRows.map(row => (
+                    <TableRow 
+                      key={row.id} 
+                      className="hover:bg-slate-50/80 dark:hover:bg-zinc-900/60 transition-colors border-b border-slate-200 dark:border-zinc-800/80"
+                    >
+                      <TableCell className="py-1.5 px-2 font-bold text-slate-900 dark:text-zinc-100 truncate">
+                        {row.name}
+                      </TableCell>
+                      <TableCell className="py-1.5 px-1.5 text-right font-medium text-slate-800 dark:text-zinc-200 font-mono">
+                        {formatMoney(row.debeEntregar)}
+                      </TableCell>
+                      <TableCell className="py-1.5 px-1.5 text-right font-bold text-slate-900 dark:text-white font-mono">
+                        {formatMoney(row.total)}
+                      </TableCell>
+                      <TableCell className="py-1.5 px-1.5 text-right font-medium text-slate-700 dark:text-zinc-300 font-mono">
+                        {formatMoney(row.falla)}
+                      </TableCell>
+                      <TableCell className="py-1.5 px-1.5 text-right font-medium text-slate-700 dark:text-zinc-300 font-mono">
+                        {formatMoney(row.recuperado)}
+                      </TableCell>
+                      <TableCell className="py-1.5 px-1.5 text-right font-medium text-slate-700 dark:text-zinc-300 font-mono">
+                        {formatMoney(row.venta)}
+                      </TableCell>
+                      <TableCell className="py-1.5 px-1.5 text-right font-medium text-slate-700 dark:text-zinc-300 font-mono">
+                        {formatMoney(row.comicion)}
+                      </TableCell>
+                      <TableCell className="py-1.5 px-1.5 text-right font-medium text-slate-700 dark:text-zinc-300 font-mono">
+                        {formatMoney(row.supervision)}
+                      </TableCell>
+                      <TableCell className="py-1.5 px-1.5 text-right font-semibold text-slate-900 dark:text-zinc-100 font-mono">
+                        {formatMoney(row.deuda)}
+                      </TableCell>
+                      <TableCell className="py-1.5 px-1 text-center">
+                        {row.isFrozen ? (
+                          <Badge className="bg-emerald-700 hover:bg-emerald-700 text-white text-[9.5px] font-bold px-1.5 py-0 h-4.5 rounded shadow-none">
+                            CERRADO
+                          </Badge>
+                        ) : (
+                          <Badge variant="outline" className="text-amber-700 dark:text-amber-400 border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 text-[9.5px] font-bold px-1.5 py-0 h-4.5 rounded shadow-none">
+                            EN VIVO
+                          </Badge>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
+
+                {/* Totals Row - Matching Precaptura Style */}
+                {detailPromotoraRows.length > 0 && (
+                  <TableRow className="bg-slate-200 dark:bg-zinc-800 font-black border-t-2 border-slate-400 dark:border-zinc-600 text-slate-900 dark:text-white sticky bottom-0 z-20">
+                    <TableCell className="py-1.5 px-2 uppercase tracking-wider text-slate-900 dark:text-white truncate">
+                      TOTALES ({detailPromotoraRows.length})
+                    </TableCell>
+                    <TableCell className="py-1.5 px-1.5 text-right text-slate-900 dark:text-white font-mono">
+                      {formatMoney(detailTotals.debe)}
+                    </TableCell>
+                    <TableCell className="py-1.5 px-1.5 text-right text-slate-900 dark:text-white font-mono">
+                      {formatMoney(detailTotals.total)}
+                    </TableCell>
+                    <TableCell className="py-1.5 px-1.5 text-right text-slate-900 dark:text-white font-mono">
+                      {formatMoney(detailTotals.falla)}
+                    </TableCell>
+                    <TableCell className="py-1.5 px-1.5 text-right text-slate-900 dark:text-white font-mono">
+                      {formatMoney(detailTotals.recuperado)}
+                    </TableCell>
+                    <TableCell className="py-1.5 px-1.5 text-right text-slate-900 dark:text-white font-mono">
+                      {formatMoney(detailTotals.venta)}
+                    </TableCell>
+                    <TableCell className="py-1.5 px-1.5 text-right text-slate-900 dark:text-white font-mono">
+                      {formatMoney(detailTotals.comicion)}
+                    </TableCell>
+                    <TableCell className="py-1.5 px-1.5 text-right text-slate-900 dark:text-white font-mono">
+                      {formatMoney(detailTotals.supervision)}
+                    </TableCell>
+                    <TableCell className="py-1.5 px-1.5 text-right text-slate-900 dark:text-white font-mono">
+                      {formatMoney(detailTotals.deuda)}
+                    </TableCell>
+                    <TableCell className="py-1.5 px-1 text-center text-slate-600 dark:text-zinc-400">
+                      -
+                    </TableCell>
+                  </TableRow>
+                )}
               </TableBody>
             </Table>
           </div>
 
-          <DialogFooter className="border-t pt-3 flex justify-between items-center sm:justify-between">
-            <span className="text-xs text-neutral-500">
-              Total de promotoras: <strong>{detailPromotoraRows.length}</strong>
+          <DialogFooter className="border-t border-slate-200 dark:border-zinc-800 pt-3 flex flex-row items-center justify-between sm:justify-between">
+            <span className="text-[11px] text-slate-500 dark:text-zinc-400 font-medium">
+              Mostrando <strong>{detailPromotoraRows.length}</strong> grupos de {detailPlaza?.name}
             </span>
-            <Button variant="outline" onClick={() => setDetailPlaza(null)}>
+            <Button 
+              variant="outline" 
+              size="sm" 
+              onClick={() => setDetailPlaza(null)}
+              className="h-8 text-xs font-semibold px-4 border-slate-300 dark:border-zinc-700"
+            >
               Cerrar
             </Button>
           </DialogFooter>
