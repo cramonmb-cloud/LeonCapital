@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useCallback, useRef, memo } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -52,6 +52,373 @@ const formatCurrency = (val: number) => {
 const formatPercent = (val: number) => {
   return `${(val || 0).toFixed(2)}%`;
 };
+
+interface PrecapturaTableRowProps {
+  row: PrecapturaRow;
+  index: number;
+  onCommit: (pId: string, updatedRow: PrecapturaRow) => void;
+  onRegisterLiveValues?: (pId: string, getLiveRow: () => PrecapturaRow) => void;
+  onUnregisterLiveValues?: (pId: string) => void;
+}
+
+const PrecapturaTableRow = memo(function PrecapturaTableRow({
+  row,
+  index,
+  onCommit,
+  onRegisterLiveValues,
+  onUnregisterLiveValues,
+}: PrecapturaTableRowProps) {
+  const isDirtyRef = useRef(false);
+
+  // Local state for the editable inputs
+  const [comPercentStr, setComPercentStr] = useState<string>(
+    row.comicionPercent === 0 ? '0' : String(row.comicionPercent ?? 0)
+  );
+  const [supPercentStr, setSupPercentStr] = useState<string>(
+    row.supervisionPercent === 0 ? '0' : String(row.supervisionPercent ?? 0)
+  );
+  const [fallaStr, setFallaStr] = useState<string>(
+    row.falla === 0 ? '0' : String(row.falla ?? 0)
+  );
+  const [recuperadoStr, setRecuperadoStr] = useState<string>(
+    row.recuperado === 0 ? '0' : String(row.recuperado ?? 0)
+  );
+  const [ventaStr, setVentaStr] = useState<string>(
+    row.venta === 0 ? '0' : String(row.venta ?? 0)
+  );
+  const [adelantosEntrantesStr, setAdelantosEntrantesStr] = useState<string>(
+    row.adelantosEntrantes === 0 ? '0' : String(row.adelantosEntrantes ?? 0)
+  );
+  const [semanaExtraStr, setSemanaExtraStr] = useState<string>(
+    row.semanaExtra === 0 ? '0' : String(row.semanaExtra ?? 0)
+  );
+
+  // Keep latest string values in ref so callbacks and getters always read latest
+  const valuesRef = useRef({
+    comPercentStr,
+    supPercentStr,
+    fallaStr,
+    recuperadoStr,
+    ventaStr,
+    adelantosEntrantesStr,
+    semanaExtraStr,
+  });
+
+  valuesRef.current = {
+    comPercentStr,
+    supPercentStr,
+    fallaStr,
+    recuperadoStr,
+    ventaStr,
+    adelantosEntrantesStr,
+    semanaExtraStr,
+  };
+
+  // Sync with incoming prop changes (e.g. from bulk commission modal or snapshot load)
+  useEffect(() => {
+    setComPercentStr(row.comicionPercent === 0 ? '0' : String(row.comicionPercent ?? 0));
+    setSupPercentStr(row.supervisionPercent === 0 ? '0' : String(row.supervisionPercent ?? 0));
+    setFallaStr(row.falla === 0 ? '0' : String(row.falla ?? 0));
+    setRecuperadoStr(row.recuperado === 0 ? '0' : String(row.recuperado ?? 0));
+    setVentaStr(row.venta === 0 ? '0' : String(row.venta ?? 0));
+    setAdelantosEntrantesStr(row.adelantosEntrantes === 0 ? '0' : String(row.adelantosEntrantes ?? 0));
+    setSemanaExtraStr(row.semanaExtra === 0 ? '0' : String(row.semanaExtra ?? 0));
+    isDirtyRef.current = false;
+  }, [
+    row.promotoraId,
+    row.comicionPercent,
+    row.supervisionPercent,
+    row.falla,
+    row.recuperado,
+    row.venta,
+    row.adelantosEntrantes,
+    row.semanaExtra,
+    row.debeEntregar,
+  ]);
+
+  // Derived in-row calculations
+  const numCom = parseFloat(comPercentStr) || 0;
+  const numSup = parseFloat(supPercentStr) || 0;
+  const numFalla = parseFloat(fallaStr) || 0;
+  const numRecuperado = parseFloat(recuperadoStr) || 0;
+  const numVenta = parseFloat(ventaStr) || 0;
+  const numSemanaExtra = parseFloat(semanaExtraStr) || 0;
+
+  const totalEntregar = row.debeEntregar - numFalla + numRecuperado;
+  const diferencia = totalEntregar - row.debeEntregar;
+  const porcentajeFalla = row.debeEntregar > 0 ? (numFalla / row.debeEntregar) * 100 : 0;
+  const comision = Math.round(numVenta * (numCom / 100));
+  const supervision = Math.round(numVenta * (numSup / 100));
+
+  // Build current snapshot of the row
+  const getCurrentRow = useCallback((): PrecapturaRow => {
+    const curCom = parseFloat(valuesRef.current.comPercentStr) || 0;
+    const curSup = parseFloat(valuesRef.current.supPercentStr) || 0;
+    const curFalla = parseFloat(valuesRef.current.fallaStr) || 0;
+    const curRec = parseFloat(valuesRef.current.recuperadoStr) || 0;
+    const curVenta = parseFloat(valuesRef.current.ventaStr) || 0;
+    const curAdelEnt = parseFloat(valuesRef.current.adelantosEntrantesStr) || 0;
+    const curSemExt = parseFloat(valuesRef.current.semanaExtraStr) || 0;
+    const curTotalEntregar = row.debeEntregar - curFalla + curRec;
+
+    return {
+      ...row,
+      comicionPercent: curCom,
+      supervisionPercent: curSup,
+      falla: curFalla,
+      recuperado: curRec,
+      venta: curVenta,
+      adelantosEntrantes: curAdelEnt,
+      semanaExtra: curSemExt,
+      totalEntregar: curTotalEntregar,
+      diferencia: curTotalEntregar - row.debeEntregar,
+      porcentajeFalla: row.debeEntregar > 0 ? (curFalla / row.debeEntregar) * 100 : 0,
+      comision: Math.round(curVenta * (curCom / 100)),
+      supervision: Math.round(curVenta * (curSup / 100)),
+    };
+  }, [row]);
+
+  // Register live getter for parent actions (e.g. Save, Export PDF)
+  useEffect(() => {
+    if (onRegisterLiveValues) {
+      onRegisterLiveValues(row.promotoraId, getCurrentRow);
+    }
+    return () => {
+      if (onUnregisterLiveValues) {
+        onUnregisterLiveValues(row.promotoraId);
+      }
+    };
+  }, [row.promotoraId, getCurrentRow, onRegisterLiveValues, onUnregisterLiveValues]);
+
+  // Commit changes to parent global state
+  const commitRow = useCallback(() => {
+    if (!isDirtyRef.current) return;
+    isDirtyRef.current = false;
+
+    // Clean up blank input strings to '0'
+    if (valuesRef.current.comPercentStr.trim() === '') setComPercentStr('0');
+    if (valuesRef.current.supPercentStr.trim() === '') setSupPercentStr('0');
+    if (valuesRef.current.fallaStr.trim() === '') setFallaStr('0');
+    if (valuesRef.current.recuperadoStr.trim() === '') setRecuperadoStr('0');
+    if (valuesRef.current.ventaStr.trim() === '') setVentaStr('0');
+    if (valuesRef.current.adelantosEntrantesStr.trim() === '') setAdelantosEntrantesStr('0');
+    if (valuesRef.current.semanaExtraStr.trim() === '') setSemanaExtraStr('0');
+
+    const updated = getCurrentRow();
+    onCommit(row.promotoraId, updated);
+  }, [getCurrentRow, onCommit, row.promotoraId]);
+
+  // Handle intra-row input edits
+  const handleFieldChange = (
+    field: 'com' | 'sup' | 'falla' | 'recuperado' | 'venta' | 'adelantosEntrantes' | 'semanaExtra',
+    rawValue: string
+  ) => {
+    isDirtyRef.current = true;
+    if (field === 'com') setComPercentStr(rawValue);
+    else if (field === 'sup') setSupPercentStr(rawValue);
+    else if (field === 'falla') setFallaStr(rawValue);
+    else if (field === 'recuperado') setRecuperadoStr(rawValue);
+    else if (field === 'venta') setVentaStr(rawValue);
+    else if (field === 'adelantosEntrantes') setAdelantosEntrantesStr(rawValue);
+    else if (field === 'semanaExtra') setSemanaExtraStr(rawValue);
+  };
+
+  // Keyboard navigation on the LAST field: Sem. Extra
+  const handleSemanaExtraKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Tab' && !e.shiftKey) {
+      // User pressed TAB on the last field -> calculate global totals!
+      commitRow();
+    } else if (e.key === 'Enter') {
+      commitRow();
+      // Move focus to first input of next row if possible
+      const currentTr = (e.target as HTMLElement).closest('tr');
+      const nextTr = currentTr?.nextElementSibling as HTMLElement | null;
+      const nextInput = nextTr?.querySelector('input') as HTMLInputElement | null;
+      if (nextInput) {
+        nextInput.focus();
+        nextInput.select();
+      }
+    }
+  };
+
+  const handleSemanaExtraBlur = () => {
+    commitRow();
+  };
+
+  // Row blur: only commit if focus moves completely outside this row
+  const handleRowBlur = (e: React.FocusEvent<HTMLTableRowElement>) => {
+    if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
+      commitRow();
+    }
+  };
+
+  return (
+    <TableRow 
+      className={cn(
+        "hover:bg-slate-100/70 dark:hover:bg-zinc-800/60 transition-colors border-b border-slate-200 dark:border-zinc-800",
+        index % 2 === 1 ? "bg-slate-50/60 dark:bg-zinc-900/40" : "bg-white dark:bg-zinc-950"
+      )}
+      onBlur={handleRowBlur}
+    >
+      {/* Grupo */}
+      <TableCell className="font-bold text-slate-900 dark:text-zinc-100 py-1 px-1.5 truncate" title={row.promotoraName}>
+        {row.promotoraName}
+      </TableCell>
+
+      {/* % Com */}
+      <TableCell className="p-0.5 text-center">
+        <Input
+          type="number"
+          step="0.5"
+          min="0"
+          max="100"
+          value={comPercentStr}
+          onFocus={(e) => e.target.select()}
+          onChange={(e) => handleFieldChange('com', e.target.value)}
+          className="h-6 text-[11px] text-center p-0.5 bg-white dark:bg-zinc-800 border-slate-300 dark:border-zinc-700 font-medium focus-visible:ring-1 focus-visible:ring-[#1e3a8a]"
+        />
+      </TableCell>
+
+      {/* % Sup */}
+      <TableCell className="p-0.5 text-center">
+        <Input
+          type="number"
+          step="0.5"
+          min="0"
+          max="100"
+          value={supPercentStr}
+          onFocus={(e) => e.target.select()}
+          onChange={(e) => handleFieldChange('sup', e.target.value)}
+          className="h-6 text-[11px] text-center p-0.5 bg-white dark:bg-zinc-800 border-slate-300 dark:border-zinc-700 font-medium focus-visible:ring-1 focus-visible:ring-[#1e3a8a]"
+        />
+      </TableCell>
+
+      {/* Debe Entregar */}
+      <TableCell className="py-1 px-1 text-right font-bold text-slate-900 dark:text-zinc-100">
+        {formatCurrency(row.debeEntregar)}
+      </TableCell>
+
+      {/* Falla */}
+      <TableCell className="p-0.5 text-right">
+        <Input
+          type="number"
+          step="10"
+          min="0"
+          value={fallaStr}
+          onFocus={(e) => e.target.select()}
+          onChange={(e) => handleFieldChange('falla', e.target.value)}
+          className="h-6 text-[11px] text-right p-0.5 bg-white dark:bg-zinc-800 border-slate-300 dark:border-zinc-700 font-medium focus-visible:ring-1 focus-visible:ring-[#1e3a8a]"
+        />
+      </TableCell>
+
+      {/* Recuperado */}
+      <TableCell className="p-0.5 text-right">
+        <Input
+          type="number"
+          step="10"
+          min="0"
+          value={recuperadoStr}
+          onFocus={(e) => e.target.select()}
+          onChange={(e) => handleFieldChange('recuperado', e.target.value)}
+          className="h-6 text-[11px] text-right p-0.5 bg-white dark:bg-zinc-800 border-slate-300 dark:border-zinc-700 font-medium focus-visible:ring-1 focus-visible:ring-[#1e3a8a]"
+        />
+      </TableCell>
+
+      {/* Total a Entregar */}
+      <TableCell className="py-1 px-1 text-right font-black text-slate-900 dark:text-zinc-100">
+        {formatCurrency(totalEntregar)}
+      </TableCell>
+
+      {/* Diferencia */}
+      <TableCell className="py-1 px-1 text-right font-bold text-slate-900 dark:text-zinc-100">
+        {formatCurrency(diferencia)}
+      </TableCell>
+
+      {/* % Falla */}
+      <TableCell className="py-1 px-0.5 text-right font-medium text-slate-800 dark:text-zinc-200">
+        {formatPercent(porcentajeFalla)}
+      </TableCell>
+
+      {/* Venta */}
+      <TableCell className="p-0.5 text-right">
+        <Input
+          type="number"
+          step="100"
+          min="0"
+          value={ventaStr}
+          onFocus={(e) => e.target.select()}
+          onChange={(e) => handleFieldChange('venta', e.target.value)}
+          className="h-6 text-[11px] text-right p-0.5 bg-white dark:bg-zinc-800 border-slate-300 dark:border-zinc-700 font-medium focus-visible:ring-1 focus-visible:ring-[#1e3a8a]"
+        />
+      </TableCell>
+
+      {/* Comision */}
+      <TableCell className="py-1 px-1 text-right font-medium text-slate-800 dark:text-zinc-200">
+        {formatCurrency(comision)}
+      </TableCell>
+
+      {/* Supervision */}
+      <TableCell className="py-1 px-1 text-right font-medium text-slate-800 dark:text-zinc-200">
+        {formatCurrency(supervision)}
+      </TableCell>
+
+      {/* Adelantos Entrante */}
+      <TableCell className="p-0.5 text-right">
+        <Input
+          type="number"
+          step="50"
+          min="0"
+          value={adelantosEntrantesStr}
+          onFocus={(e) => e.target.select()}
+          onChange={(e) => handleFieldChange('adelantosEntrantes', e.target.value)}
+          className="h-6 text-[11px] text-right p-0.5 bg-white dark:bg-zinc-800 border-slate-300 dark:border-zinc-700 font-medium focus-visible:ring-1 focus-visible:ring-[#1e3a8a]"
+        />
+      </TableCell>
+
+      {/* Adelantos Saliente */}
+      <TableCell className="py-1 px-1 text-right font-bold text-slate-900 dark:text-zinc-100">
+        {formatCurrency(row.adelantosSalientes)}
+      </TableCell>
+
+      {/* Sem. Extra */}
+      <TableCell className="p-0.5 text-right">
+        <Input
+          type="number"
+          step="10"
+          min="0"
+          value={semanaExtraStr}
+          onFocus={(e) => e.target.select()}
+          onChange={(e) => handleFieldChange('semanaExtra', e.target.value)}
+          onKeyDown={handleSemanaExtraKeyDown}
+          onBlur={handleSemanaExtraBlur}
+          className="h-6 text-[11px] text-right p-0.5 bg-white dark:bg-zinc-800 border-slate-300 dark:border-zinc-700 font-medium focus-visible:ring-1 focus-visible:ring-[#1e3a8a]"
+        />
+      </TableCell>
+    </TableRow>
+  );
+}, (prevProps, nextProps) => {
+  if (prevProps.index !== nextProps.index) return false;
+  const p = prevProps.row;
+  const n = nextProps.row;
+  return (
+    p.promotoraId === n.promotoraId &&
+    p.promotoraName === n.promotoraName &&
+    p.comicionPercent === n.comicionPercent &&
+    p.supervisionPercent === n.supervisionPercent &&
+    p.debeEntregar === n.debeEntregar &&
+    p.falla === n.falla &&
+    p.recuperado === n.recuperado &&
+    p.totalEntregar === n.totalEntregar &&
+    p.diferencia === n.diferencia &&
+    p.porcentajeFalla === n.porcentajeFalla &&
+    p.venta === n.venta &&
+    p.comision === n.comision &&
+    p.supervision === n.supervision &&
+    p.adelantosEntrantes === n.adelantosEntrantes &&
+    p.adelantosSalientes === n.adelantosSalientes &&
+    p.semanaExtra === n.semanaExtra
+  );
+});
 
 export function PrecapturaClientPage({
   initialClients,
@@ -183,6 +550,7 @@ export function PrecapturaClientPage({
   const [observaciones, setObservaciones] = useState<string>('');
   const [gastos, setGastos] = useState<PrecapturaGasto[]>([]);
   const [rowsOverrides, setRowsOverrides] = useState<Record<string, Partial<PrecapturaRow>>>({});
+  const [savedDocRows, setSavedDocRows] = useState<Record<string, PrecapturaRow>>({});
   const [isSaving, setIsSaving] = useState<boolean>(false);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState<boolean>(false);
 
@@ -223,6 +591,7 @@ export function PrecapturaClientPage({
         setGastos(data.gastos || []);
         const savedRows = data.rows;
         if (savedRows && Object.keys(savedRows).length > 0) {
+          setSavedDocRows(savedRows as Record<string, PrecapturaRow>);
           // Si el grupo no está cerrado y todas las filas tenían 8% (antiguo valor default del sistema),
           // restablecer comicionPercent a 0 para permitir la captura manual como solicitó el usuario
           const rowsList = Object.values(savedRows);
@@ -240,6 +609,9 @@ export function PrecapturaClientPage({
           } else {
             setRowsOverrides(savedRows);
           }
+        } else {
+          setSavedDocRows({});
+          setRowsOverrides({});
         }
       } else {
         setIsSavedInDb(false);
@@ -248,6 +620,7 @@ export function PrecapturaClientPage({
         setAcumularSupervision(false);
         setObservaciones('');
         setGastos([]);
+        setSavedDocRows({});
         setRowsOverrides({});
       }
       setHasUnsavedChanges(false);
@@ -274,10 +647,10 @@ export function PrecapturaClientPage({
     return map;
   }, [loans]);
 
-  // Determine which promotoras lack a saved snapshot in rowsOverrides
+  // Determine which promotoras lack a saved snapshot in savedDocRows
   const promotorasNeedingCalc = useMemo(() => {
-    return plazaPromotoras.filter(p => rowsOverrides[p.id]?.debeEntregar === undefined);
-  }, [plazaPromotoras, rowsOverrides]);
+    return plazaPromotoras.filter(p => savedDocRows[p.id]?.debeEntregar === undefined);
+  }, [plazaPromotoras, savedDocRows]);
 
   // ULTRA-OPTIMIZED calculation of Debes:
   // If snapshot exists in DB, it returns immediately without re-calculating!
@@ -662,8 +1035,20 @@ export function PrecapturaClientPage({
 
   // Bottom Summary Cards formulas
   const totalEntregarGlobal = useMemo(() => {
-    return totals.totalEntregar - totals.adelantosSalientes;
-  }, [totals.totalEntregar, totals.adelantosSalientes]);
+    return (
+      totals.totalEntregar -
+      totals.adelantosSalientes -
+      totals.venta +
+      totals.adelantosEntrantes -
+      totals.comision
+    );
+  }, [
+    totals.totalEntregar,
+    totals.adelantosSalientes,
+    totals.venta,
+    totals.adelantosEntrantes,
+    totals.comision,
+  ]);
 
   const granTotal = useMemo(() => {
     return totalEntregarGlobal - totalGastos + totals.semanaExtra + (Number(fondo) || 0);
@@ -678,43 +1063,25 @@ export function PrecapturaClientPage({
   // Must be saved in DB AND have no pending unsaved modifications
   const isPrintDisabled = !isSavedInDb || hasUnsavedChanges || isSaving;
 
-  // Handle cell edits in table
-  const handleCellChange = (pId: string, field: keyof PrecapturaRow, rawValue: string) => {
-    const numValue = parseFloat(rawValue) || 0;
-    setRowsOverrides(prev => {
-      const current = prev[pId] || {};
-      const updated = {
-        ...current,
-        [field]: numValue
-      };
+  // Live row getters to ensure Save and PDF always capture the latest unsaved in-row keystrokes
+  const liveGettersRef = useRef<Record<string, () => PrecapturaRow>>({});
 
-      const pDebe = updated.debeEntregar !== undefined ? updated.debeEntregar : (computedDebesMap[pId]?.debeEntregar || 0);
-      const currentRow = tableRows.find(r => r.promotoraId === pId);
-      const pVenta = updated.venta !== undefined ? updated.venta : (current.venta !== undefined ? current.venta : (currentRow?.venta || 0));
-      const pComPercent = updated.comicionPercent !== undefined ? updated.comicionPercent : (current.comicionPercent || 0);
-      const pSupPercent = updated.supervisionPercent !== undefined ? updated.supervisionPercent : (current.supervisionPercent || 0);
-      const pFalla = updated.falla !== undefined ? updated.falla : (current.falla || 0);
-      const pRecuperado = updated.recuperado !== undefined ? updated.recuperado : (current.recuperado || 0);
+  const handleRegisterLiveValues = useCallback((pId: string, getLiveRow: () => PrecapturaRow) => {
+    liveGettersRef.current[pId] = getLiveRow;
+  }, []);
 
-      if (field === 'venta' || field === 'comicionPercent') {
-        updated.comision = Math.round(pVenta * (pComPercent / 100));
-      }
-      if (field === 'venta' || field === 'supervisionPercent') {
-        updated.supervision = Math.round(pVenta * (pSupPercent / 100));
-      }
-      if (field === 'falla' || field === 'recuperado' || field === 'debeEntregar') {
-        updated.totalEntregar = pDebe - pFalla + pRecuperado;
-        updated.diferencia = updated.totalEntregar - pDebe;
-        updated.porcentajeFalla = pDebe > 0 ? (pFalla / pDebe) * 100 : 0;
-      }
+  const handleUnregisterLiveValues = useCallback((pId: string) => {
+    delete liveGettersRef.current[pId];
+  }, []);
 
-      return {
-        ...prev,
-        [pId]: updated
-      };
-    });
+  // Commit updated row to global state (triggered when Tab is pressed on Sem. Extra or row leaves focus)
+  const handleRowCommit = useCallback((pId: string, updatedRow: PrecapturaRow) => {
+    setRowsOverrides(prev => ({
+      ...prev,
+      [pId]: updatedRow
+    }));
     setHasUnsavedChanges(true);
-  };
+  }, []);
 
   // Add a new gasto
   const handleAddGasto = async () => {
@@ -807,11 +1174,13 @@ export function PrecapturaClientPage({
     try {
       const closedVal = overrideClosedState !== undefined ? overrideClosedState : isClosed;
 
-      // Capture all computed rows so subsequent loads are INSTANT
+      // Capture all computed rows (including any live in-row edits) so subsequent loads are INSTANT
       const fullRowsSnapshot: Record<string, PrecapturaRow> = {};
       tableRows.forEach(row => {
-        fullRowsSnapshot[row.promotoraId] = row;
+        const liveRow = liveGettersRef.current[row.promotoraId]?.();
+        fullRowsSnapshot[row.promotoraId] = liveRow || row;
       });
+      setRowsOverrides(fullRowsSnapshot);
 
       const precapturaData: Precaptura = {
         id: precapturaId,
@@ -865,6 +1234,7 @@ export function PrecapturaClientPage({
   // Force re-sync with dynamic loans (clears local snapshot and re-computes)
   const handleForceRecalculate = () => {
     setRowsOverrides({});
+    setSavedDocRows({});
     setHasUnsavedChanges(true);
     toast({
       title: 'Datos recalculados',
@@ -1353,136 +1723,16 @@ export function PrecapturaClientPage({
                   </TableCell>
                 </TableRow>
               ) : (
-                tableRows.map((row, index) => {
-                  return (
-                    <TableRow 
-                      key={row.promotoraId} 
-                      className={cn(
-                        "hover:bg-slate-100/70 dark:hover:bg-zinc-800/60 transition-colors border-b border-slate-200 dark:border-zinc-800",
-                        index % 2 === 1 ? "bg-slate-50/60 dark:bg-zinc-900/40" : "bg-white dark:bg-zinc-950"
-                      )}
-                    >
-                      {/* Grupo */}
-                      <TableCell className="font-bold text-slate-900 dark:text-zinc-100 py-1 px-1.5 truncate" title={row.promotoraName}>
-                        {row.promotoraName}
-                      </TableCell>
-
-                      {/* % Com */}
-                      <TableCell className="p-0.5 text-center">
-                        <Input
-                          type="number"
-                          step="0.5"
-                          min="0"
-                          max="100"
-                          value={row.comicionPercent === 0 ? '0' : row.comicionPercent}
-                          onChange={(e) => handleCellChange(row.promotoraId, 'comicionPercent', e.target.value)}
-                          className="h-6 text-[11px] text-center p-0.5 bg-white dark:bg-zinc-800 border-slate-300 dark:border-zinc-700 font-medium focus-visible:ring-1 focus-visible:ring-[#1e3a8a]"
-                        />
-                      </TableCell>
-
-                      {/* % Sup */}
-                      <TableCell className="p-0.5 text-center">
-                        <Input
-                          type="number"
-                          step="0.5"
-                          min="0"
-                          max="100"
-                          value={row.supervisionPercent === 0 ? '0' : row.supervisionPercent}
-                          onChange={(e) => handleCellChange(row.promotoraId, 'supervisionPercent', e.target.value)}
-                          className="h-6 text-[11px] text-center p-0.5 bg-white dark:bg-zinc-800 border-slate-300 dark:border-zinc-700 font-medium focus-visible:ring-1 focus-visible:ring-[#1e3a8a]"
-                        />
-                      </TableCell>
-
-                      {/* Debe Entregar */}
-                      <TableCell className="py-1 px-1 text-right font-bold text-slate-900 dark:text-zinc-100">
-                        {formatCurrency(row.debeEntregar)}
-                      </TableCell>
-
-                      {/* Falla */}
-                      <TableCell className="p-0.5 text-right">
-                        <Input
-                          type="number"
-                          step="10"
-                          min="0"
-                          value={row.falla === 0 ? '0' : row.falla}
-                          onChange={(e) => handleCellChange(row.promotoraId, 'falla', e.target.value)}
-                          className="h-6 text-[11px] text-right p-0.5 bg-white dark:bg-zinc-800 border-slate-300 dark:border-zinc-700 font-medium focus-visible:ring-1 focus-visible:ring-[#1e3a8a]"
-                        />
-                      </TableCell>
-
-                      {/* Recuperado */}
-                      <TableCell className="p-0.5 text-right">
-                        <Input
-                          type="number"
-                          step="10"
-                          min="0"
-                          value={row.recuperado === 0 ? '0' : row.recuperado}
-                          onChange={(e) => handleCellChange(row.promotoraId, 'recuperado', e.target.value)}
-                          className="h-6 text-[11px] text-right p-0.5 bg-white dark:bg-zinc-800 border-slate-300 dark:border-zinc-700 font-medium focus-visible:ring-1 focus-visible:ring-[#1e3a8a]"
-                        />
-                      </TableCell>
-
-                      {/* Total a Entregar */}
-                      <TableCell className="py-1 px-1 text-right font-black text-slate-900 dark:text-zinc-100">
-                        {formatCurrency(row.totalEntregar)}
-                      </TableCell>
-
-                      {/* Diferencia */}
-                      <TableCell className="py-1 px-1 text-right font-bold text-slate-900 dark:text-zinc-100">
-                        {formatCurrency(row.diferencia)}
-                      </TableCell>
-
-                      {/* % Falla */}
-                      <TableCell className="py-1 px-0.5 text-right font-medium text-slate-800 dark:text-zinc-200">
-                        {formatPercent(row.porcentajeFalla)}
-                      </TableCell>
-
-                      {/* Venta */}
-                      <TableCell className="p-0.5 text-right">
-                        <Input
-                          type="number"
-                          step="100"
-                          min="0"
-                          value={row.venta === 0 ? '0' : row.venta}
-                          onChange={(e) => handleCellChange(row.promotoraId, 'venta', e.target.value)}
-                          className="h-6 text-[11px] text-right p-0.5 bg-white dark:bg-zinc-800 border-slate-300 dark:border-zinc-700 font-medium focus-visible:ring-1 focus-visible:ring-[#1e3a8a]"
-                        />
-                      </TableCell>
-
-                      {/* Comision */}
-                      <TableCell className="py-1 px-1 text-right font-medium text-slate-800 dark:text-zinc-200">
-                        {formatCurrency(row.comision)}
-                      </TableCell>
-
-                      {/* Supervision */}
-                      <TableCell className="py-1 px-1 text-right font-medium text-slate-800 dark:text-zinc-200">
-                        {formatCurrency(row.supervision)}
-                      </TableCell>
-
-                      {/* Adelantos Entrante */}
-                      <TableCell className="py-1 px-1 text-right font-medium text-slate-800 dark:text-zinc-200">
-                        {formatCurrency(row.adelantosEntrantes)}
-                      </TableCell>
-
-                      {/* Adelantos Saliente */}
-                      <TableCell className="py-1 px-1 text-right font-bold text-slate-900 dark:text-zinc-100">
-                        {formatCurrency(row.adelantosSalientes)}
-                      </TableCell>
-
-                      {/* Sem. Extra */}
-                      <TableCell className="p-0.5 text-right">
-                        <Input
-                          type="number"
-                          step="10"
-                          min="0"
-                          value={row.semanaExtra === 0 ? '0' : row.semanaExtra}
-                          onChange={(e) => handleCellChange(row.promotoraId, 'semanaExtra', e.target.value)}
-                          className="h-6 text-[11px] text-right p-0.5 bg-white dark:bg-zinc-800 border-slate-300 dark:border-zinc-700 font-medium focus-visible:ring-1 focus-visible:ring-[#1e3a8a]"
-                        />
-                      </TableCell>
-                    </TableRow>
-                  );
-                })
+                tableRows.map((row, index) => (
+                  <PrecapturaTableRow
+                    key={row.promotoraId}
+                    row={row}
+                    index={index}
+                    onCommit={handleRowCommit}
+                    onRegisterLiveValues={handleRegisterLiveValues}
+                    onUnregisterLiveValues={handleUnregisterLiveValues}
+                  />
+                ))
               )}
 
               {/* Totals Row */}
@@ -1719,7 +1969,7 @@ export function PrecapturaClientPage({
                 </div>
 
                 {/* Total a Entregar Global */}
-                <div className="flex items-center justify-between text-xs">
+                <div className="flex items-center justify-between text-xs" title="Total a Entregar - Adelantos Salientes - Venta + Adelantos Entrantes - Comisión">
                   <span className="font-bold text-slate-700 dark:text-zinc-300">Total a Entregar:</span>
                   <span className="font-bold text-slate-900 dark:text-white bg-slate-100 dark:bg-zinc-800 px-2.5 py-0.5 rounded border border-slate-300 dark:border-zinc-700 min-w-[120px] text-right">
                     {formatCurrency(totalEntregarGlobal)}
