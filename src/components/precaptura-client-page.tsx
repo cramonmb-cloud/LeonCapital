@@ -1040,7 +1040,8 @@ export function PrecapturaClientPage({
       totals.adelantosSalientes -
       totals.venta +
       totals.adelantosEntrantes -
-      totals.comision
+      totals.comision +
+      (Number(fondo) || 0)
     );
   }, [
     totals.totalEntregar,
@@ -1048,11 +1049,12 @@ export function PrecapturaClientPage({
     totals.venta,
     totals.adelantosEntrantes,
     totals.comision,
+    fondo,
   ]);
 
   const granTotal = useMemo(() => {
-    return totalEntregarGlobal - totalGastos + totals.semanaExtra + (Number(fondo) || 0);
-  }, [totalEntregarGlobal, totalGastos, totals.semanaExtra, fondo]);
+    return totalEntregarGlobal - totalGastos + totals.semanaExtra;
+  }, [totalEntregarGlobal, totalGastos, totals.semanaExtra]);
 
   // Current Plaza name
   const currentPlazaName = useMemo(() => {
@@ -1969,7 +1971,7 @@ export function PrecapturaClientPage({
                 </div>
 
                 {/* Total a Entregar Global */}
-                <div className="flex items-center justify-between text-xs" title="Total a Entregar - Adelantos Salientes - Venta + Adelantos Entrantes - Comisión">
+                <div className="flex items-center justify-between text-xs" title="Total a Entregar - Adelantos Salientes - Venta + Adelantos Entrantes - Comisión + Fondo">
                   <span className="font-bold text-slate-700 dark:text-zinc-300">Total a Entregar:</span>
                   <span className="font-bold text-slate-900 dark:text-white bg-slate-100 dark:bg-zinc-800 px-2.5 py-0.5 rounded border border-slate-300 dark:border-zinc-700 min-w-[120px] text-right">
                     {formatCurrency(totalEntregarGlobal)}
