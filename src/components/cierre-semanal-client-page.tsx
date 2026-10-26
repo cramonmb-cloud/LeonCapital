@@ -15,7 +15,8 @@ import {
   Eye, 
   Loader2, 
   ShieldCheck,
-  FileCheck
+  FileCheck,
+  RefreshCw
 } from 'lucide-react';
 import { useAuth } from '@/hooks/use-auth';
 import { useToast } from '@/hooks/use-toast';
@@ -48,7 +49,8 @@ import {
   executePlazaClosureAction, 
   executeGlobalClosureAction, 
   reopenPlazaClosureAction, 
-  reopenGlobalClosureAction 
+  reopenGlobalClosureAction,
+  recalculateWeekAction
 } from '@/app/inicio/cierre-semanal/actions';
 import { computePromotoraWeekMetrics, getPreviousSaturdayStr } from '@/lib/settlement-calculator';
 
@@ -125,6 +127,7 @@ export function CierreSemanalClientPage({
   // Action states
   const [processingPlazaId, setProcessingPlazaId] = useState<string | null>(null);
   const [isProcessingGlobal, setIsProcessingGlobal] = useState<boolean>(false);
+  const [isRecalculating, setIsRecalculating] = useState<boolean>(false);
 
   // Dialog states
   const [confirmDialog, setConfirmDialog] = useState<{
@@ -445,6 +448,26 @@ export function CierreSemanalClientPage({
     }
   };
 
+  const handleRecalculateWeek = async () => {
+    const username = appUser?.username || 'Usuario';
+    setIsRecalculating(true);
+    try {
+      const res = await recalculateWeekAction({
+        weekDate: selectedWeek,
+        username,
+      });
+      if (res.success) {
+        toast({ title: 'Semana Sincronizada', description: res.message });
+      } else {
+        toast({ title: 'Error al sincronizar', description: res.message, variant: 'destructive' });
+      }
+    } catch (err: any) {
+      toast({ title: 'Error inesperado', description: err.message, variant: 'destructive' });
+    } finally {
+      setIsRecalculating(false);
+    }
+  };
+
   const formatMoney = (val: number) => {
     return (val || 0).toLocaleString('es-MX', {
       style: 'currency',
@@ -537,11 +560,21 @@ export function CierreSemanalClientPage({
             <div className="flex flex-wrap items-center gap-3">
               {isAdmin && (
                 <>
+                  <Button
+                    variant="outline"
+                    className="border-blue-300 text-blue-700 hover:bg-blue-50 font-medium h-10 px-4 gap-2"
+                    disabled={isProcessingGlobal || isRecalculating}
+                    onClick={handleRecalculateWeek}
+                  >
+                    {isRecalculating ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4 text-blue-600" />}
+                    Sincronizar Préstamos
+                  </Button>
+
                   {isGlobalClosed || companyStats.allPlazasClosed ? (
                     <Button
                       variant="outline"
                       className="border-neutral-300 text-neutral-700 hover:bg-neutral-100 font-medium h-10 px-4 gap-2"
-                      disabled={isProcessingGlobal}
+                      disabled={isProcessingGlobal || isRecalculating}
                       onClick={() => setConfirmDialog({
                         isOpen: true,
                         type: 'reopen_global',
@@ -553,7 +586,7 @@ export function CierreSemanalClientPage({
                   ) : (
                     <Button
                       className="bg-[#1e3a8a] hover:bg-[#172554] text-white font-medium h-10 px-5 gap-2 shadow-sm"
-                      disabled={isProcessingGlobal}
+                      disabled={isProcessingGlobal || isRecalculating}
                       onClick={() => setConfirmDialog({
                         isOpen: true,
                         type: 'close_global',

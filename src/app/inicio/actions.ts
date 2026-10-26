@@ -1,11 +1,12 @@
 'use server';
 
-import type { Client, Loan, LoanPlan, AppUser, Payment, AppConfig } from '@/lib/types';
+import type { Client, Loan, LoanPlan, AppUser, Payment, AppConfig, PromotoraSettlement, Precaptura, Promotora, Localidad, WeeklyClosure } from '@/lib/types';
 import { collection, doc, addDoc, serverTimestamp, updateDoc, runTransaction, increment, writeBatch, getDoc, getDocs, query, where, deleteDoc, Timestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { revalidatePath } from 'next/cache';
-import { getLoanPlan, getClient, getLoan } from '@/lib/firestore-data';
+import { getLoanPlan, getClient, getLoan, getAppConfig } from '@/lib/firestore-data';
 import { getSaturdayOfWeek, getMexicoNow, getCurrentLoanWeekNumber, parseLocalDate, getExtraWeekThreshold, doesLoanHavePenalty } from '@/lib/utils';
+import { computePromotoraWeekMetrics, getPreviousSaturdayStr } from '@/lib/settlement-calculator';
 
 // Helper to handle Firestore dates consistently in server actions
 const parseFirestoreDate = (date: any): Date => parseLocalDate(date);
@@ -487,6 +488,9 @@ export async function manualAdjustPaymentAction(
     userId?: string
 ) {
     try {
+        let adjustedPromotoraId: string | undefined;
+        let targetWeekDateStr: string | undefined;
+
         await runTransaction(db, async (transaction) => {
             const loanRef = doc(db, 'loans', loanId);
             const loanSnap = await transaction.get(loanRef);
@@ -500,6 +504,8 @@ export async function manualAdjustPaymentAction(
             }
 
             const loan = loanSnap.data() as Loan;
+            adjustedPromotoraId = loan.promotoraId;
+
             const client = await getClient(loan.clientId);
             const loanPlan = await getLoanPlan(loan.loanPlanId);
             const walletRef = doc(db, 'wallet', 'main');
@@ -514,6 +520,13 @@ export async function manualAdjustPaymentAction(
                 date: parseFirestoreDate(p.date).toISOString()
             }));
 
+            // Calcular el sábado de corte exacto para este weekNumber del préstamo
+            const loanStartDate = parseFirestoreDate(loan.startDate);
+            const loanStartSat = getSaturdayOfWeek(loanStartDate);
+            const targetSat = new Date(loanStartSat.getTime() + (weekNumber * 7 * 24 * 3600 * 1000));
+            targetWeekDateStr = targetSat.toISOString().split('T')[0];
+            const targetSatIso = targetSat.toISOString();
+
             let allPayments: Payment[] = [];
 
             if (amountPaid < 0) {
@@ -521,14 +534,12 @@ export async function manualAdjustPaymentAction(
                 allPayments = currentPayments.filter(p => p.weekNumber !== weekNumber);
             } else {
                 const otherPayments = currentPayments.filter(p => p.weekNumber !== weekNumber);
-                const existingP = currentPayments.find(p => p.weekNumber === weekNumber);
-                const pDate = existingP?.date || new Date().toISOString();
                 const paymentWeekDateStr = getSaturdayOfWeek(getMexicoNow()).toISOString().split('T')[0];
 
                 let newPayment: Payment;
                 if (tag === 'falla') {
                     newPayment = {
-                        date: pDate,
+                        date: targetSatIso,
                         amount: 0,
                         weekNumber,
                         isRecovered: false,
@@ -539,7 +550,7 @@ export async function manualAdjustPaymentAction(
                     };
                 } else if (tag === 'asumido') {
                     newPayment = {
-                        date: pDate,
+                        date: targetSatIso,
                         amount: amountPaid > 0 ? amountPaid : weeklyPayment,
                         weekNumber,
                         isRecovered: false,
@@ -550,7 +561,7 @@ export async function manualAdjustPaymentAction(
                     };
                 } else if (tag === 'adelanto') {
                     newPayment = {
-                        date: pDate,
+                        date: targetSatIso,
                         amount: amountPaid > 0 ? amountPaid : weeklyPayment,
                         weekNumber,
                         isRecovered: false,
@@ -563,7 +574,7 @@ export async function manualAdjustPaymentAction(
                 } else {
                     // 'pagado'
                     newPayment = {
-                        date: pDate,
+                        date: targetSatIso,
                         amount: amountPaid,
                         weekNumber,
                         isRecovered: false,
@@ -577,7 +588,6 @@ export async function manualAdjustPaymentAction(
                 allPayments = [...otherPayments, newPayment].sort((a, b) => a.weekNumber - b.weekNumber);
             }
 
-            const loanStartDate = parseFirestoreDate(loan.startDate);
             const currentLoanWeek = Math.max(1, getCurrentLoanWeekNumber(loanStartDate));
 
             const originalTotalPaid = (loan.payments || []).reduce((acc, p) => acc + p.amount, 0);
@@ -627,7 +637,16 @@ export async function manualAdjustPaymentAction(
             }));
         });
 
+        // Sincronizar automáticamente la liquidación de la promotora en Firestore
+        if (adjustedPromotoraId && targetWeekDateStr) {
+            await syncPromotoraSettlementsFromWeek(adjustedPromotoraId, targetWeekDateStr);
+        }
+
         revalidatePath('/inicio', 'layout');
+        revalidatePath('/inicio/debes');
+        revalidatePath('/inicio/resumen');
+        revalidatePath('/inicio/cierre-semanal');
+        revalidatePath('/inicio/precaptura');
         
         return { 
             success: true, 
@@ -639,6 +658,227 @@ export async function manualAdjustPaymentAction(
     } catch (error: any) {
         console.error('Error in manualAdjustPaymentAction:', error);
         return { success: false, message: `Error al ajustar el pago: ${error.message}` };
+    }
+}
+
+/**
+ * Sincroniza y recalcula automáticamente la liquidación de una promotora
+ * a partir de una semana específica hacia adelante en promotoraSettlements, precapturas y weeklyClosures.
+ */
+export async function syncPromotoraSettlementsFromWeek(promotoraId: string, fromWeekDateStr: string) {
+    try {
+        if (!promotoraId || !fromWeekDateStr) return;
+
+        // 1. Obtener settlements guardados para esta promotora
+        const settlementsCol = collection(db, 'promotoraSettlements');
+        const q = query(
+            settlementsCol, 
+            where('promotoraId', '==', promotoraId)
+        );
+        const settlementsSnap = await getDocs(q);
+        const allSettlements = settlementsSnap.docs.map(d => ({ id: d.id, ...d.data() } as PromotoraSettlement));
+        
+        // Semanas a partir de fromWeekDateStr
+        const targetSettlements = allSettlements
+            .filter(s => s.weekDate && s.weekDate >= fromWeekDateStr)
+            .sort((a, b) => a.weekDate.localeCompare(b.weekDate));
+
+        // Si la semana objetivo no tenía registro guardado, agregarla a la lista de sincronización
+        if (!targetSettlements.some(s => s.weekDate === fromWeekDateStr)) {
+            targetSettlements.unshift({
+                id: `${promotoraId}_${fromWeekDateStr}`,
+                promotoraId,
+                weekDate: fromWeekDateStr,
+                debeEntregar: 0,
+                falla: 0,
+                efectivo: 0,
+                recuperado: 0,
+                total: 0,
+                diferencia: 0,
+                deuda: 0,
+                venta: 0,
+                comicion: 0,
+                comicionPercent: 0,
+                supervision: 0,
+                supervisionPercent: 0,
+                abonoSemanal: 0,
+                adelEnt: 0,
+                adelSal: 0,
+                isClosed: false,
+            });
+        }
+
+        // 2. Traer préstamos de la promotora, planes y configuración
+        const [loansSnap, plansSnap, config, promSnap] = await Promise.all([
+            getDocs(query(collection(db, 'loans'), where('promotoraId', '==', promotoraId))),
+            getDocs(collection(db, 'loanPlans')),
+            getAppConfig(),
+            getDoc(doc(db, 'promotoras', promotoraId))
+        ]);
+
+        const loans = loansSnap.docs.map(d => ({ id: d.id, ...d.data() } as Loan));
+        const loanPlans = plansSnap.docs.map(d => ({ id: d.id, ...d.data() } as LoanPlan));
+        const promotoraData = promSnap.exists() ? (promSnap.data() as Promotora) : null;
+        const promotoraName = promotoraData?.name || 'Promotora';
+        const localidadId = promotoraData?.localidadId;
+
+        let plazaId: string | undefined;
+        if (localidadId) {
+            const locSnap = await getDoc(doc(db, 'localidades', localidadId));
+            if (locSnap.exists()) {
+                plazaId = (locSnap.data() as Localidad).plazaId;
+            }
+        }
+
+        const nowIso = new Date().toISOString();
+        let currentPrevSettlement: PromotoraSettlement | null = null;
+
+        // Para la primera semana objetivo, buscar la liquidación de la semana anterior
+        const firstWeekDate = targetSettlements[0].weekDate;
+        const prevFirstWeekStr = getPreviousSaturdayStr(firstWeekDate);
+        const prevFirstSnap = await getDoc(doc(db, 'promotoraSettlements', `${promotoraId}_${prevFirstWeekStr}`));
+        if (prevFirstSnap.exists()) {
+            currentPrevSettlement = prevFirstSnap.data() as PromotoraSettlement;
+        }
+
+        const batch = writeBatch(db);
+        let batchCount = 0;
+
+        for (const curS of targetSettlements) {
+            const wDate = curS.weekDate;
+            const prevWeekStr = getPreviousSaturdayStr(wDate);
+
+            if (!currentPrevSettlement || currentPrevSettlement.weekDate !== prevWeekStr) {
+                const prevSnap = await getDoc(doc(db, 'promotoraSettlements', `${promotoraId}_${prevWeekStr}`));
+                currentPrevSettlement = prevSnap.exists() ? (prevSnap.data() as PromotoraSettlement) : null;
+            }
+
+            // Buscar precaptura si existe plazaId
+            let precapturaRef = null;
+            let precapturaData: Precaptura | null = null;
+            if (plazaId) {
+                precapturaRef = doc(db, 'precapturas', `${plazaId}_${wDate}`);
+                const pSnap = await getDoc(precapturaRef);
+                if (pSnap.exists()) {
+                    precapturaData = pSnap.data() as Precaptura;
+                }
+            }
+
+            const rawPrecapturaRow = precapturaData?.rows?.[promotoraId];
+            // Sanitizar precapturaRow para no forzar la falla vieja guardada
+            const precapturaRow = rawPrecapturaRow ? { ...rawPrecapturaRow, falla: undefined } : undefined;
+
+            const computed = computePromotoraWeekMetrics({
+                promotoraId,
+                promotoraName,
+                targetWeekStr: wDate,
+                loans,
+                loanPlans,
+                config,
+                prevSettlement: currentPrevSettlement,
+                precapturaRow,
+                savedSettlement: curS,
+            });
+
+            const updatedSettlement: PromotoraSettlement = {
+                ...curS,
+                ...computed,
+                isClosed: curS.isClosed ?? false,
+                updatedAt: nowIso,
+            };
+
+            const sRef = doc(db, 'promotoraSettlements', curS.id);
+            batch.set(sRef, cleanFirestoreData(updatedSettlement), { merge: true });
+            batchCount++;
+
+            // Si hay precaptura, mantener la fila sincronizada
+            if (precapturaRef && precapturaData && rawPrecapturaRow) {
+                const updatedRow = {
+                    ...rawPrecapturaRow,
+                    falla: computed.falla,
+                    efectivo: computed.efectivo,
+                    totalEntregar: computed.total,
+                    diferencia: computed.diferencia,
+                };
+                batch.update(precapturaRef, {
+                    [`rows.${promotoraId}`]: cleanFirestoreData(updatedRow),
+                    updatedAt: nowIso,
+                });
+                batchCount++;
+            }
+
+            // Actualizar la referencia de previous para la siguiente iteración de semana
+            currentPrevSettlement = updatedSettlement;
+
+            // Actualizar weeklyClosures si existe cierre de esa semana
+            const closureRef = doc(db, 'weeklyClosures', wDate);
+            const closureSnap = await getDoc(closureRef);
+            if (closureSnap.exists() && plazaId) {
+                const cData = closureSnap.data() as WeeklyClosure;
+                const pClosure = cData.plazaClosures?.[plazaId];
+                if (pClosure) {
+                    const locsSnap = await getDocs(query(collection(db, 'localidades'), where('plazaId', '==', plazaId)));
+                    const locIds = locsSnap.docs.map(d => d.id);
+                    const promsSnap = await getDocs(collection(db, 'promotoras'));
+                    const plazaProms = promsSnap.docs
+                        .map(d => ({ id: d.id, ...d.data() } as Promotora))
+                        .filter(p => locIds.includes(p.localidadId));
+
+                    let sumDebe = 0;
+                    let sumCobrado = 0;
+                    let sumFalla = 0;
+                    let sumRecuperado = 0;
+                    let sumVenta = 0;
+
+                    await Promise.all(plazaProms.map(async (p) => {
+                        let sData: PromotoraSettlement | null = null;
+                        if (p.id === promotoraId) {
+                            sData = updatedSettlement;
+                        } else {
+                            const pDoc = await getDoc(doc(db, 'promotoraSettlements', `${p.id}_${wDate}`));
+                            if (pDoc.exists()) sData = pDoc.data() as PromotoraSettlement;
+                        }
+                        if (sData) {
+                            sumDebe += Number(sData.debeEntregar) || 0;
+                            sumCobrado += Number(sData.total) || 0;
+                            sumFalla += Number(sData.falla) || 0;
+                            sumRecuperado += Number(sData.recuperado) || 0;
+                            sumVenta += Number(sData.venta) || 0;
+                        }
+                    }));
+
+                    const updatedPlazaClosures = {
+                        ...(cData.plazaClosures || {}),
+                        [plazaId]: {
+                            ...pClosure,
+                            totalDebeEntregar: sumDebe,
+                            totalCobrado: sumCobrado,
+                            totalFalla: sumFalla,
+                            totalRecuperado: sumRecuperado,
+                            totalVenta: sumVenta,
+                        }
+                    };
+
+                    batch.update(closureRef, {
+                        plazaClosures: updatedPlazaClosures,
+                        updatedAt: nowIso,
+                    });
+                    batchCount++;
+                }
+            }
+        }
+
+        if (batchCount > 0) {
+            await batch.commit();
+        }
+
+        revalidatePath('/inicio/debes');
+        revalidatePath('/inicio/resumen');
+        revalidatePath('/inicio/cierre-semanal');
+        revalidatePath('/inicio/precaptura');
+
+    } catch (err: any) {
+        console.error('Error in syncPromotoraSettlementsFromWeek:', err);
     }
 }
 

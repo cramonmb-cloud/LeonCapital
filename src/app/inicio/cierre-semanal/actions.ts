@@ -61,6 +61,23 @@ export async function getWeeklyClosuresListAction(): Promise<WeeklyClosure[]> {
   }
 }
 
+function cleanFirestoreData<T>(obj: T): T {
+  if (obj === null || obj === undefined) return obj;
+  if (Array.isArray(obj)) {
+    return obj.map(item => cleanFirestoreData(item)) as unknown as T;
+  }
+  if (typeof obj === 'object' && !(obj instanceof Date)) {
+    const clean: any = {};
+    for (const [key, value] of Object.entries(obj)) {
+      if (value !== undefined) {
+        clean[key] = cleanFirestoreData(value);
+      }
+    }
+    return clean as T;
+  }
+  return obj;
+}
+
 /**
  * Helper to commit docs in chunks of 250 to respect Firestore batch limit of 500
  */
@@ -418,7 +435,7 @@ export async function executeGlobalClosureAction({
 }
 
 /**
- * Reopens a closed Plaza for a specific week
+ * Reopens a closed Plaza for a specific week and recalculates metrics from live loans
  */
 export async function reopenPlazaClosureAction({
   plazaId,
@@ -431,32 +448,101 @@ export async function reopenPlazaClosureAction({
 }): Promise<{ success: boolean; message: string }> {
   try {
     const nowIso = new Date().toISOString();
+    const prevWeekStr = getPreviousSaturdayStr(weekDate);
 
     // 1. Fetch Localidades of this plaza
     const localidadesSnap = await getDocs(query(collection(db, 'localidades'), where('plazaId', '==', plazaId)));
     const locIds = localidadesSnap.docs.map(d => d.id);
-    const promotorasSnap = await getDocs(collection(db, 'promotoras'));
+    const [promotorasSnap, loansSnap, plansSnap, config] = await Promise.all([
+      getDocs(collection(db, 'promotoras')),
+      getDocs(collection(db, 'loans')),
+      getDocs(collection(db, 'loanPlans')),
+      getAppConfig()
+    ]);
     const plazaPromotoras = promotorasSnap.docs
       .map(d => ({ id: d.id, ...d.data() } as Promotora))
       .filter(p => locIds.includes(p.localidadId));
 
-    const batchOperations: Array<(batch: ReturnType<typeof writeBatch>) => void> = [];
+    const loans = loansSnap.docs.map(d => ({ id: d.id, ...d.data() } as Loan));
+    const loanPlans = plansSnap.docs.map(d => ({ id: d.id, ...d.data() } as LoanPlan));
 
-    // 2. Mark settlements isClosed = false
-    plazaPromotoras.forEach(p => {
-      const setRef = doc(db, 'promotoraSettlements', `${p.id}_${weekDate}`);
-      batchOperations.push((batch) => {
-        batch.update(setRef, {
-          isClosed: false,
-          updatedAt: nowIso,
-          updatedBy: username,
-        });
-      });
-    });
-
-    // 3. Mark Precaptura isClosed = false
     const precapturaRef = doc(db, 'precapturas', `${plazaId}_${weekDate}`);
     const precapturaSnap = await getDoc(precapturaRef);
+    const precapturaData = precapturaSnap.exists() ? (precapturaSnap.data() as Precaptura) : null;
+
+    const promIds = plazaPromotoras.map(p => p.id);
+    const prevSettlementsMap: Record<string, PromotoraSettlement> = {};
+    const existingSettlementsMap: Record<string, PromotoraSettlement> = {};
+
+    await Promise.all(promIds.map(async (pId) => {
+      const prevDocSnap = await getDoc(doc(db, 'promotoraSettlements', `${pId}_${prevWeekStr}`));
+      if (prevDocSnap.exists()) {
+        prevSettlementsMap[pId] = prevDocSnap.data() as PromotoraSettlement;
+      }
+      const curDocSnap = await getDoc(doc(db, 'promotoraSettlements', `${pId}_${weekDate}`));
+      if (curDocSnap.exists()) {
+        existingSettlementsMap[pId] = curDocSnap.data() as PromotoraSettlement;
+      }
+    }));
+
+    const batchOperations: Array<(batch: ReturnType<typeof writeBatch>) => void> = [];
+    let sumDebe = 0;
+    let sumCobrado = 0;
+    let sumFalla = 0;
+    let sumRecuperado = 0;
+    let sumVenta = 0;
+
+    plazaPromotoras.forEach(promotora => {
+      const pId = promotora.id;
+      const rawPrecapturaRow = precapturaData?.rows?.[pId];
+      const precapturaRow = rawPrecapturaRow ? { ...rawPrecapturaRow, falla: undefined } : undefined;
+      const prevSettlement = prevSettlementsMap[pId];
+      const curSettlement = existingSettlementsMap[pId];
+
+      const settlement = computePromotoraWeekMetrics({
+        promotoraId: pId,
+        promotoraName: promotora.name,
+        targetWeekStr: weekDate,
+        loans,
+        loanPlans,
+        config,
+        prevSettlement,
+        precapturaRow,
+        savedSettlement: curSettlement,
+      });
+
+      const updatedSettlement: PromotoraSettlement = {
+        ...curSettlement,
+        ...settlement,
+        isClosed: false,
+        updatedAt: nowIso,
+        updatedBy: username,
+      };
+
+      sumDebe += updatedSettlement.debeEntregar;
+      sumCobrado += updatedSettlement.total;
+      sumFalla += updatedSettlement.falla;
+      sumRecuperado += updatedSettlement.recuperado;
+      sumVenta += updatedSettlement.venta;
+
+      const setRef = doc(db, 'promotoraSettlements', updatedSettlement.id);
+      batchOperations.push((batch) => {
+        batch.set(setRef, cleanFirestoreData(updatedSettlement), { merge: true });
+      });
+
+      if (precapturaSnap.exists() && rawPrecapturaRow) {
+        batchOperations.push((batch) => {
+          batch.update(precapturaRef, {
+            [`rows.${pId}.falla`]: updatedSettlement.falla,
+            [`rows.${pId}.efectivo`]: updatedSettlement.efectivo,
+            [`rows.${pId}.totalEntregar`]: updatedSettlement.total,
+            [`rows.${pId}.diferencia`]: updatedSettlement.diferencia,
+          });
+        });
+      }
+    });
+
+    // Mark Precaptura isClosed = false
     if (precapturaSnap.exists()) {
       batchOperations.push((batch) => {
         batch.update(precapturaRef, {
@@ -467,24 +553,32 @@ export async function reopenPlazaClosureAction({
       });
     }
 
-    // 4. Update WeeklyClosure doc
+    // Update WeeklyClosure doc
     const closureRef = doc(db, 'weeklyClosures', weekDate);
     const closureSnap = await getDoc(closureRef);
     if (closureSnap.exists()) {
       const closureData = closureSnap.data() as WeeklyClosure;
       const nextClosedPlazas = (closureData.closedPlazaIds || []).filter(id => id !== plazaId);
       const nextPlazaClosures = { ...(closureData.plazaClosures || {}) };
-      delete nextPlazaClosures[plazaId];
+      
+      nextPlazaClosures[plazaId] = {
+        totalPromotoras: plazaPromotoras.length,
+        totalDebeEntregar: sumDebe,
+        totalCobrado: sumCobrado,
+        totalFalla: sumFalla,
+        totalRecuperado: sumRecuperado,
+        totalVenta: sumVenta,
+      };
 
       batchOperations.push((batch) => {
-        batch.set(closureRef, {
+        batch.set(closureRef, cleanFirestoreData({
           ...closureData,
           isGlobalClosed: false,
           closedPlazaIds: nextClosedPlazas,
           plazaClosures: nextPlazaClosures,
           updatedAt: nowIso,
           updatedBy: username,
-        }, { merge: true });
+        }), { merge: true });
       });
     }
 
@@ -492,9 +586,10 @@ export async function reopenPlazaClosureAction({
 
     revalidatePath('/inicio/cierre-semanal');
     revalidatePath('/inicio/debes');
+    revalidatePath('/inicio/resumen');
     revalidatePath('/inicio/precaptura');
 
-    return { success: true, message: 'Plaza reabierta correctamente para edición.' };
+    return { success: true, message: 'Plaza reabierta y sincronizada exitosamente con los préstamos actuales.' };
   } catch (err: any) {
     console.error('Error reopening plaza closure:', err);
     return { success: false, message: err.message || 'Error al reabrir la plaza.' };
@@ -502,7 +597,7 @@ export async function reopenPlazaClosureAction({
 }
 
 /**
- * Reopens an entire week globally across all plazas
+ * Reopens an entire week globally across all plazas and recalculates metrics from live loans
  */
 export async function reopenGlobalClosureAction({
   weekDate,
@@ -513,56 +608,316 @@ export async function reopenGlobalClosureAction({
 }): Promise<{ success: boolean; message: string }> {
   try {
     const nowIso = new Date().toISOString();
+    const prevWeekStr = getPreviousSaturdayStr(weekDate);
 
-    // 1. Fetch all settlements for this week
-    const settlementsSnap = await getDocs(query(collection(db, 'promotoraSettlements'), where('weekDate', '==', weekDate)));
+    // Fetch all structure
+    const [plazasSnap, localidadesSnap, promotorasSnap, loansSnap, plansSnap, config] = await Promise.all([
+      getDocs(collection(db, 'plazas')),
+      getDocs(collection(db, 'localidades')),
+      getDocs(collection(db, 'promotoras')),
+      getDocs(collection(db, 'loans')),
+      getDocs(collection(db, 'loanPlans')),
+      getAppConfig()
+    ]);
+
+    const plazas = plazasSnap.docs.map(d => ({ id: d.id, ...d.data() } as Plaza));
+    const localidades = localidadesSnap.docs.map(d => ({ id: d.id, ...d.data() } as Localidad));
+    const promotoras = promotorasSnap.docs.map(d => ({ id: d.id, ...d.data() } as Promotora));
+    const loans = loansSnap.docs.map(d => ({ id: d.id, ...d.data() } as Loan));
+    const loanPlans = plansSnap.docs.map(d => ({ id: d.id, ...d.data() } as LoanPlan));
+
+    // Fetch all precapturas for this week
     const precapturasSnap = await getDocs(query(collection(db, 'precapturas'), where('weekDate', '==', weekDate)));
+    const precapturasByPlaza: Record<string, Precaptura> = {};
+    precapturasSnap.docs.forEach(d => {
+      const data = d.data() as Precaptura;
+      precapturasByPlaza[data.plazaId] = { ...data, id: d.id };
+    });
+
+    const prevSettlementsMap: Record<string, PromotoraSettlement> = {};
+    const curSettlementsMap: Record<string, PromotoraSettlement> = {};
+
+    await Promise.all(promotoras.map(async (p) => {
+      const prevDocSnap = await getDoc(doc(db, 'promotoraSettlements', `${p.id}_${prevWeekStr}`));
+      if (prevDocSnap.exists()) {
+        prevSettlementsMap[p.id] = prevDocSnap.data() as PromotoraSettlement;
+      }
+      const curDocSnap = await getDoc(doc(db, 'promotoraSettlements', `${p.id}_${weekDate}`));
+      if (curDocSnap.exists()) {
+        curSettlementsMap[p.id] = curDocSnap.data() as PromotoraSettlement;
+      }
+    }));
 
     const batchOperations: Array<(batch: ReturnType<typeof writeBatch>) => void> = [];
+    const plazaClosures: Record<string, PlazaClosureSummary> = {};
 
-    settlementsSnap.docs.forEach(d => {
-      batchOperations.push((batch) => {
-        batch.update(d.ref, {
+    plazas.forEach(plaza => {
+      const plazaLocIds = localidades.filter(l => l.plazaId === plaza.id).map(l => l.id);
+      const pPromotoras = promotoras.filter(p => plazaLocIds.includes(p.localidadId));
+      const precaptura = precapturasByPlaza[plaza.id];
+
+      let sumDebe = 0;
+      let sumCobrado = 0;
+      let sumFalla = 0;
+      let sumRecuperado = 0;
+      let sumVenta = 0;
+
+      pPromotoras.forEach(promotora => {
+        const pId = promotora.id;
+        const rawPrecapturaRow = precaptura?.rows?.[pId];
+        const precapturaRow = rawPrecapturaRow ? { ...rawPrecapturaRow, falla: undefined } : undefined;
+        const prevSettlement = prevSettlementsMap[pId];
+        const curSettlement = curSettlementsMap[pId];
+
+        const settlement = computePromotoraWeekMetrics({
+          promotoraId: pId,
+          promotoraName: promotora.name,
+          targetWeekStr: weekDate,
+          loans,
+          loanPlans,
+          config,
+          prevSettlement,
+          precapturaRow,
+          savedSettlement: curSettlement,
+        });
+
+        const updatedSettlement: PromotoraSettlement = {
+          ...curSettlement,
+          ...settlement,
           isClosed: false,
           updatedAt: nowIso,
           updatedBy: username,
+        };
+
+        sumDebe += updatedSettlement.debeEntregar;
+        sumCobrado += updatedSettlement.total;
+        sumFalla += updatedSettlement.falla;
+        sumRecuperado += updatedSettlement.recuperado;
+        sumVenta += updatedSettlement.venta;
+
+        const setRef = doc(db, 'promotoraSettlements', updatedSettlement.id);
+        batchOperations.push((batch) => {
+          batch.set(setRef, cleanFirestoreData(updatedSettlement), { merge: true });
         });
+
+        if (precaptura && rawPrecapturaRow) {
+          batchOperations.push((batch) => {
+            batch.update(doc(db, 'precapturas', precaptura.id), {
+              [`rows.${pId}.falla`]: updatedSettlement.falla,
+              [`rows.${pId}.efectivo`]: updatedSettlement.efectivo,
+              [`rows.${pId}.totalEntregar`]: updatedSettlement.total,
+              [`rows.${pId}.diferencia`]: updatedSettlement.diferencia,
+            });
+          });
+        }
       });
+
+      plazaClosures[plaza.id] = {
+        totalPromotoras: pPromotoras.length,
+        totalDebeEntregar: sumDebe,
+        totalCobrado: sumCobrado,
+        totalFalla: sumFalla,
+        totalRecuperado: sumRecuperado,
+        totalVenta: sumVenta,
+      };
+
+      if (precaptura) {
+        batchOperations.push((batch) => {
+          batch.update(doc(db, 'precapturas', precaptura.id), {
+            isClosed: false,
+            updatedAt: nowIso,
+            updatedBy: username,
+          });
+        });
+      }
     });
 
-    precapturasSnap.docs.forEach(d => {
-      batchOperations.push((batch) => {
-        batch.update(d.ref, {
-          isClosed: false,
-          updatedAt: nowIso,
-          updatedBy: username,
-        });
-      });
-    });
-
-    // Update closure document
+    // Update global weekly closure document
     const closureRef = doc(db, 'weeklyClosures', weekDate);
+    const closureData: WeeklyClosure = {
+      id: weekDate,
+      weekDate,
+      isGlobalClosed: false,
+      closedPlazaIds: [],
+      plazaClosures,
+      updatedAt: nowIso,
+      updatedBy: username,
+      createdAt: nowIso,
+    };
+
     batchOperations.push((batch) => {
-      batch.set(closureRef, {
-        id: weekDate,
-        weekDate,
-        isGlobalClosed: false,
-        closedPlazaIds: [],
-        plazaClosures: {},
-        updatedAt: nowIso,
-        updatedBy: username,
-      }, { merge: true });
+      batch.set(closureRef, cleanFirestoreData(closureData), { merge: true });
     });
 
     await commitBatches(batchOperations);
 
     revalidatePath('/inicio/cierre-semanal');
     revalidatePath('/inicio/debes');
+    revalidatePath('/inicio/resumen');
     revalidatePath('/inicio/precaptura');
 
-    return { success: true, message: 'La semana fue reabierta globalmente en todas las plazas.' };
+    return { 
+      success: true, 
+      message: 'La semana fue reabierta y sincronizada globalmente en todas las plazas con los préstamos actuales.' 
+    };
   } catch (err: any) {
     console.error('Error reopening global closure:', err);
     return { success: false, message: err.message || 'Error al reabrir la semana globalmente.' };
+  }
+}
+
+/**
+ * Recalcula y sincroniza todos los valores de una semana desde los préstamos en vivo
+ * sin alterar el estado de apertura/cierre de las plazas.
+ */
+export async function recalculateWeekAction({
+  weekDate,
+  username
+}: {
+  weekDate: string;
+  username: string;
+}): Promise<{ success: boolean; message: string }> {
+  try {
+    const nowIso = new Date().toISOString();
+    const prevWeekStr = getPreviousSaturdayStr(weekDate);
+
+    const [plazasSnap, localidadesSnap, promotorasSnap, loansSnap, plansSnap, config, closureSnap] = await Promise.all([
+      getDocs(collection(db, 'plazas')),
+      getDocs(collection(db, 'localidades')),
+      getDocs(collection(db, 'promotoras')),
+      getDocs(collection(db, 'loans')),
+      getDocs(collection(db, 'loanPlans')),
+      getAppConfig(),
+      getDoc(doc(db, 'weeklyClosures', weekDate))
+    ]);
+
+    const plazas = plazasSnap.docs.map(d => ({ id: d.id, ...d.data() } as Plaza));
+    const localidades = localidadesSnap.docs.map(d => ({ id: d.id, ...d.data() } as Localidad));
+    const promotoras = promotorasSnap.docs.map(d => ({ id: d.id, ...d.data() } as Promotora));
+    const loans = loansSnap.docs.map(d => ({ id: d.id, ...d.data() } as Loan));
+    const loanPlans = plansSnap.docs.map(d => ({ id: d.id, ...d.data() } as LoanPlan));
+    const closureData = closureSnap.exists() ? (closureSnap.data() as WeeklyClosure) : null;
+
+    const precapturasSnap = await getDocs(query(collection(db, 'precapturas'), where('weekDate', '==', weekDate)));
+    const precapturasByPlaza: Record<string, Precaptura> = {};
+    precapturasSnap.docs.forEach(d => {
+      const data = d.data() as Precaptura;
+      precapturasByPlaza[data.plazaId] = { ...data, id: d.id };
+    });
+
+    const prevSettlementsMap: Record<string, PromotoraSettlement> = {};
+    const curSettlementsMap: Record<string, PromotoraSettlement> = {};
+
+    await Promise.all(promotoras.map(async (p) => {
+      const prevDocSnap = await getDoc(doc(db, 'promotoraSettlements', `${p.id}_${prevWeekStr}`));
+      if (prevDocSnap.exists()) {
+        prevSettlementsMap[p.id] = prevDocSnap.data() as PromotoraSettlement;
+      }
+      const curDocSnap = await getDoc(doc(db, 'promotoraSettlements', `${p.id}_${weekDate}`));
+      if (curDocSnap.exists()) {
+        curSettlementsMap[p.id] = curDocSnap.data() as PromotoraSettlement;
+      }
+    }));
+
+    const batchOperations: Array<(batch: ReturnType<typeof writeBatch>) => void> = [];
+    const plazaClosures: Record<string, PlazaClosureSummary> = { ...(closureData?.plazaClosures || {}) };
+
+    plazas.forEach(plaza => {
+      const plazaLocIds = localidades.filter(l => l.plazaId === plaza.id).map(l => l.id);
+      const pPromotoras = promotoras.filter(p => plazaLocIds.includes(p.localidadId));
+      const precaptura = precapturasByPlaza[plaza.id];
+
+      let sumDebe = 0;
+      let sumCobrado = 0;
+      let sumFalla = 0;
+      let sumRecuperado = 0;
+      let sumVenta = 0;
+
+      pPromotoras.forEach(promotora => {
+        const pId = promotora.id;
+        const rawPrecapturaRow = precaptura?.rows?.[pId];
+        const precapturaRow = rawPrecapturaRow ? { ...rawPrecapturaRow, falla: undefined } : undefined;
+        const prevSettlement = prevSettlementsMap[pId];
+        const curSettlement = curSettlementsMap[pId];
+
+        const settlement = computePromotoraWeekMetrics({
+          promotoraId: pId,
+          promotoraName: promotora.name,
+          targetWeekStr: weekDate,
+          loans,
+          loanPlans,
+          config,
+          prevSettlement,
+          precapturaRow,
+          savedSettlement: curSettlement,
+        });
+
+        const isClosed = curSettlement?.isClosed ?? false;
+        const updatedSettlement: PromotoraSettlement = {
+          ...curSettlement,
+          ...settlement,
+          isClosed,
+          updatedAt: nowIso,
+          updatedBy: username,
+        };
+
+        sumDebe += updatedSettlement.debeEntregar;
+        sumCobrado += updatedSettlement.total;
+        sumFalla += updatedSettlement.falla;
+        sumRecuperado += updatedSettlement.recuperado;
+        sumVenta += updatedSettlement.venta;
+
+        const setRef = doc(db, 'promotoraSettlements', updatedSettlement.id);
+        batchOperations.push((batch) => {
+          batch.set(setRef, cleanFirestoreData(updatedSettlement), { merge: true });
+        });
+
+        if (precaptura && rawPrecapturaRow) {
+          batchOperations.push((batch) => {
+            batch.update(doc(db, 'precapturas', precaptura.id), {
+              [`rows.${pId}.falla`]: updatedSettlement.falla,
+              [`rows.${pId}.efectivo`]: updatedSettlement.efectivo,
+              [`rows.${pId}.totalEntregar`]: updatedSettlement.total,
+              [`rows.${pId}.diferencia`]: updatedSettlement.diferencia,
+            });
+          });
+        }
+      });
+
+      plazaClosures[plaza.id] = {
+        ...(plazaClosures[plaza.id] || {}),
+        totalPromotoras: pPromotoras.length,
+        totalDebeEntregar: sumDebe,
+        totalCobrado: sumCobrado,
+        totalFalla: sumFalla,
+        totalRecuperado: sumRecuperado,
+        totalVenta: sumVenta,
+      };
+    });
+
+    if (closureSnap.exists()) {
+      batchOperations.push((batch) => {
+        batch.update(closureSnap.ref, {
+          plazaClosures,
+          updatedAt: nowIso,
+          updatedBy: username,
+        });
+      });
+    }
+
+    await commitBatches(batchOperations);
+
+    revalidatePath('/inicio/cierre-semanal');
+    revalidatePath('/inicio/debes');
+    revalidatePath('/inicio/resumen');
+    revalidatePath('/inicio/precaptura');
+
+    return { 
+      success: true, 
+      message: 'Semana recalculada y sincronizada exitosamente con los préstamos actuales.' 
+    };
+  } catch (err: any) {
+    console.error('Error recalculating week:', err);
+    return { success: false, message: err.message || 'Error al recalcular la semana.' };
   }
 }

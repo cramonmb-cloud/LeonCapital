@@ -108,11 +108,13 @@ export type PromotoraSettlement = {
     isClosed?: boolean;
     closedAt?: string;
     closedBy?: string;
+    updatedAt?: string;
+    updatedBy?: string;
 };
 
 export type PlazaClosureSummary = {
-    closedAt: string;
-    closedBy: string;
+    closedAt?: string;
+    closedBy?: string;
     totalPromotoras: number;
     totalDebeEntregar: number;
     totalCobrado: number;
