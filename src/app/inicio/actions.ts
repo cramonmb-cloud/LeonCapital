@@ -531,9 +531,9 @@ export async function manualAdjustPaymentAction(
 
             if (tag === 'limpiar' || amountPaid < 0) {
                 // Modo eliminación / limpiar: quitar el abono de esa semana por completo
-                allPayments = currentPayments.filter(p => p.weekNumber !== weekNumber);
+                allPayments = currentPayments.filter(p => Number(p.weekNumber) !== Number(weekNumber));
             } else {
-                const otherPayments = currentPayments.filter(p => p.weekNumber !== weekNumber);
+                const otherPayments = currentPayments.filter(p => Number(p.weekNumber) !== Number(weekNumber));
                 const paymentWeekDateStr = getSaturdayOfWeek(getMexicoNow()).toISOString().split('T')[0];
 
                 let newPayment: Payment;
@@ -541,7 +541,7 @@ export async function manualAdjustPaymentAction(
                     newPayment = {
                         date: targetSatIso,
                         amount: 0,
-                        weekNumber,
+                        weekNumber: Number(weekNumber),
                         isRecovered: false,
                         isReverted: false,
                         isAdvance: false,
@@ -552,7 +552,7 @@ export async function manualAdjustPaymentAction(
                     newPayment = {
                         date: targetSatIso,
                         amount: amountPaid > 0 ? amountPaid : weeklyPayment,
-                        weekNumber,
+                        weekNumber: Number(weekNumber),
                         isRecovered: false,
                         isReverted: false,
                         isAdvance: false,
@@ -563,7 +563,7 @@ export async function manualAdjustPaymentAction(
                     newPayment = {
                         date: targetSatIso,
                         amount: amountPaid > 0 ? amountPaid : weeklyPayment,
-                        weekNumber,
+                        weekNumber: Number(weekNumber),
                         isRecovered: false,
                         isReverted: false,
                         isAdvance: true,
@@ -576,7 +576,7 @@ export async function manualAdjustPaymentAction(
                     newPayment = {
                         date: targetSatIso,
                         amount: amountPaid,
-                        weekNumber,
+                        weekNumber: Number(weekNumber),
                         isRecovered: false,
                         isReverted: false,
                         isAdvance: false,
@@ -585,7 +585,7 @@ export async function manualAdjustPaymentAction(
                     };
                 }
 
-                allPayments = [...otherPayments, newPayment].sort((a, b) => a.weekNumber - b.weekNumber);
+                allPayments = [...otherPayments, newPayment].sort((a, b) => Number(a.weekNumber) - Number(b.weekNumber));
             }
 
             const currentLoanWeek = Math.max(1, getCurrentLoanWeekNumber(loanStartDate));
@@ -620,11 +620,14 @@ export async function manualAdjustPaymentAction(
             const balance = Math.max(0, totalExpected - newTotalPaid);
 
             const totalPaidInBaseTerm = allPayments
-                .filter(p => p.weekNumber >= 1 && p.weekNumber <= baseTerm && !p.isReverted)
+                .filter(p => Number(p.weekNumber) >= 1 && Number(p.weekNumber) <= baseTerm && !p.isReverted)
                 .reduce((sum, p) => sum + p.amount, 0);
 
+            // Si se limpió el abono (tag === 'limpiar'), esa semana queda PENDIENTE y el préstamo YA NO puede estar liquidado ('Paid Off')
             let newStatus: Loan['status'] = loan.status;
-            if (balance <= 0) {
+            if (tag === 'limpiar') {
+                newStatus = (isExpired || currentLoanWeek > totalTerm) ? 'Overdue' : 'Active';
+            } else if (balance <= 0) {
                 newStatus = (isExpired && totalPaidInBaseTerm < (baseTerm * weeklyPayment)) ? 'Pagado desde CV' : 'Paid Off';
             } else {
                 newStatus = (isExpired || currentLoanWeek > totalTerm) ? 'Overdue' : 'Active';
@@ -643,6 +646,10 @@ export async function manualAdjustPaymentAction(
         }
 
         revalidatePath('/inicio', 'layout');
+        revalidatePath('/inicio/clientes');
+        revalidatePath('/inicio/clientes/[id]', 'page');
+        revalidatePath('/inicio/prestamos');
+        revalidatePath('/inicio/consultar-cliente');
         revalidatePath('/inicio/debes');
         revalidatePath('/inicio/resumen');
         revalidatePath('/inicio/cierre-semanal');

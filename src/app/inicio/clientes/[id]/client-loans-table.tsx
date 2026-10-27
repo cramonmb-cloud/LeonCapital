@@ -169,7 +169,7 @@ export function ClientLoansTable({ clientLoans, loanPlans, allLoans, users, plaz
       const rows = [];
 
       for(let i = 1; i <= maxDisplayWeek; i++) {
-          const payment = loanForDetails.payments?.find(p => p.weekNumber === i);
+          const payment = loanForDetails.payments?.find(p => Number(p.weekNumber) === i);
           const isRegistered = !!payment && !payment.isReverted;
           
           // Si supera el plazo calculado (termInWeeks) y NO tiene pago registrado con monto > 0, no mostrar
@@ -204,8 +204,8 @@ export function ClientLoansTable({ clientLoans, loanPlans, allLoans, users, plaz
               }
           } else if (isLiquidated) {
               received = weeklyPayment;
-              tag = 'adelanto';
-              note = 'AD';
+              tag = 'pagado';
+              note = 'LIQUIDADO';
               dateStr = 'LIQUIDADO';
           }
 
