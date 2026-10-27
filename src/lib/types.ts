@@ -46,6 +46,7 @@ export type Loan = {
   createdAt?: string;
   gestor?: string;
   hasPenalty?: boolean;
+  extraWeekWaived?: boolean;
 };
 
 export type Wallet = {

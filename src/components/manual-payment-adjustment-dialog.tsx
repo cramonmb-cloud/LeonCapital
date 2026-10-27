@@ -23,15 +23,16 @@ import {
 } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
 import type { Loan, AppConfig } from '@/lib/types';
-import { Loader2, ShieldCheck, AlertCircle, CheckCircle2, XCircle, ArrowUpRight, Check } from 'lucide-react';
+import { Loader2, ShieldCheck, AlertCircle, CheckCircle2, XCircle, ArrowUpRight, Check, RotateCcw, CalendarX2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { manualAdjustPaymentAction } from '@/app/inicio/actions';
 import { useAuth } from '@/hooks/use-auth';
 import { Alert, AlertDescription, AlertTitle } from './ui/alert';
 import { getExtraWeekThreshold, cn } from '@/lib/utils';
+import { RemoveExtraWeekDialog } from './remove-extra-week-dialog';
 
 const formSchema = z.object({
-  tag: z.enum(['pagado', 'asumido', 'falla', 'adelanto']),
+  tag: z.enum(['pagado', 'asumido', 'falla', 'adelanto', 'limpiar']),
   amountPaid: z.string()
     .min(1, 'El monto es obligatorio.')
     .refine((val) => {
@@ -46,7 +47,7 @@ const formSchema = z.object({
 
 type AdjustmentFormValues = z.infer<typeof formSchema>;
 
-export type PaymentAdjustmentTag = 'pagado' | 'asumido' | 'falla' | 'adelanto';
+export type PaymentAdjustmentTag = 'pagado' | 'asumido' | 'falla' | 'adelanto' | 'limpiar';
 
 interface ManualPaymentAdjustmentDialogProps {
   isOpen: boolean;
@@ -55,6 +56,7 @@ interface ManualPaymentAdjustmentDialogProps {
   weekNumber: number;
   currentAmount: number;
   currentTag?: PaymentAdjustmentTag;
+  clientName?: string;
   appConfig?: AppConfig | null;
   onSuccess?: () => void;
 }
@@ -68,15 +70,17 @@ export function ManualPaymentAdjustmentDialog({
   weekNumber,
   currentAmount,
   currentTag,
+  clientName,
   appConfig,
   onSuccess,
 }: ManualPaymentAdjustmentDialogProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isRemoveExtraWeekOpen, setIsRemoveExtraWeekOpen] = useState(false);
   const { toast } = useToast();
   const { appUser } = useAuth();
 
   const getInitialTag = (): PaymentAdjustmentTag => {
-    if (currentTag && ['pagado', 'asumido', 'falla', 'adelanto'].includes(currentTag)) {
+    if (currentTag && ['pagado', 'asumido', 'falla', 'adelanto', 'limpiar'].includes(currentTag)) {
       return currentTag;
     }
     const p = loan.payments?.find(pay => pay.weekNumber === weekNumber && !pay.isReverted);
@@ -113,7 +117,7 @@ export function ManualPaymentAdjustmentDialog({
 
   const handleSelectTag = (tag: PaymentAdjustmentTag) => {
     form.setValue('tag', tag);
-    if (tag === 'falla') {
+    if (tag === 'falla' || tag === 'limpiar') {
       form.setValue('amountPaid', '0');
     } else if (form.getValues('amountPaid') === '0' && currentAmount > 0) {
       form.setValue('amountPaid', currentAmount.toString());
@@ -128,7 +132,7 @@ export function ManualPaymentAdjustmentDialog({
 
     setIsSubmitting(true);
     try {
-      const isDeletion = values.amountPaid === '0000000';
+      const isDeletion = values.tag === 'limpiar' || values.amountPaid === '0000000';
       const numericAmount = isDeletion ? -1 : parseFloat(values.amountPaid);
 
       const result = await manualAdjustPaymentAction(
@@ -141,10 +145,16 @@ export function ManualPaymentAdjustmentDialog({
 
       if (result.success) {
         toast({
-          title: isDeletion ? 'Ajuste Realizado (Eliminación)' : 'Ajuste Realizado',
-          description: isDeletion
-            ? `Se ha eliminado el abono de la semana ${weekNumber} y restablecido su estado.`
-            : `El abono de la semana ${weekNumber} ha sido procesado como ${values.tag.toUpperCase()} por ${new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(Math.max(0, numericAmount))}.`,
+          title: values.tag === 'limpiar'
+            ? 'Abono Limpiado'
+            : isDeletion 
+              ? 'Ajuste Realizado (Eliminación)' 
+              : 'Ajuste Realizado',
+          description: values.tag === 'limpiar'
+            ? `Se ha limpiado el abono de la semana ${weekNumber}, dejándolo disponible como nuevo para registro posterior.`
+            : isDeletion
+              ? `Se ha eliminado el abono de la semana ${weekNumber} y restablecido su estado.`
+              : `El abono de la semana ${weekNumber} ha sido procesado como ${values.tag.toUpperCase()} por ${new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(Math.max(0, numericAmount))}.`,
         });
         onOpenChange(false);
         if (onSuccess) onSuccess();
@@ -251,6 +261,30 @@ export function ManualPaymentAdjustmentDialog({
                       <span className="text-[10px] font-normal text-muted-foreground">Semana no cubierta ($0)</span>
                     </div>
                   </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleSelectTag('limpiar')}
+                    className={cn(
+                      "flex items-center gap-2 p-2.5 rounded-lg border-2 text-xs font-bold transition-all text-left col-span-2",
+                      selectedTag === 'limpiar'
+                        ? "border-amber-500 bg-amber-50 text-amber-900 shadow-sm dark:bg-amber-950/40 dark:text-amber-200"
+                        : "border-zinc-200 bg-white text-zinc-600 hover:border-zinc-300 hover:bg-zinc-50 dark:bg-zinc-900 dark:border-zinc-800 dark:text-zinc-400"
+                    )}
+                  >
+                    <RotateCcw className={cn("h-4 w-4 shrink-0 font-bold", selectedTag === 'limpiar' ? "text-amber-600" : "text-zinc-400")} />
+                    <div className="flex flex-col">
+                      <div className="flex items-center gap-1.5">
+                        <span>Limpiar / Pendiente</span>
+                        <span className="text-[9px] px-1.5 py-0.5 bg-amber-100 text-amber-800 dark:bg-amber-900/60 dark:text-amber-300 rounded font-bold">
+                          Dejar limpio
+                        </span>
+                      </div>
+                      <span className="text-[10px] font-normal text-muted-foreground">
+                        Elimina cualquier registro (abono, falla o adelanto) y deja la semana limpia para un abono posterior.
+                      </span>
+                    </div>
+                  </button>
                 </div>
               </div>
 
@@ -264,13 +298,19 @@ export function ManualPaymentAdjustmentDialog({
                       <Input 
                         type="text" 
                         {...field} 
-                        disabled={selectedTag === 'falla'}
+                        disabled={selectedTag === 'falla' || selectedTag === 'limpiar'}
                         className="h-10 border-2 focus:ring-primary font-bold" 
                       />
                     </FormControl>
-                    <p className="text-[10px] text-zinc-500 mt-1">
-                      Tip: Escribe <strong>"0000000"</strong> (7 ceros) para eliminar este abono por completo, limpiar la fecha y recalcular.
-                    </p>
+                    {selectedTag === 'limpiar' ? (
+                      <p className="text-[10px] font-semibold text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900/50 p-2 rounded-md mt-1">
+                        Esta semana se desmarcará y quedará como <strong>Pendiente / Limpio</strong>, disponible para registrar un abono en el futuro.
+                      </p>
+                    ) : (
+                      <p className="text-[10px] text-zinc-500 mt-1">
+                        Tip: Selecciona <strong>"Limpiar / Pendiente"</strong> arriba o escribe <strong>"0000000"</strong> para restablecer el abono por completo.
+                      </p>
+                    )}
                     <FormMessage />
                   </FormItem>
                 )}
@@ -283,7 +323,7 @@ export function ManualPaymentAdjustmentDialog({
                   <FormItem>
                     <FormLabel className="font-bold text-xs uppercase text-destructive">Contraseña de Autorización</FormLabel>
                     <FormControl>
-                      <Input type="password" placeholder="••••••••" {...field} className="h-10 border-2 border-destructive/20 focus:ring-destructive" />
+                      <Input type="password" placeholder="••••••••" {...field} className="h-10 border-2 border-destructive/20 focus:ring-destructive font-mono" />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -291,10 +331,31 @@ export function ManualPaymentAdjustmentDialog({
               />
             </div>
 
-            <Alert className="bg-amber-50 border-amber-200 py-2">
+            {loan.hasPenalty && !loan.extraWeekWaived && (
+              <div className="bg-rose-50 border border-rose-200 rounded-lg p-2.5 flex items-center justify-between gap-2 dark:bg-rose-950/30 dark:border-rose-900/50">
+                <div className="flex items-center gap-2">
+                  <CalendarX2 className="h-4 w-4 text-rose-600 shrink-0" />
+                  <div>
+                    <p className="text-[11px] font-bold text-rose-900 dark:text-rose-200 leading-tight">Semana Extra Activa</p>
+                    <p className="text-[9px] text-rose-700 dark:text-rose-400">¿Deseas retirar la penalización a este préstamo?</p>
+                  </div>
+                </div>
+                <Button
+                  type="button"
+                  variant="destructive"
+                  size="sm"
+                  onClick={() => setIsRemoveExtraWeekOpen(true)}
+                  className="h-7 text-[10px] font-bold px-2.5 shrink-0 bg-rose-600 hover:bg-rose-700"
+                >
+                  Eliminar Semana Extra
+                </Button>
+              </div>
+            )}
+
+            <Alert className="bg-amber-50 border-amber-200 py-2 dark:bg-amber-950/30 dark:border-amber-900/50">
               <AlertCircle className="h-4 w-4 text-amber-600" />
-              <AlertTitle className="text-amber-800 font-bold text-xs">Aviso de Semana Extra</AlertTitle>
-              <AlertDescription className="text-[10px] text-amber-700">
+              <AlertTitle className="text-amber-800 dark:text-amber-200 font-bold text-xs">Aviso de Semana Extra</AlertTitle>
+              <AlertDescription className="text-[10px] text-amber-700 dark:text-amber-300">
                 Si el préstamo ya alcanzó el umbral de {getExtraWeekThreshold(appConfig)} fallo(s), la semana extra se mantendrá como penalización. Si se marca como Adelanto, impactará como abono saliente en Debe.
               </AlertDescription>
             </Alert>
@@ -308,6 +369,17 @@ export function ManualPaymentAdjustmentDialog({
             </DialogFooter>
           </form>
         </Form>
+
+        <RemoveExtraWeekDialog
+          isOpen={isRemoveExtraWeekOpen}
+          onOpenChange={setIsRemoveExtraWeekOpen}
+          loan={loan}
+          clientName={clientName}
+          onSuccess={() => {
+            onOpenChange(false);
+            if (onSuccess) onSuccess();
+          }}
+        />
       </DialogContent>
     </Dialog>
   );

@@ -5,7 +5,7 @@ import type { Client, Loan, LoanPlan, Plaza, Localidad, Promotora, AppConfig } f
 import { Input } from '@/components/ui/input';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { Search, Wallet, Calendar, Shield, Phone, Home, X, CircleDollarSign, Building, MapPin, List, ChevronRight, UserCheck, Smartphone, Info, Route, ArrowRight, AlertTriangle, User, Monitor, Filter, ListTodo, History, PencilLine, ArrowUpRight } from 'lucide-react';
+import { Search, Wallet, Calendar, Shield, Phone, Home, X, CircleDollarSign, Building, MapPin, List, ChevronRight, UserCheck, Smartphone, Info, Route, ArrowRight, AlertTriangle, User, Monitor, Filter, ListTodo, History, PencilLine, ArrowUpRight, CalendarX2, CheckCircle2 } from 'lucide-react';
 import { Separator } from './ui/separator';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
@@ -16,6 +16,7 @@ import { ScrollArea } from './ui/scroll-area';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow, TableFooter } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogClose, DialogDescription } from '@/components/ui/dialog';
 import { ManualPaymentAdjustmentDialog, type PaymentAdjustmentTag } from '@/components/manual-payment-adjustment-dialog';
+import { RemoveExtraWeekDialog } from '@/components/remove-extra-week-dialog';
 
 interface ConsultarClientePageProps {
   clients: Client[];
@@ -34,6 +35,7 @@ export function ConsultarClientePage({ clients: allClients, loans: allLoans, loa
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+  const [isRemoveExtraWeekOpen, setIsRemoveExtraWeekOpen] = useState(false);
   
   // State for manual adjustment
   const [isAdjustDialogOpen, setIsAdjustDialogOpen] = useState(false);
@@ -694,6 +696,40 @@ export function ConsultarClientePage({ clients: allClients, loans: allLoans, loa
                                                 </span>
                                             </div>
                                         </div>
+
+                                        {activeLoanDetails?.hasPenalty && (
+                                            <div className="bg-orange-50 border border-orange-200 rounded-xl p-3 flex items-center justify-between gap-3 dark:bg-orange-950/30 dark:border-orange-900/50">
+                                                <div className="flex items-center gap-2 min-w-0">
+                                                    <div className="h-8 w-8 rounded-lg bg-orange-100 flex items-center justify-center shrink-0 text-orange-700 dark:bg-orange-900/60 dark:text-orange-300">
+                                                        <CalendarX2 className="h-4 w-4" />
+                                                    </div>
+                                                    <div className="min-w-0">
+                                                        <p className="text-[10px] font-black text-orange-900 dark:text-orange-200 uppercase leading-tight">Semana Extra Activa (+1 Sem)</p>
+                                                        <p className="text-[8px] font-bold text-orange-700/80 dark:text-orange-400 uppercase">Penalización por atraso acumulado</p>
+                                                    </div>
+                                                </div>
+                                                {isCristobal && (
+                                                    <Button
+                                                        type="button"
+                                                        size="sm"
+                                                        variant="destructive"
+                                                        className="h-8 text-[9px] font-black uppercase tracking-wider px-3 shrink-0 shadow-sm bg-rose-600 hover:bg-rose-700 text-white"
+                                                        onClick={() => setIsRemoveExtraWeekOpen(true)}
+                                                    >
+                                                        Eliminar Semana Extra
+                                                    </Button>
+                                                )}
+                                            </div>
+                                        )}
+
+                                        {activeLoanDetails?.loan.extraWeekWaived && (
+                                            <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-2.5 px-3 flex items-center justify-between text-xs text-emerald-800 dark:bg-emerald-950/30 dark:border-emerald-900/50">
+                                                <div className="flex items-center gap-2">
+                                                    <CheckCircle2 className="h-4 w-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                                                    <span className="text-[10px] font-black uppercase text-emerald-900 dark:text-emerald-200">Semana Extra Condonada / Retirada</span>
+                                                </div>
+                                            </div>
+                                        )}
                                     </div>
                                 </div>
 
@@ -842,7 +878,21 @@ export function ConsultarClientePage({ clients: allClients, loans: allLoans, loa
                 weekNumber={adjustData.weekNumber}
                 currentAmount={adjustData.amount}
                 currentTag={adjustData.tag}
+                clientName={selectedClient?.name}
                 appConfig={appConfig}
+                onSuccess={() => {
+                    if (typeof window !== 'undefined') window.location.reload();
+                }}
+            />
+        )}
+
+        {/* DIALOG DE ELIMINAR SEMANA EXTRA (PARA CRISTOBAL) */}
+        {activeLoanDetails && (
+            <RemoveExtraWeekDialog
+                isOpen={isRemoveExtraWeekOpen}
+                onOpenChange={setIsRemoveExtraWeekOpen}
+                loan={activeLoanDetails.loan}
+                clientName={selectedClient?.name}
                 onSuccess={() => {
                     if (typeof window !== 'undefined') window.location.reload();
                 }}

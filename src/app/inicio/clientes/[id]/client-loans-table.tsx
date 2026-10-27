@@ -14,7 +14,7 @@ import {
 } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Edit, ListTodo, PencilLine, ArrowUpRight } from 'lucide-react';
+import { Edit, ListTodo, PencilLine, ArrowUpRight, CalendarX2, CheckCircle2 } from 'lucide-react';
 import { EditLoanDialog } from '@/components/edit-loan-dialog';
 import {
     Dialog,
@@ -25,6 +25,7 @@ import {
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn, getSaturdayOfWeek, getCurrentLoanWeekNumber, getExtraWeekThreshold, doesLoanHavePenalty } from '@/lib/utils';
 import { ManualPaymentAdjustmentDialog, type PaymentAdjustmentTag } from '@/components/manual-payment-adjustment-dialog';
+import { RemoveExtraWeekDialog } from '@/components/remove-extra-week-dialog';
 import type { AppConfig } from '@/lib/types';
 
 
@@ -49,9 +50,19 @@ export function ClientLoansTable({ clientLoans, loanPlans, allLoans, users, plaz
   // State for manual adjustment
   const [isAdjustDialogOpen, setIsAdjustDialogOpen] = useState(false);
   const [adjustData, setAdjustData] = useState<{ weekNumber: number, amount: number, tag?: PaymentAdjustmentTag } | null>(null);
+  const [isRemoveExtraWeekOpen, setIsRemoveExtraWeekOpen] = useState(false);
 
   const isCristobal = useMemo(() => appUser?.username?.toUpperCase() === 'CRISTOBAL', [appUser]);
   const canEdit = useMemo(() => isCristobal, [isCristobal]);
+
+  const detailsHasPenalty = useMemo(() => {
+    if (!loanForDetails) return false;
+    const plan = loanPlans.find(p => p.id === loanForDetails.loanPlanId);
+    if (!plan) return false;
+    const weeklyPayment = (loanForDetails.amount / 1000) * plan.weeklyPaymentRate;
+    const penaltyThreshold = getExtraWeekThreshold(appConfig);
+    return doesLoanHavePenalty(loanForDetails, plan.termInWeeks, weeklyPayment, penaltyThreshold);
+  }, [loanForDetails, loanPlans, appConfig]);
   
   // Sort loans: Active/Overdue first, then by startDate descending
   const sortedLoans = useMemo(() => {
@@ -315,10 +326,37 @@ export function ClientLoansTable({ clientLoans, loanPlans, allLoans, users, plaz
               <DialogHeader className="p-6 pb-2 shrink-0">
                   <DialogTitle className="text-center border-b pb-2">Detalle de los abonos del prestamo</DialogTitle>
                   {loanForDetails && (
-                    <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1 text-xs text-muted-foreground pt-1">
-                      <span>Localidad: <strong className="text-foreground">{getLocalidadName(loanForDetails)}</strong></span>
-                      <span>•</span>
-                      <span>Promotora: <strong className="text-foreground">{getPromotoraName(loanForDetails)}</strong></span>
+                    <div className="flex flex-col items-center justify-center gap-1.5 pt-1">
+                      <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                        <span>Localidad: <strong className="text-foreground">{getLocalidadName(loanForDetails)}</strong></span>
+                        <span>•</span>
+                        <span>Promotora: <strong className="text-foreground">{getPromotoraName(loanForDetails)}</strong></span>
+                      </div>
+                      {detailsHasPenalty && (
+                        <div className="flex items-center gap-2 mt-1">
+                          <Badge variant="destructive" className="text-[10px] font-bold bg-orange-600 hover:bg-orange-700">
+                            Semana Extra Activa (+1 Sem)
+                          </Badge>
+                          {isCristobal && (
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="destructive"
+                              className="h-6 text-[9px] font-bold px-2.5 bg-rose-600 hover:bg-rose-700 shadow-sm"
+                              onClick={() => setIsRemoveExtraWeekOpen(true)}
+                            >
+                              <CalendarX2 className="h-3 w-3 mr-1" />
+                              Eliminar Semana Extra
+                            </Button>
+                          )}
+                        </div>
+                      )}
+                      {loanForDetails.extraWeekWaived && (
+                        <Badge variant="outline" className="text-[10px] font-bold border-emerald-500 text-emerald-700 bg-emerald-50 mt-1">
+                          <CheckCircle2 className="h-3 w-3 mr-1 text-emerald-600" />
+                          Semana Extra Condonada / Retirada
+                        </Badge>
+                      )}
                     </div>
                   )}
               </DialogHeader>
@@ -427,6 +465,17 @@ export function ClientLoansTable({ clientLoans, loanPlans, allLoans, users, plaz
           onSuccess={() => {
               // No es ideal, pero fuerza el refresco de los datos tras el ajuste manual
               if (typeof window !== 'undefined') window.location.reload();
+          }}
+        />
+      )}
+
+      {loanForDetails && (
+        <RemoveExtraWeekDialog
+          isOpen={isRemoveExtraWeekOpen}
+          onOpenChange={setIsRemoveExtraWeekOpen}
+          loan={loanForDetails}
+          onSuccess={() => {
+            if (typeof window !== 'undefined') window.location.reload();
           }}
         />
       )}

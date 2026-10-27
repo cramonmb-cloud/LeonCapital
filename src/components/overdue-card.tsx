@@ -822,6 +822,7 @@ export function OverdueCard({
                     loan={loan}
                     weekNumber={adjustData.weekNumber}
                     currentAmount={adjustData.amount}
+                    clientName={client.name}
                     appConfig={appConfig}
                     onSuccess={() => {
                         if (typeof window !== 'undefined') window.location.reload();

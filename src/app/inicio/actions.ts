@@ -483,7 +483,7 @@ export async function registerPaymentAction(loanId: string, paymentStartDate: Da
 export async function manualAdjustPaymentAction(
     loanId: string, 
     weekNumber: number, 
-    tag: 'pagado' | 'asumido' | 'falla' | 'adelanto', 
+    tag: 'pagado' | 'asumido' | 'falla' | 'adelanto' | 'limpiar', 
     amountPaid: number, 
     userId?: string
 ) {
@@ -529,8 +529,8 @@ export async function manualAdjustPaymentAction(
 
             let allPayments: Payment[] = [];
 
-            if (amountPaid < 0) {
-                // Modo eliminación: quitar el abono de esa semana
+            if (tag === 'limpiar' || amountPaid < 0) {
+                // Modo eliminación / limpiar: quitar el abono de esa semana por completo
                 allPayments = currentPayments.filter(p => p.weekNumber !== weekNumber);
             } else {
                 const otherPayments = currentPayments.filter(p => p.weekNumber !== weekNumber);
@@ -600,8 +600,8 @@ export async function manualAdjustPaymentAction(
                     type: walletAdjustment > 0 ? 'credit' : 'debit',
                     amount: Math.abs(walletAdjustment),
                     date: new Date(),
-                    description: amountPaid < 0 
-                        ? `Reversión/Eliminación manual de abono de ${client?.name || 'N/A'} (Semana ${weekNumber}).`
+                    description: (tag === 'limpiar' || amountPaid < 0)
+                        ? `Reversión/Limpieza manual de abono de ${client?.name || 'N/A'} (Semana ${weekNumber}).`
                         : `Ajuste manual de abono (${tag.toUpperCase()}) de ${client?.name || 'N/A'} (Semana ${weekNumber}).`,
                     loanId: loanId,
                     clientId: loan.clientId,
@@ -650,14 +650,190 @@ export async function manualAdjustPaymentAction(
         
         return { 
             success: true, 
-            message: amountPaid < 0 
-                ? `Abono de semana ${weekNumber} eliminado correctamente.` 
+            message: (tag === 'limpiar' || amountPaid < 0) 
+                ? `Abono de semana ${weekNumber} limpiado y disponible para registro posterior.` 
                 : `Ajuste manual (${tag.toUpperCase()}) aplicado correctamente a semana ${weekNumber}.` 
         };
 
     } catch (error: any) {
         console.error('Error in manualAdjustPaymentAction:', error);
         return { success: false, message: `Error al ajustar el pago: ${error.message}` };
+    }
+}
+
+const AUTH_PASSWORD = "Lacrimosa_12";
+
+/**
+ * Elimina la semana extra de penalización a un préstamo,
+ * validando la contraseña de autorización.
+ */
+export async function removeExtraWeekPenaltyAction(
+    loanId: string,
+    password: string,
+    userId?: string
+) {
+    if (password !== AUTH_PASSWORD) {
+        return { success: false, message: 'Contraseña de autorización incorrecta.' };
+    }
+
+    try {
+        let clientName: string = 'Cliente';
+
+        await runTransaction(db, async (transaction) => {
+            const loanRef = doc(db, 'loans', loanId);
+            const loanSnap = await transaction.get(loanRef);
+
+            if (!loanSnap.exists()) {
+                throw new Error('Préstamo no encontrado');
+            }
+
+            const loan = loanSnap.data() as Loan;
+
+            const client = await getClient(loan.clientId);
+            if (client?.name) clientName = client.name;
+
+            const loanPlan = await getLoanPlan(loan.loanPlanId);
+            const baseTerm = loanPlan ? loanPlan.termInWeeks : 14;
+            const weeklyPayment = loanPlan ? (loan.amount / 1000) * loanPlan.weeklyPaymentRate : 0;
+
+            const currentPayments = loan.payments || [];
+
+            // Remover cualquier pago registrado en la semana extra que sea solo falla o vacío ($0)
+            const cleanedPayments = currentPayments.filter(p => {
+                if (p.weekNumber > baseTerm && (!p.amount || p.amount === 0)) {
+                    return false;
+                }
+                return true;
+            });
+
+            const currentLoanWeek = Math.max(1, getCurrentLoanWeekNumber(parseFirestoreDate(loan.startDate)));
+            const newTotalPaid = cleanedPayments.reduce((acc, p) => acc + p.amount, 0);
+
+            // Plazo sin penalización = baseTerm
+            const totalTerm = baseTerm;
+            const totalExpected = totalTerm * weeklyPayment;
+            const balance = Math.max(0, totalExpected - newTotalPaid);
+            const isExpired = currentLoanWeek > baseTerm;
+
+            const totalPaidInBaseTerm = cleanedPayments
+                .filter(p => p.weekNumber >= 1 && p.weekNumber <= baseTerm && !p.isReverted)
+                .reduce((sum, p) => sum + p.amount, 0);
+
+            let newStatus: Loan['status'] = loan.status;
+            if (balance <= 0) {
+                newStatus = (isExpired && totalPaidInBaseTerm < (baseTerm * weeklyPayment)) ? 'Pagado desde CV' : 'Paid Off';
+            } else {
+                newStatus = isExpired ? 'Overdue' : 'Active';
+            }
+
+            transaction.update(loanRef, cleanFirestoreData({
+                payments: cleanedPayments,
+                hasPenalty: false,
+                extraWeekWaived: true,
+                status: newStatus
+            }));
+        });
+
+        revalidatePath('/inicio', 'layout');
+        revalidatePath('/inicio/clientes', 'layout');
+        revalidatePath('/inicio/debes');
+        revalidatePath('/inicio/resumen');
+        revalidatePath('/inicio/cierre-semanal');
+        revalidatePath('/inicio/precaptura');
+        revalidatePath('/inicio/cartera-vencida');
+        revalidatePath('/inicio/pendientes');
+
+        return {
+            success: true,
+            message: `Semana extra eliminada exitosamente para ${clientName}.`
+        };
+    } catch (error: any) {
+        console.error('Error in removeExtraWeekPenaltyAction:', error);
+        return { success: false, message: `Error al eliminar la semana extra: ${error.message}` };
+    }
+}
+
+/**
+ * Restablece la regla automática de semana extra si fue previamente retirada.
+ */
+export async function restoreExtraWeekPenaltyAction(
+    loanId: string,
+    password: string,
+    userId?: string
+) {
+    if (password !== AUTH_PASSWORD) {
+        return { success: false, message: 'Contraseña de autorización incorrecta.' };
+    }
+
+    try {
+        let clientName: string = 'Cliente';
+
+        await runTransaction(db, async (transaction) => {
+            const loanRef = doc(db, 'loans', loanId);
+            const loanSnap = await transaction.get(loanRef);
+
+            if (!loanSnap.exists()) {
+                throw new Error('Préstamo no encontrado');
+            }
+
+            const loan = loanSnap.data() as Loan;
+            const client = await getClient(loan.clientId);
+            if (client?.name) clientName = client.name;
+
+            const configRef = doc(db, 'config', 'main');
+            const configSnap = await transaction.get(configRef);
+            const configData = configSnap.data() as AppConfig | undefined;
+            const penaltyThreshold = getExtraWeekThreshold(configData);
+
+            const loanPlan = await getLoanPlan(loan.loanPlanId);
+            const baseTerm = loanPlan ? loanPlan.termInWeeks : 14;
+            const weeklyPayment = loanPlan ? (loan.amount / 1000) * loanPlan.weeklyPaymentRate : 0;
+
+            const currentPayments = loan.payments || [];
+            const hasPenalty = doesLoanHavePenalty({ ...loan, extraWeekWaived: false }, baseTerm, weeklyPayment, penaltyThreshold);
+
+            const currentLoanWeek = Math.max(1, getCurrentLoanWeekNumber(parseFirestoreDate(loan.startDate)));
+            const newTotalPaid = currentPayments.reduce((acc, p) => acc + p.amount, 0);
+
+            const totalTerm = baseTerm + (hasPenalty ? 1 : 0);
+            const totalExpected = totalTerm * weeklyPayment;
+            const balance = Math.max(0, totalExpected - newTotalPaid);
+            const isExpired = currentLoanWeek > baseTerm;
+
+            const totalPaidInBaseTerm = currentPayments
+                .filter(p => p.weekNumber >= 1 && p.weekNumber <= baseTerm && !p.isReverted)
+                .reduce((sum, p) => sum + p.amount, 0);
+
+            let newStatus: Loan['status'] = loan.status;
+            if (balance <= 0) {
+                newStatus = (isExpired && totalPaidInBaseTerm < (baseTerm * weeklyPayment)) ? 'Pagado desde CV' : 'Paid Off';
+            } else {
+                newStatus = (isExpired || currentLoanWeek > totalTerm) ? 'Overdue' : 'Active';
+            }
+
+            transaction.update(loanRef, cleanFirestoreData({
+                hasPenalty: hasPenalty ? true : false,
+                extraWeekWaived: false,
+                status: newStatus
+            }));
+        });
+
+        revalidatePath('/inicio', 'layout');
+        revalidatePath('/inicio/clientes', 'layout');
+        revalidatePath('/inicio/debes');
+        revalidatePath('/inicio/resumen');
+        revalidatePath('/inicio/cierre-semanal');
+        revalidatePath('/inicio/precaptura');
+        revalidatePath('/inicio/cartera-vencida');
+        revalidatePath('/inicio/pendientes');
+
+        return {
+            success: true,
+            message: `Semana extra restablecida para ${clientName}.`
+        };
+    } catch (error: any) {
+        console.error('Error in restoreExtraWeekPenaltyAction:', error);
+        return { success: false, message: `Error al restablecer la semana extra: ${error.message}` };
     }
 }
 

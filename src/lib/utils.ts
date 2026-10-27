@@ -278,13 +278,14 @@ export function isWeekMissedOrRecovered(
  * 3. Si el préstamo está liquidado ('Paid Off'), NO tiene penalización.
  */
 export function doesLoanHavePenalty(
-  loan: { startDate: any; payments?: any[]; hasPenalty?: boolean; amount?: number; status?: string },
+  loan: { startDate: any; payments?: any[]; hasPenalty?: boolean; amount?: number; status?: string; extraWeekWaived?: boolean },
   baseTerm: number,
   weeklyPayment: number,
   threshold: number = 2,
   referenceDate: Date = getMexicoNow()
 ): boolean {
   if (loan.status === 'Paid Off') return false;
+  if (loan.extraWeekWaived) return false;
 
   const payments = loan.payments || [];
   let missedCount = 0;
@@ -322,7 +323,7 @@ export interface LoanWeeklyDebeBreakdown {
  * Si el préstamo tiene penalización de semana extra, su plazo efectivo se extiende a baseTerm + 1.
  */
 export function getLoanAbonoSalienteForWeek(
-  loan: { startDate: any; amount: number; loanPlanId: string; payments?: any[]; hasPenalty?: boolean; status?: string },
+  loan: { startDate: any; amount: number; loanPlanId: string; payments?: any[]; hasPenalty?: boolean; status?: string; extraWeekWaived?: boolean },
   loanPlan: { termInWeeks: number; weeklyPaymentRate: number } | undefined,
   targetWeekSaturdayDate: Date | string,
   config?: { extraWeekMissedThreshold?: number } | null
@@ -413,7 +414,7 @@ export function getLoanAbonoSalienteForWeek(
  * 4. NO contabiliza semanas extras pendientes o esperadas sin pago registrado.
  */
 export function getLoanSemanaExtraPaidAmountForWeek(
-  loan: { startDate: any; amount?: number; loanPlanId: string; payments?: any[]; hasPenalty?: boolean; status?: string },
+  loan: { startDate: any; amount?: number; loanPlanId: string; payments?: any[]; hasPenalty?: boolean; status?: string; extraWeekWaived?: boolean },
   loanPlan: { termInWeeks: number; weeklyPaymentRate?: number } | undefined,
   targetWeekSaturdayDate: Date | string,
   config?: { extraWeekMissedThreshold?: number } | null
@@ -495,7 +496,7 @@ export function getLoanSemanaExtraPaidAmountForWeek(
  * Determina si un préstamo tuvo abonos cobrados de semana extra en la semana consultada.
  */
 export function isLoanInSemanaExtraForWeek(
-  loan: { startDate: any; amount: number; loanPlanId: string; payments?: any[]; hasPenalty?: boolean; status?: string },
+  loan: { startDate: any; amount: number; loanPlanId: string; payments?: any[]; hasPenalty?: boolean; status?: string; extraWeekWaived?: boolean },
   loanPlan: { termInWeeks: number; weeklyPaymentRate: number } | undefined,
   targetWeekSaturdayDate: Date | string,
   config?: { extraWeekMissedThreshold?: number } | null
@@ -510,7 +511,7 @@ export function isLoanInSemanaExtraForWeek(
 export function calculatePromotoraWeeklyDebeAndAbonosSalientes(
   promotoraId: string,
   targetWeekSaturdayDate: Date | string,
-  loans: Array<{ promotoraId?: string; startDate: any; amount: number; loanPlanId: string; payments?: any[]; hasPenalty?: boolean; status?: string }>,
+  loans: Array<{ promotoraId?: string; startDate: any; amount: number; loanPlanId: string; payments?: any[]; hasPenalty?: boolean; status?: string; extraWeekWaived?: boolean }>,
   loanPlans: Array<{ id: string; termInWeeks: number; weeklyPaymentRate: number }>,
   config?: { extraWeekMissedThreshold?: number } | null
 ): { totalExpectedQuota: number; totalAbonosSalientes: number; totalDebeEntregar: number; totalSemExt: number; totalAbonosEntrantes: number } {

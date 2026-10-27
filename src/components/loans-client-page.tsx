@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useMemo } from 'react';
-import { MoreHorizontal, CheckCircle2, XCircle, Circle, AlertCircle, FileDown, Loader2, CalendarCog, BadgeDollarSign, Filter, ChevronDown, ChevronUp, RotateCcw, Search, Coins, ArrowUpRight, Check, History, ShieldAlert, UserCog } from 'lucide-react';
+import { MoreHorizontal, CheckCircle2, XCircle, Circle, AlertCircle, FileDown, Loader2, CalendarCog, BadgeDollarSign, Filter, ChevronDown, ChevronUp, RotateCcw, Search, Coins, ArrowUpRight, Check, History, ShieldAlert, UserCog, CalendarX2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   Card,
@@ -68,6 +68,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tooltip, TooltipProvider, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import type { Client, Loan, LoanPlan, Payment, Plaza, Localidad, Promotora, AppUser, AppConfig } from '@/lib/types';
 import { RegisterPaymentDialog } from './register-payment-dialog';
+import { RemoveExtraWeekDialog } from './remove-extra-week-dialog';
 import { useRouter } from 'next/navigation';
 import { cn, getSaturdayOfWeek, getMexicoNow, getCurrentLoanWeekNumber, parseLocalDate, getExtraWeekThreshold, doesLoanHavePenalty } from '@/lib/utils';
 import jsPDF from 'jspdf';
@@ -144,6 +145,7 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
   const [isChangingDate, setIsChangingDate] = useState(false);
   const [isPayingOff, setIsPayingOff] = useState(false);
   const [loanToPayOff, setLoanToPayOff] = useState<Loan | null>(null);
+  const [loanToRemoveExtraWeek, setLoanToRemoveExtraWeek] = useState<Loan | null>(null);
   const [changeDateDialogOpen, setChangeDateDialogOpen] = useState(false);
   const [changePromotoraDialogOpen, setChangePromotoraDialogOpen] = useState(false);
   const [targetMovePlaza, setTargetMovePlaza] = useState<string>('');
@@ -1943,6 +1945,15 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
                                             <BadgeDollarSign className="mr-2 h-4 w-4" />
                                             Liquidar Préstamo
                                         </DropdownMenuItem>
+                                        {hasPenalty && (
+                                            <DropdownMenuItem 
+                                                onClick={() => setLoanToRemoveExtraWeek(loan)} 
+                                                className="text-rose-600 dark:text-rose-400 font-semibold cursor-pointer"
+                                            >
+                                                <CalendarX2 className="mr-2 h-4 w-4" />
+                                                Eliminar Semana Extra
+                                            </DropdownMenuItem>
+                                        )}
                                     </>
                                 )}
                               </DropdownMenuContent>
@@ -2462,6 +2473,19 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
             </AlertDialogFooter>
         </AlertDialogContent>
     </AlertDialog>
+
+    {loanToRemoveExtraWeek && (
+        <RemoveExtraWeekDialog
+            isOpen={!!loanToRemoveExtraWeek}
+            onOpenChange={(open) => !open && setLoanToRemoveExtraWeek(null)}
+            loan={loanToRemoveExtraWeek}
+            clientName={getClientName(loanToRemoveExtraWeek.clientId)}
+            onSuccess={() => {
+                setLoanToRemoveExtraWeek(null);
+                if (typeof window !== 'undefined') window.location.reload();
+            }}
+        />
+    )}
     </>
   );
 }
