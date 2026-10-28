@@ -23,7 +23,7 @@ import {
 } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
 import type { Loan, AppConfig } from '@/lib/types';
-import { Loader2, ShieldCheck, AlertCircle, CheckCircle2, XCircle, ArrowUpRight, Check, RotateCcw, CalendarX2 } from 'lucide-react';
+import { Loader2, ShieldCheck, AlertCircle, CheckCircle2, XCircle, ArrowUpRight, Check, RotateCcw, RotateCw, CalendarX2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { manualAdjustPaymentAction } from '@/app/inicio/actions';
 import { useAuth } from '@/hooks/use-auth';
@@ -32,7 +32,7 @@ import { getExtraWeekThreshold, cn } from '@/lib/utils';
 import { RemoveExtraWeekDialog } from './remove-extra-week-dialog';
 
 const formSchema = z.object({
-  tag: z.enum(['pagado', 'asumido', 'falla', 'adelanto', 'limpiar']),
+  tag: z.enum(['pagado', 'recuperado', 'asumido', 'falla', 'adelanto', 'limpiar']),
   amountPaid: z.string()
     .min(1, 'El monto es obligatorio.')
     .refine((val) => {
@@ -47,7 +47,7 @@ const formSchema = z.object({
 
 type AdjustmentFormValues = z.infer<typeof formSchema>;
 
-export type PaymentAdjustmentTag = 'pagado' | 'asumido' | 'falla' | 'adelanto' | 'limpiar';
+export type PaymentAdjustmentTag = 'pagado' | 'recuperado' | 'asumido' | 'falla' | 'adelanto' | 'limpiar';
 
 interface ManualPaymentAdjustmentDialogProps {
   isOpen: boolean;
@@ -80,11 +80,12 @@ export function ManualPaymentAdjustmentDialog({
   const { appUser } = useAuth();
 
   const getInitialTag = (): PaymentAdjustmentTag => {
-    if (currentTag && ['pagado', 'asumido', 'falla', 'adelanto', 'limpiar'].includes(currentTag)) {
+    if (currentTag && ['pagado', 'recuperado', 'asumido', 'falla', 'adelanto', 'limpiar'].includes(currentTag)) {
       return currentTag;
     }
     const p = loan.payments?.find(pay => pay.weekNumber === weekNumber && !pay.isReverted);
     if (p) {
+      if (p.isRecovered || p.paymentType === 'recovered') return 'recuperado';
       if (p.isAdvance || p.paymentType === 'adelanto_entrante') return 'adelanto';
       if (p.paymentType === 'assumed') return 'asumido';
       if (p.amount === 0) return 'falla';
@@ -183,7 +184,7 @@ export function ManualPaymentAdjustmentDialog({
                 Registro / Ajuste Manual
               </DialogTitle>
               <DialogDescription className="text-xs">
-                Ajustando abono de la <strong>Semana {weekNumber}</strong>. Puedes etiquetarlo libremente como Pagado, Asumido, Falla o Adelanto.
+                Ajustando abono de la <strong>Semana {weekNumber}</strong>. Puedes etiquetarlo libremente como Pagado, Recuperado, Adelanto, Asumido o Falla.
               </DialogDescription>
             </DialogHeader>
 
@@ -208,6 +209,23 @@ export function ManualPaymentAdjustmentDialog({
                     <div className="flex flex-col">
                       <span>Pagado</span>
                       <span className="text-[10px] font-normal text-muted-foreground">Abono regular</span>
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleSelectTag('recuperado')}
+                    className={cn(
+                      "flex items-center gap-2 p-2.5 rounded-lg border-2 text-xs font-bold transition-all text-left",
+                      selectedTag === 'recuperado'
+                        ? "border-purple-600 bg-purple-50 text-purple-900 shadow-sm dark:bg-purple-950/40 dark:text-purple-200"
+                        : "border-zinc-200 bg-white text-zinc-600 hover:border-zinc-300 hover:bg-zinc-50 dark:bg-zinc-900 dark:border-zinc-800 dark:text-zinc-400"
+                    )}
+                  >
+                    <RotateCw className={cn("h-4 w-4 shrink-0 font-bold", selectedTag === 'recuperado' ? "text-purple-600" : "text-zinc-400")} />
+                    <div className="flex flex-col">
+                      <span>Recuperado</span>
+                      <span className="text-[10px] font-normal text-muted-foreground">Abono recuperado</span>
                     </div>
                   </button>
 
@@ -266,7 +284,7 @@ export function ManualPaymentAdjustmentDialog({
                     type="button"
                     onClick={() => handleSelectTag('limpiar')}
                     className={cn(
-                      "flex items-center gap-2 p-2.5 rounded-lg border-2 text-xs font-bold transition-all text-left col-span-2",
+                      "flex items-center gap-2 p-2.5 rounded-lg border-2 text-xs font-bold transition-all text-left",
                       selectedTag === 'limpiar'
                         ? "border-amber-500 bg-amber-50 text-amber-900 shadow-sm dark:bg-amber-950/40 dark:text-amber-200"
                         : "border-zinc-200 bg-white text-zinc-600 hover:border-zinc-300 hover:bg-zinc-50 dark:bg-zinc-900 dark:border-zinc-800 dark:text-zinc-400"
@@ -274,15 +292,13 @@ export function ManualPaymentAdjustmentDialog({
                   >
                     <RotateCcw className={cn("h-4 w-4 shrink-0 font-bold", selectedTag === 'limpiar' ? "text-amber-600" : "text-zinc-400")} />
                     <div className="flex flex-col">
-                      <div className="flex items-center gap-1.5">
-                        <span>Limpiar / Pendiente</span>
-                        <span className="text-[9px] px-1.5 py-0.5 bg-amber-100 text-amber-800 dark:bg-amber-900/60 dark:text-amber-300 rounded font-bold">
-                          Dejar limpio
+                      <div className="flex items-center gap-1">
+                        <span>Limpiar</span>
+                        <span className="text-[8px] px-1 py-0.2 bg-amber-100 text-amber-800 dark:bg-amber-900/60 dark:text-amber-300 rounded font-bold">
+                          Nuevo
                         </span>
                       </div>
-                      <span className="text-[10px] font-normal text-muted-foreground">
-                        Elimina cualquier registro (abono, falla o adelanto) y deja la semana limpia para un abono posterior.
-                      </span>
+                      <span className="text-[10px] font-normal text-muted-foreground">Dejar disponible ($0)</span>
                     </div>
                   </button>
                 </div>

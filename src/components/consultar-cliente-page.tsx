@@ -293,7 +293,7 @@ export function ConsultarClientePage({ clients: allClients, loans: allLoans, loa
 
         const isAdvance = Boolean(payment?.isAdvance || payment?.paymentType === 'adelanto_entrante');
         const isAssumed = payment?.paymentType === 'assumed';
-        const isRecovered = payment?.isRecovered || false;
+        const isRecovered = Boolean(payment?.isRecovered || payment?.paymentType === 'recovered');
         let tag: PaymentAdjustmentTag | 'pendiente' = 'pendiente';
 
         if (isRegistered) {
@@ -309,13 +309,17 @@ export function ConsultarClientePage({ clients: allClients, loans: allLoans, loa
                 tag = 'falla';
                 statusText = 'FALLO';
                 statusType = 'MISSED';
+            } else if (isRecovered) {
+                tag = 'recuperado';
+                statusText = payment.amount >= weeklyPayment ? 'RECUPERADO' : 'RECUPERADO PARCIAL';
+                statusType = payment.amount >= weeklyPayment ? 'PAID' : 'MISSED';
             } else if (payment.amount >= weeklyPayment) {
                 tag = 'pagado';
-                statusText = isRecovered ? 'RECUPERADO' : formatDate(payment.date);
+                statusText = formatDate(payment.date);
                 statusType = 'PAID';
             } else if (payment.amount > 0) {
                 tag = 'pagado';
-                statusText = isRecovered ? 'RECUPERADO PARCIAL' : 'PARCIAL';
+                statusText = 'PARCIAL';
                 statusType = 'MISSED';
             }
         } else if (isPast) {

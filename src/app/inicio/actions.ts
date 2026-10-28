@@ -483,7 +483,7 @@ export async function registerPaymentAction(loanId: string, paymentStartDate: Da
 export async function manualAdjustPaymentAction(
     loanId: string, 
     weekNumber: number, 
-    tag: 'pagado' | 'asumido' | 'falla' | 'adelanto' | 'limpiar', 
+    tag: 'pagado' | 'recuperado' | 'asumido' | 'falla' | 'adelanto' | 'limpiar', 
     amountPaid: number, 
     userId?: string
 ) {
@@ -547,6 +547,17 @@ export async function manualAdjustPaymentAction(
                         isAdvance: false,
                         isAccumulated: true,
                         paymentType: 'regular'
+                    };
+                } else if (tag === 'recuperado') {
+                    newPayment = {
+                        date: targetSatIso,
+                        amount: amountPaid > 0 ? amountPaid : weeklyPayment,
+                        weekNumber: Number(weekNumber),
+                        isRecovered: true,
+                        isReverted: false,
+                        isAdvance: false,
+                        isAccumulated: true,
+                        paymentType: 'recovered'
                     };
                 } else if (tag === 'asumido') {
                     newPayment = {

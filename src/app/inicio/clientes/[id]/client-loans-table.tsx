@@ -195,9 +195,12 @@ export function ClientLoansTable({ clientLoans, loanPlans, allLoans, users, plaz
               } else if (payment.amount === 0) {
                   tag = 'falla';
                   note = 'FALLA';
+              } else if (payment.isRecovered || payment.paymentType === 'recovered') {
+                  tag = 'recuperado';
+                  note = payment.amount >= weeklyPayment ? 'RECUPERADO' : 'RECUPERADO PARCIAL';
               } else if (payment.amount >= weeklyPayment) {
                   tag = 'pagado';
-                  note = payment.isRecovered ? 'RECUPERADO' : 'PAGADO';
+                  note = 'PAGADO';
               } else {
                   tag = 'pagado';
                   note = 'PARCIAL';
@@ -382,16 +385,22 @@ export function ClientLoansTable({ clientLoans, loanPlans, allLoans, users, plaz
                                         <TableCell 
                                             className={cn(
                                                 "border-r border-blue-100 text-right py-1 font-semibold relative group", 
+                                                row.tag === 'recuperado' ? "bg-purple-50 text-purple-900" :
                                                 row.tag === 'adelanto' ? "bg-blue-50/90 text-blue-900" :
                                                 row.tag === 'asumido' ? "bg-sky-50 text-sky-900" :
                                                 row.tag === 'falla' ? "bg-rose-50 text-rose-800" :
                                                 row.importeRecibido !== null ? (row.importeRecibido >= row.importeAbono ? "bg-green-100 text-green-800" : "bg-orange-50 text-orange-700") : "bg-red-50 text-red-700",
                                                 isCristobal && "cursor-pointer hover:bg-blue-100 transition-colors"
                                             )}
-                                            onClick={() => isCristobal && handleAdjustClick(row.num, row.importeRecibido !== null ? row.importeRecibido : row.importeAbono, row.tag !== 'pendiente' ? (row.tag as PaymentAdjustmentTag) : undefined)}
+                                            onClick={() => isCristobal && handleAdjustClick(row.num, (row.importeRecibido !== null && row.importeRecibido > 0) ? row.importeRecibido : row.importeAbono, row.tag !== 'pendiente' ? (row.tag as PaymentAdjustmentTag) : undefined)}
                                         >
                                             <div className="flex items-center justify-end gap-1.5">
                                                 <span>{row.importeRecibido !== null ? formatCurrency(row.importeRecibido) : formatCurrency(0)}</span>
+                                                {row.tag === 'recuperado' && (
+                                                    <Badge variant="secondary" className="bg-purple-100 text-purple-900 border border-purple-300 text-[10px] h-4 px-1 font-bold">
+                                                        Recup.
+                                                    </Badge>
+                                                )}
                                                 {row.tag === 'adelanto' && (
                                                     <Badge variant="secondary" className="bg-blue-100 text-blue-900 border border-blue-300 text-[10px] h-4 px-1 gap-0.5 flex items-center font-bold">
                                                         <ArrowUpRight className="h-3 w-3 text-blue-700 stroke-[2.5]" />
