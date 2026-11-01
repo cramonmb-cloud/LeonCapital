@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server';
 interface PostalCodeResult {
   success: boolean;
   colony?: string;
+  colonies: string[];
   city?: string;
   state?: string;
   message?: string;
@@ -22,7 +23,7 @@ export async function GET(
 
     if (!cleanCp || cleanCp.length < 4 || cleanCp.length > 5) {
       return NextResponse.json(
-        { success: false, message: 'Código postal inválido' },
+        { success: false, colonies: [], message: 'Código postal inválido' },
         { status: 400 }
       );
     }
@@ -41,16 +42,17 @@ export async function GET(
     }
 
     let colony = '';
+    const coloniesSet = new Set<string>();
     let city = '';
     let state = '';
 
-    // 1. Try sepomex.kurenn.dev
+    // 1. Try sepomex.kurenn.dev with per_page=100 to get all colonies
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 3500);
+      const timeoutId = setTimeout(() => controller.abort(), 4000);
 
       const res = await fetch(
-        `https://sepomex.kurenn.dev/api/v1/zip_codes?zip_code=${formattedCp}`,
+        `https://sepomex.kurenn.dev/api/v1/zip_codes?zip_code=${formattedCp}&per_page=100`,
         {
           signal: controller.signal,
           headers: { Accept: 'application/json' },
@@ -62,6 +64,13 @@ export async function GET(
         const json = await res.json();
         const zipCodes = json.zip_codes || [];
         if (Array.isArray(zipCodes) && zipCodes.length > 0) {
+          zipCodes.forEach((item: any) => {
+            const c = item.d_asenta || item.colony;
+            if (c && typeof c === 'string') {
+              coloniesSet.add(c.trim().toUpperCase());
+            }
+          });
+
           const first = zipCodes[0];
           colony = first.d_asenta || first.colony || '';
           city = first.d_ciudad || first.d_mnpio || first.city || first.municipality || '';
@@ -73,10 +82,10 @@ export async function GET(
     }
 
     // 2. Fallback to api.zippopotam.us
-    if (!colony || !city) {
+    if (coloniesSet.size === 0 || !city) {
       try {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 3500);
+        const timeoutId = setTimeout(() => controller.abort(), 4000);
 
         const res = await fetch(
           `https://api.zippopotam.us/mx/${formattedCp}`,
@@ -91,6 +100,13 @@ export async function GET(
           const json = await res.json();
           const places = json.places || [];
           if (Array.isArray(places) && places.length > 0) {
+            places.forEach((place: any) => {
+              const name = place['place name'];
+              if (name && typeof name === 'string') {
+                coloniesSet.add(name.trim().toUpperCase());
+              }
+            });
+
             const place = places[0];
             if (!colony) colony = place['place name'] || '';
             if (!city) city = place['place name'] || place['state'] || '';
@@ -102,10 +118,13 @@ export async function GET(
       }
     }
 
-    if (colony || city) {
+    const colonies = Array.from(coloniesSet);
+
+    if (colonies.length > 0 || colony || city) {
       const result: PostalCodeResult = {
         success: true,
-        colony: colony.toUpperCase(),
+        colony: (colony || colonies[0] || '').toUpperCase(),
+        colonies: colonies,
         city: city.toUpperCase(),
         state: state.toUpperCase(),
       };
@@ -120,13 +139,13 @@ export async function GET(
 
     return NextResponse.json({
       success: false,
+      colonies: [],
       message: 'No se encontraron datos para el código postal',
     });
   } catch (error: any) {
     return NextResponse.json(
-      { success: false, message: error.message },
+      { success: false, colonies: [], message: error.message },
       { status: 500 }
     );
   }
 }
-

@@ -44,7 +44,7 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import type { Client, Loan, LoanPlan, Promotora, Plaza, Localidad } from '@/lib/types';
-import { PlusCircle, Loader2, AlertTriangle, BadgeDollarSign, Calendar, CheckCircle2, X } from 'lucide-react';
+import { PlusCircle, Loader2, AlertTriangle, BadgeDollarSign, Calendar, CheckCircle2, X, Check } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { createLoanAction, payOffLoanAction } from '@/app/inicio/actions';
 import { useRouter } from 'next/navigation';
@@ -187,6 +187,11 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
   const [authCodeInput, setAuthCodeInput] = useState('');
   const [authCodeError, setAuthCodeError] = useState(false);
 
+  const [clientColonies, setClientColonies] = useState<string[]>([]);
+  const [showClientColonies, setShowClientColonies] = useState(false);
+  const [endorsementColonies, setEndorsementColonies] = useState<string[]>([]);
+  const [showEndorsementColonies, setShowEndorsementColonies] = useState(false);
+
 
   const defaultPlan = useMemo(() => loanPlans.find(p => p.isDefault), [loanPlans]);
 
@@ -227,6 +232,24 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
   const watchLoanPlanId = form.watch('loanPlanId');
   const watchAmount = form.watch('amount');
   const watchPromotoraId = form.watch('promotoraId');
+
+  const watchNeighborhood = form.watch('neighborhood') || '';
+  const filteredClientColonies = useMemo(() => {
+    if (!clientColonies.length) return [];
+    const query = watchNeighborhood.trim().toUpperCase();
+    if (!query) return clientColonies;
+    const filtered = clientColonies.filter(c => c.includes(query));
+    return filtered.length > 0 ? filtered : clientColonies;
+  }, [clientColonies, watchNeighborhood]);
+
+  const watchEndorsementNeighborhood = form.watch('endorsementNeighborhood') || '';
+  const filteredEndorsementColonies = useMemo(() => {
+    if (!endorsementColonies.length) return [];
+    const query = watchEndorsementNeighborhood.trim().toUpperCase();
+    if (!query) return endorsementColonies;
+    const filtered = endorsementColonies.filter(c => c.includes(query));
+    return filtered.length > 0 ? filtered : endorsementColonies;
+  }, [endorsementColonies, watchEndorsementNeighborhood]);
 
   // Préstamos capturados visibles: sesión actual + préstamos de la promotora en la semana activa sin pagos acumulados
   const capturedLoans = useMemo(() => {
@@ -1104,6 +1127,41 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
         setActiveLoanDetails(null);
     };
 
+    const applyPostalCodeData = (
+      data: { colony?: string; colonies?: string[]; city?: string },
+      target: 'client' | 'endorsement'
+    ) => {
+      const coloniesList = (data.colonies && data.colonies.length > 0)
+        ? data.colonies
+        : (data.colony ? [data.colony] : []);
+
+      if (target === 'client') {
+        if (data.city) form.setValue('city', data.city.toUpperCase());
+        setClientColonies(coloniesList);
+        if (coloniesList.length === 1) {
+          form.setValue('neighborhood', coloniesList[0]);
+          setShowClientColonies(false);
+        } else if (coloniesList.length > 1) {
+          setShowClientColonies(true);
+          if (!form.getValues('neighborhood')) {
+            form.setValue('neighborhood', coloniesList[0]);
+          }
+        }
+      } else {
+        if (data.city) form.setValue('endorsementCity', data.city.toUpperCase());
+        setEndorsementColonies(coloniesList);
+        if (coloniesList.length === 1) {
+          form.setValue('endorsementNeighborhood', coloniesList[0]);
+          setShowEndorsementColonies(false);
+        } else if (coloniesList.length > 1) {
+          setShowEndorsementColonies(true);
+          if (!form.getValues('endorsementNeighborhood')) {
+            form.setValue('endorsementNeighborhood', coloniesList[0]);
+          }
+        }
+      }
+    };
+
     const handlePostalCodeLookup = async (
       rawCp: string,
       target: 'client' | 'endorsement',
@@ -1117,59 +1175,76 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
       const formattedCp = cleanedCp.padStart(5, '0');
 
       // 1. Verificación rápida en memoria si ya existen clientes con ese C.P.
-      const match = clients.find(c => (c.postalCode || '').trim() === formattedCp && (c.neighborhood || c.city));
-      if (match) {
-        if (target === 'client') {
-          if (match.neighborhood) form.setValue('neighborhood', match.neighborhood.toUpperCase());
-          if (match.city) form.setValue('city', match.city.toUpperCase());
-        } else {
-          if (match.neighborhood) form.setValue('endorsementNeighborhood', match.neighborhood.toUpperCase());
-          if (match.city) form.setValue('endorsementCity', match.city.toUpperCase());
+      const matches = clients.filter(c => (c.postalCode || '').trim() === formattedCp && (c.neighborhood || c.city));
+      if (matches.length > 0) {
+        const memColonies = Array.from(new Set(matches.map(c => (c.neighborhood || '').trim().toUpperCase()).filter(Boolean)));
+        const memCity = matches.find(c => c.city)?.city || '';
+        if (memColonies.length > 0 || memCity) {
+          applyPostalCodeData({ colony: memColonies[0], colonies: memColonies, city: memCity }, target);
         }
-        return;
       }
 
-      // 2. Consulta a la API de código postal
+      // 2. Consulta directa a SEPOMEX (con CORS público habilitado)
+      try {
+        const sepomexRes = await fetch(`https://sepomex.kurenn.dev/api/v1/zip_codes?zip_code=${formattedCp}&per_page=100`);
+        if (sepomexRes.ok) {
+          const sepomexData = await sepomexRes.json();
+          const zipCodes = sepomexData.zip_codes || [];
+          if (Array.isArray(zipCodes) && zipCodes.length > 0) {
+            const sepomexColoniesSet = new Set<string>();
+            zipCodes.forEach((item: any) => {
+              const c = item.d_asenta || item.colony;
+              if (c && typeof c === 'string') {
+                sepomexColoniesSet.add(c.trim().toUpperCase());
+              }
+            });
+            const first = zipCodes[0];
+            const city = first.d_ciudad || first.d_mnpio || first.city || first.municipality || '';
+            const coloniesList = Array.from(sepomexColoniesSet);
+            if (coloniesList.length > 0 || city) {
+              applyPostalCodeData({
+                colony: coloniesList[0] || '',
+                colonies: coloniesList,
+                city: city,
+              }, target);
+              return;
+            }
+          }
+        }
+      } catch {
+        // Continuar con fallback
+      }
+
+      // 3. Fallback a la API interna /api/postal-code/:cp
       try {
         const res = await fetch(`/api/postal-code/${formattedCp}`);
         if (res.ok) {
           const data = await res.json();
-          if (data.success && (data.colony || data.city)) {
-            if (target === 'client') {
-              if (data.colony) form.setValue('neighborhood', data.colony.toUpperCase());
-              if (data.city) form.setValue('city', data.city.toUpperCase());
-            } else {
-              if (data.colony) form.setValue('endorsementNeighborhood', data.colony.toUpperCase());
-              if (data.city) form.setValue('endorsementCity', data.city.toUpperCase());
-            }
+          if (data.success && (data.colonies?.length || data.colony || data.city)) {
+            applyPostalCodeData(data, target);
             return;
           }
         }
       } catch {
-        // Fallback a consulta directa
+        // Fallback a zippopotam
       }
 
-      // 3. Fallback directo en el cliente a zippopotam (CORS público)
+      // 4. Fallback directo en el cliente a zippopotam (CORS público)
       try {
         const directRes = await fetch(`https://api.zippopotam.us/mx/${formattedCp}`);
         if (directRes.ok) {
           const directData = await directRes.json();
-          const place = directData.places?.[0];
-          if (place) {
-            const placeName = (place['place name'] || '').toUpperCase();
-            let extractedCity = placeName;
-            let extractedColony = placeName;
-            if (placeName.includes('CENTRO')) {
-              extractedCity = placeName.replace(/\s*CENTRO\b/i, '').trim() || placeName;
-              extractedColony = 'CENTRO';
-            }
-            if (target === 'client') {
-              form.setValue('neighborhood', extractedColony);
-              form.setValue('city', extractedCity);
-            } else {
-              form.setValue('endorsementNeighborhood', extractedColony);
-              form.setValue('endorsementCity', extractedCity);
-            }
+          const places = directData.places || [];
+          const directColoniesSet = new Set<string>();
+          let directCity = '';
+          places.forEach((p: any) => {
+            const pName = (p['place name'] || '').toUpperCase();
+            if (pName) directColoniesSet.add(pName);
+            if (!directCity) directCity = p['state'] || pName;
+          });
+          const directColonies = Array.from(directColoniesSet);
+          if (directColonies.length > 0) {
+            applyPostalCodeData({ colony: directColonies[0], colonies: directColonies, city: directCity }, target);
           }
         }
       } catch {
@@ -1494,7 +1569,7 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
 
                   {/* 2.- COLONIA y 3.- C.P. */}
                   <div className="grid grid-cols-3 gap-2">
-                    <div className="col-span-2">
+                    <div className="col-span-2 relative">
                       <FormField
                         control={form.control}
                         name="neighborhood"
@@ -1506,6 +1581,21 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
                                 placeholder="Centro" 
                                 {...field} 
                                 value={field.value || ''} 
+                                onFocus={() => {
+                                  if (clientColonies.length > 1) {
+                                    setShowClientColonies(true);
+                                  }
+                                }}
+                                onChange={(e) => {
+                                  field.onChange(e);
+                                  if (clientColonies.length > 1) {
+                                    setShowClientColonies(true);
+                                  }
+                                }}
+                                onBlur={(e) => {
+                                  field.onBlur();
+                                  setTimeout(() => setShowClientColonies(false), 200);
+                                }}
                                 onKeyDown={(e) => handleFieldEnter(e, 'postalCode')}
                                 className="h-9 text-xs uppercase font-bold placeholder:text-zinc-400 placeholder:normal-case placeholder:font-normal" 
                               />
@@ -1514,6 +1604,33 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
                           </FormItem>
                         )}
                       />
+                      {showClientColonies && clientColonies.length > 1 && (
+                        <Card 
+                          className="absolute left-0 right-0 z-50 mt-1 shadow-2xl border-2 dark:bg-zinc-950 overflow-hidden"
+                          onMouseDown={(e) => e.preventDefault()}
+                        >
+                          <div className="px-3 py-1 bg-zinc-100 dark:bg-zinc-900 border-b text-[9px] font-black uppercase text-zinc-500">
+                            {filteredClientColonies.length} {filteredClientColonies.length === 1 ? 'colonia disponible' : 'colonias disponibles'}
+                          </div>
+                          <ul className="max-h-48 overflow-y-auto divide-y divide-zinc-100 dark:divide-zinc-800">
+                            {filteredClientColonies.map((col, idx) => (
+                              <li
+                                key={idx}
+                                className="px-3 py-2 cursor-pointer hover:bg-blue-50 dark:hover:bg-blue-950/40 flex items-center justify-between transition-colors text-xs font-bold uppercase text-zinc-800 dark:text-zinc-200"
+                                onClick={() => {
+                                  form.setValue('neighborhood', col);
+                                  setShowClientColonies(false);
+                                }}
+                              >
+                                <span>{col}</span>
+                                {form.getValues('neighborhood')?.trim().toUpperCase() === col && (
+                                  <Check className="h-3.5 w-3.5 text-blue-600 dark:text-blue-400" />
+                                )}
+                              </li>
+                            ))}
+                          </ul>
+                        </Card>
+                      )}
                     </div>
                     <div className="col-span-1">
                       <FormField
@@ -1707,7 +1824,7 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
 
                   {/* 3.- COLONIA y 4.- C.P. */}
                   <div className="grid grid-cols-3 gap-2">
-                    <div className="col-span-2">
+                    <div className="col-span-2 relative">
                       <FormField
                         control={form.control}
                         name="endorsementNeighborhood"
@@ -1719,6 +1836,21 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
                                 placeholder="Centro" 
                                 {...field} 
                                 value={field.value || ''} 
+                                onFocus={() => {
+                                  if (endorsementColonies.length > 1) {
+                                    setShowEndorsementColonies(true);
+                                  }
+                                }}
+                                onChange={(e) => {
+                                  field.onChange(e);
+                                  if (endorsementColonies.length > 1) {
+                                    setShowEndorsementColonies(true);
+                                  }
+                                }}
+                                onBlur={(e) => {
+                                  field.onBlur();
+                                  setTimeout(() => setShowEndorsementColonies(false), 200);
+                                }}
                                 onKeyDown={(e) => handleFieldEnter(e, 'endorsementPostalCode')}
                                 className="h-9 text-xs uppercase font-bold placeholder:text-zinc-400 placeholder:normal-case placeholder:font-normal" 
                               />
@@ -1727,6 +1859,33 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
                           </FormItem>
                         )}
                       />
+                      {showEndorsementColonies && endorsementColonies.length > 1 && (
+                        <Card 
+                          className="absolute left-0 right-0 z-50 mt-1 shadow-2xl border-2 dark:bg-zinc-950 overflow-hidden"
+                          onMouseDown={(e) => e.preventDefault()}
+                        >
+                          <div className="px-3 py-1 bg-zinc-100 dark:bg-zinc-900 border-b text-[9px] font-black uppercase text-zinc-500">
+                            {filteredEndorsementColonies.length} {filteredEndorsementColonies.length === 1 ? 'colonia disponible' : 'colonias disponibles'}
+                          </div>
+                          <ul className="max-h-48 overflow-y-auto divide-y divide-zinc-100 dark:divide-zinc-800">
+                            {filteredEndorsementColonies.map((col, idx) => (
+                              <li
+                                key={idx}
+                                className="px-3 py-2 cursor-pointer hover:bg-blue-50 dark:hover:bg-blue-950/40 flex items-center justify-between transition-colors text-xs font-bold uppercase text-zinc-800 dark:text-zinc-200"
+                                onClick={() => {
+                                  form.setValue('endorsementNeighborhood', col);
+                                  setShowEndorsementColonies(false);
+                                }}
+                              >
+                                <span>{col}</span>
+                                {form.getValues('endorsementNeighborhood')?.trim().toUpperCase() === col && (
+                                  <Check className="h-3.5 w-3.5 text-blue-600 dark:text-blue-400" />
+                                )}
+                              </li>
+                            ))}
+                          </ul>
+                        </Card>
+                      )}
                     </div>
                     <div className="col-span-1">
                       <FormField
