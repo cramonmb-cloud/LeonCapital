@@ -1,6 +1,4 @@
-import { redirect } from 'next/navigation'
-import { auth } from '@/lib/firebase';
-import { onAuthStateChanged } from 'firebase/auth';
+import { redirect } from 'next/navigation';
 
 export default function RootPage() {
   // En Next.js App Router, el lado del servidor no tiene acceso directo al estado de autenticación del cliente.

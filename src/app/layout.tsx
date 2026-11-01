@@ -12,33 +12,41 @@ export const viewport: Viewport = {
 };
 
 export async function generateMetadata(): Promise<Metadata> {
-  const config = await getAppConfig();
-  const appName = config?.appName || 'CrediControl';
-  const logoUrl = config?.logoUrl || '';
-  const description = `Gestión de préstamos personales para ${appName}`;
+  try {
+    const config = await getAppConfig();
+    const appName = config?.appName || 'CrediControl';
+    const logoUrl = config?.logoUrl || '';
+    const description = `Gestión de préstamos personales para ${appName}`;
 
-  return {
-    title: appName,
-    description: description,
-    manifest: '/manifest.ts',
-    icons: {
-      icon: logoUrl || '/favicon.ico',
-      apple: logoUrl || '/favicon.ico',
-    },
-    openGraph: {
+    return {
       title: appName,
       description: description,
-      images: [
-        {
-          url: logoUrl,
-          width: 1200,
-          height: 630,
-          alt: `Logo de ${appName}`,
-        },
-      ],
-      type: 'website',
-    },
-  };
+      manifest: '/manifest.ts',
+      icons: {
+        icon: logoUrl || '/favicon.ico',
+        apple: logoUrl || '/favicon.ico',
+      },
+      openGraph: {
+        title: appName,
+        description: description,
+        images: [
+          {
+            url: logoUrl,
+            width: 1200,
+            height: 630,
+            alt: `Logo de ${appName}`,
+          },
+        ],
+        type: 'website',
+      },
+    };
+  } catch (error) {
+    console.error('Error generating metadata:', error);
+    return {
+      title: 'CrediControl',
+      description: 'Gestión de préstamos personales',
+    };
+  }
 }
 
 export default function RootLayout({

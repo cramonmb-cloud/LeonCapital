@@ -140,7 +140,7 @@ export async function createLoanAction(input: CreateLoanInput) {
             createdAt: mexicoNow.toISOString(),
         };
         
-        await addDoc(collection(db, 'loans'), newLoan);
+        const docRef = await addDoc(collection(db, 'loans'), newLoan);
 
         revalidatePath('/inicio/prestamos');
         revalidatePath('/inicio/clientes');
@@ -148,7 +148,7 @@ export async function createLoanAction(input: CreateLoanInput) {
             revalidatePath(`/inicio/clientes/${clientId}`);
         }
         
-        return { success: true, message: 'Préstamo creado con éxito.' };
+        return { success: true, message: 'Préstamo creado con éxito.', loanId: docRef.id };
     } catch (error: any) {
         console.error('Error creating loan:', error);
         return { success: false, message: `Error al crear el préstamo: ${error.message}` };

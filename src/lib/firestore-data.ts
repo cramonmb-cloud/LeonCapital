@@ -317,6 +317,10 @@ export async function getAppConfig(): Promise<AppConfig | null> {
         }
         return null;
     } catch (err) {
+        if (typeof window === 'undefined') {
+            console.warn('Could not fetch appConfig on server (operating in offline/fallback mode):', err);
+            return null;
+        }
         return handleFirestoreError(err, configRef.path, 'get');
     }
 }

@@ -228,33 +228,65 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
   const watchAmount = form.watch('amount');
   const watchPromotoraId = form.watch('promotoraId');
 
-  // Préstamos capturados visibles: solo los registrados en el DÍA ACTUAL (hora México) que aún no han sido acumulados
+  // Préstamos capturados visibles: sesión actual + préstamos de la promotora en la semana activa sin pagos acumulados
   const capturedLoans = useMemo(() => {
     const currentPromId = watchPromotoraId || initialSelection?.promotoraId;
     if (!currentPromId) return [];
 
     const mexicoNow = getMexicoNow();
-    const todayMexicoStr = mexicoNow.toLocaleDateString('en-CA');
+    const todayMexicoStr = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/Mexico_City',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(mexicoNow);
+    const currentSaturdayIso = getSaturdayOfWeek(mexicoNow).toISOString();
 
     const clientMap = new Map(clients.map(c => [c.id, c.name]));
     const planMap = new Map(loanPlans.map(p => [p.id, p]));
 
-    // Préstamos de Firestore de esta promotora, capturados HOY y sin pagos activos (sin acumular)
+    // Préstamos de Firestore de esta promotora:
+    // Deben estar activos y NO tener pagos acumulados activos.
+    // Además deben pertenecer al día de hoy, a las últimas 48 hrs, o a la semana activa (mismo sábado).
     const unaccumulatedFromDb = loans.filter(l => {
       if (l.promotoraId !== currentPromId) return false;
       if (l.status !== 'Active') return false;
 
-      // Verificar que haya sido capturado en el día de hoy (hora México)
+      // Si ya tiene pagos activos, ya fue acumulado / cobrado
+      const hasActivePayments = (l.payments || []).some(p => !p.isReverted);
+      if (hasActivePayments) return false;
+
+      // 1. Creado hoy o en las últimas 48 horas
       if (l.createdAt) {
-        const loanCreatedDate = new Date(l.createdAt).toLocaleDateString('en-CA', { timeZone: 'America/Mexico_City' });
-        if (loanCreatedDate !== todayMexicoStr) return false;
-      } else {
-        // Préstamos sin fecha de creación explícita no se muestran para evitar cargar días anteriores
-        return false;
+        try {
+          const loanCreatedDate = new Intl.DateTimeFormat('en-CA', {
+            timeZone: 'America/Mexico_City',
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+          }).format(new Date(l.createdAt));
+          if (loanCreatedDate === todayMexicoStr) return true;
+
+          const createdTime = new Date(l.createdAt).getTime();
+          if (!isNaN(createdTime) && Math.abs(Date.now() - createdTime) <= 48 * 60 * 60 * 1000) {
+            return true;
+          }
+        } catch {
+          // Si falla parseo de fecha, continuar con verificación de startDate
+        }
       }
 
-      const hasActivePayments = (l.payments || []).some(p => !p.isReverted);
-      return !hasActivePayments;
+      // 2. O pertenece a la semana activa actual (misma fecha de corte / sábado)
+      if (l.startDate) {
+        try {
+          const loanSatIso = getSaturdayOfWeek(l.startDate).toISOString();
+          if (loanSatIso === currentSaturdayIso) {
+            return true;
+          }
+        } catch {}
+      }
+
+      return false;
     });
 
     const mappedDbLoans: CapturedLoanItem[] = unaccumulatedFromDb.map(l => {
@@ -275,39 +307,26 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
       };
     });
 
-    // Unir con los locales recién registrados que pertenezcan a HOY
-    const dbLoanIds = new Set(unaccumulatedFromDb.map(l => l.id));
-    const pendingLocals = localCapturedLoans.filter(loc => 
-      loc.promotoraId === currentPromId && 
-      loc.capturedDate === todayMexicoStr && 
-      !dbLoanIds.has(loc.id)
-    );
+    // Préstamos locales registrados en la sesión actual para esta promotora
+    const pendingLocals = localCapturedLoans.filter(loc => loc.promotoraId === currentPromId);
 
-    const result: CapturedLoanItem[] = [...pendingLocals];
-    mappedDbLoans.forEach(dbItem => {
-      const alreadyInList = result.some(r => r.id === dbItem.id || (r.clientName === dbItem.clientName && r.amount === dbItem.amount));
-      if (!alreadyInList) {
-        result.push(dbItem);
+    // Combinar sin duplicar:
+    // Empezamos con los préstamos de DB
+    const result: CapturedLoanItem[] = [...mappedDbLoans];
+
+    // Añadimos los de la sesión local que aún no se reflejen en la DB
+    pendingLocals.forEach(loc => {
+      const alreadyInDb = result.some(r => 
+        r.id === loc.id || 
+        (r.clientName.trim().toUpperCase() === loc.clientName.trim().toUpperCase() && r.amount === loc.amount)
+      );
+      if (!alreadyInDb) {
+        result.unshift(loc);
       }
     });
 
     return result;
   }, [loans, clients, loanPlans, watchPromotoraId, initialSelection, localCapturedLoans]);
-
-  // Si los préstamos en Firestore ya tienen pagos acumulados o ya cambió el día, depurar la lista local
-  useEffect(() => {
-    if (localCapturedLoans.length > 0) {
-      const todayMexicoStr = getMexicoNow().toLocaleDateString('en-CA');
-      setLocalCapturedLoans(prev => prev.filter(local => {
-        if (local.capturedDate !== todayMexicoStr) return false;
-        const matchingLoan = loans.find(l => l.id === local.id || (l.status === 'Active' && l.promotoraId === local.promotoraId && l.amount === local.amount));
-        if (matchingLoan && (matchingLoan.payments || []).some(p => p.weekNumber === 1 && !p.isReverted)) {
-          return false;
-        }
-        return true;
-      }));
-    }
-  }, [loans, localCapturedLoans.length]);
 
   const calculatedAbono = useMemo(() => {
     if (!watchLoanPlanId || !watchAmount) return 0;
@@ -860,12 +879,19 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
                 const plan = loanPlans.find(p => p.id === values.loanPlanId);
                 const weeklyPayment = plan ? (Number(values.amount) / 1000) * plan.weeklyPaymentRate : 0;
                 const ratePerThousand = plan ? plan.weeklyPaymentRate : 0;
-                const todayMexicoStr = getMexicoNow().toLocaleDateString('en-CA');
+                const todayMexicoStr = new Intl.DateTimeFormat('en-CA', {
+                  timeZone: 'America/Mexico_City',
+                  year: 'numeric',
+                  month: '2-digit',
+                  day: '2-digit',
+                }).format(new Date());
+
+                const newLoanId = (result as any).loanId || `local-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
 
                 // Registrar en la lista local de préstamos capturados de la sesión actual
                 setLocalCapturedLoans(prev => [
                     {
-                        id: `local-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+                        id: newLoanId,
                         clientName: values.clientName.trim().toUpperCase(),
                         amount: Number(values.amount),
                         ratePerThousand: ratePerThousand,
