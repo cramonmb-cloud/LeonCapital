@@ -216,7 +216,19 @@ export function CierreSemanalClientPage({
           sumCobrado += Number(saved.total) || 0;
           sumFalla += Number(saved.falla) || 0;
           sumRecuperado += Number(saved.recuperado) || 0;
-          sumVenta += Number(saved.venta) || 0;
+
+          let effectiveVenta = Number(saved.venta) || 0;
+          if (!saved.isClosed && effectiveVenta === 0) {
+            const wTime = parseLocalDate(selectedWeek).getTime();
+            const pLoans = loans.filter(l => l.promotoraId === p.id);
+            const realV = pLoans
+              .filter(l => getSaturdayOfWeek(parseLocalDate(l.startDate)).getTime() === wTime)
+              .reduce((sum, l) => sum + (Number(l.amount) || 0), 0);
+            if (realV > 0) {
+              effectiveVenta = realV;
+            }
+          }
+          sumVenta += effectiveVenta;
         } else {
           // Dynamic calculation
           const prevS = prevWeekSettlementsByProm.get(p.id);

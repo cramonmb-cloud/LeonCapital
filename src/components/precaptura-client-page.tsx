@@ -929,9 +929,17 @@ export function PrecapturaClientPage({
       const supervisionPercent = override.supervisionPercent !== undefined 
         ? override.supervisionPercent 
         : (savedSettlement?.supervisionPercent !== undefined ? savedSettlement.supervisionPercent : 0);
+      const pLoans = loansByPromotora[pId] || [];
+      const wTime = parseLocalDate(selectedWeek).getTime();
+      const realVenta = pLoans
+        .filter(l => getSaturdayOfWeek(parseLocalDate(l.startDate)).getTime() === wTime)
+        .reduce((sum, l) => sum + (Number(l.amount) || 0), 0);
+
       const venta = override.venta !== undefined 
         ? override.venta 
-        : (savedSettlement?.venta !== undefined ? savedSettlement.venta : 0);
+        : (savedSettlement?.venta !== undefined && Number(savedSettlement.venta) > 0 
+            ? savedSettlement.venta 
+            : realVenta);
       
       const falla = override.falla !== undefined 
         ? override.falla 

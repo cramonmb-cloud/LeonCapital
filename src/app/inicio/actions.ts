@@ -993,6 +993,9 @@ export async function syncPromotoraSettlementsFromWeek(promotoraId: string, from
                     efectivo: computed.efectivo,
                     totalEntregar: computed.total,
                     diferencia: computed.diferencia,
+                    venta: computed.venta,
+                    comision: computed.comicion,
+                    supervision: computed.supervision,
                 };
                 batch.update(precapturaRef, {
                     [`rows.${promotoraId}`]: cleanFirestoreData(updatedRow),

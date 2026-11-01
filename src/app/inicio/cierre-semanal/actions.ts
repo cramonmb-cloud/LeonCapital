@@ -495,9 +495,21 @@ export async function reopenPlazaClosureAction({
     plazaPromotoras.forEach(promotora => {
       const pId = promotora.id;
       const rawPrecapturaRow = precapturaData?.rows?.[pId];
-      const precapturaRow = rawPrecapturaRow ? { ...rawPrecapturaRow, falla: undefined } : undefined;
+      const precapturaRow = rawPrecapturaRow ? {
+        ...rawPrecapturaRow,
+        falla: undefined,
+        venta: (rawPrecapturaRow.venta !== undefined && Number(rawPrecapturaRow.venta) > 0)
+          ? rawPrecapturaRow.venta
+          : undefined
+      } : undefined;
       const prevSettlement = prevSettlementsMap[pId];
       const curSettlement = existingSettlementsMap[pId];
+      const sanitizedCurSettlement = curSettlement ? {
+        ...curSettlement,
+        venta: (curSettlement.venta !== undefined && Number(curSettlement.venta) > 0)
+          ? curSettlement.venta
+          : undefined
+      } : undefined;
 
       const settlement = computePromotoraWeekMetrics({
         promotoraId: pId,
@@ -508,7 +520,7 @@ export async function reopenPlazaClosureAction({
         config,
         prevSettlement,
         precapturaRow,
-        savedSettlement: curSettlement,
+        savedSettlement: sanitizedCurSettlement,
       });
 
       const updatedSettlement: PromotoraSettlement = {
@@ -537,6 +549,9 @@ export async function reopenPlazaClosureAction({
             [`rows.${pId}.efectivo`]: updatedSettlement.efectivo,
             [`rows.${pId}.totalEntregar`]: updatedSettlement.total,
             [`rows.${pId}.diferencia`]: updatedSettlement.diferencia,
+            [`rows.${pId}.venta`]: updatedSettlement.venta,
+            [`rows.${pId}.comision`]: updatedSettlement.comicion,
+            [`rows.${pId}.supervision`]: updatedSettlement.supervision,
           });
         });
       }
@@ -665,9 +680,21 @@ export async function reopenGlobalClosureAction({
       pPromotoras.forEach(promotora => {
         const pId = promotora.id;
         const rawPrecapturaRow = precaptura?.rows?.[pId];
-        const precapturaRow = rawPrecapturaRow ? { ...rawPrecapturaRow, falla: undefined } : undefined;
+        const precapturaRow = rawPrecapturaRow ? {
+          ...rawPrecapturaRow,
+          falla: undefined,
+          venta: (rawPrecapturaRow.venta !== undefined && Number(rawPrecapturaRow.venta) > 0)
+            ? rawPrecapturaRow.venta
+            : undefined
+        } : undefined;
         const prevSettlement = prevSettlementsMap[pId];
         const curSettlement = curSettlementsMap[pId];
+        const sanitizedCurSettlement = curSettlement ? {
+          ...curSettlement,
+          venta: (curSettlement.venta !== undefined && Number(curSettlement.venta) > 0)
+            ? curSettlement.venta
+            : undefined
+        } : undefined;
 
         const settlement = computePromotoraWeekMetrics({
           promotoraId: pId,
@@ -678,7 +705,7 @@ export async function reopenGlobalClosureAction({
           config,
           prevSettlement,
           precapturaRow,
-          savedSettlement: curSettlement,
+          savedSettlement: sanitizedCurSettlement,
         });
 
         const updatedSettlement: PromotoraSettlement = {
@@ -707,6 +734,9 @@ export async function reopenGlobalClosureAction({
               [`rows.${pId}.efectivo`]: updatedSettlement.efectivo,
               [`rows.${pId}.totalEntregar`]: updatedSettlement.total,
               [`rows.${pId}.diferencia`]: updatedSettlement.diferencia,
+              [`rows.${pId}.venta`]: updatedSettlement.venta,
+              [`rows.${pId}.comision`]: updatedSettlement.comicion,
+              [`rows.${pId}.supervision`]: updatedSettlement.supervision,
             });
           });
         }
@@ -836,9 +866,21 @@ export async function recalculateWeekAction({
       pPromotoras.forEach(promotora => {
         const pId = promotora.id;
         const rawPrecapturaRow = precaptura?.rows?.[pId];
-        const precapturaRow = rawPrecapturaRow ? { ...rawPrecapturaRow, falla: undefined } : undefined;
+        const precapturaRow = rawPrecapturaRow ? {
+          ...rawPrecapturaRow,
+          falla: undefined,
+          venta: (rawPrecapturaRow.venta !== undefined && Number(rawPrecapturaRow.venta) > 0)
+            ? rawPrecapturaRow.venta
+            : undefined
+        } : undefined;
         const prevSettlement = prevSettlementsMap[pId];
         const curSettlement = curSettlementsMap[pId];
+        const sanitizedCurSettlement = curSettlement ? {
+          ...curSettlement,
+          venta: (curSettlement.venta !== undefined && Number(curSettlement.venta) > 0)
+            ? curSettlement.venta
+            : undefined
+        } : undefined;
 
         const settlement = computePromotoraWeekMetrics({
           promotoraId: pId,
@@ -849,7 +891,7 @@ export async function recalculateWeekAction({
           config,
           prevSettlement,
           precapturaRow,
-          savedSettlement: curSettlement,
+          savedSettlement: sanitizedCurSettlement,
         });
 
         const isClosed = curSettlement?.isClosed ?? false;
@@ -879,6 +921,9 @@ export async function recalculateWeekAction({
               [`rows.${pId}.efectivo`]: updatedSettlement.efectivo,
               [`rows.${pId}.totalEntregar`]: updatedSettlement.total,
               [`rows.${pId}.diferencia`]: updatedSettlement.diferencia,
+              [`rows.${pId}.venta`]: updatedSettlement.venta,
+              [`rows.${pId}.comision`]: updatedSettlement.comicion,
+              [`rows.${pId}.supervision`]: updatedSettlement.supervision,
             });
           });
         }

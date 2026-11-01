@@ -20,7 +20,7 @@ export interface ComputeMetricsParams {
   config?: AppConfig | null;
   prevSettlement?: PromotoraSettlement | null;
   precapturaRow?: Partial<PrecapturaRow> | null;
-  savedSettlement?: PromotoraSettlement | null;
+  savedSettlement?: Partial<PromotoraSettlement> | null;
 }
 
 /**
@@ -187,12 +187,14 @@ export function computePromotoraWeekMetrics({
     if (precapturaRow.debeEntregar !== undefined) debeEntregar = Number(precapturaRow.debeEntregar);
     if (precapturaRow.falla !== undefined) falla = Number(precapturaRow.falla);
     if (precapturaRow.recuperado !== undefined) recuperado = Number(precapturaRow.recuperado);
-    if (precapturaRow.venta !== undefined) venta = Number(precapturaRow.venta);
+    if (precapturaRow.venta !== undefined && (Number(precapturaRow.venta) > 0 || realVenta === 0)) {
+      venta = Number(precapturaRow.venta);
+    }
     if (precapturaRow.comicionPercent !== undefined) comicionPercent = Number(precapturaRow.comicionPercent);
     if (precapturaRow.supervisionPercent !== undefined) supervisionPercent = Number(precapturaRow.supervisionPercent);
-    if (precapturaRow.comision !== undefined) comicion = Number(precapturaRow.comision);
+    if (precapturaRow.comision !== undefined && Number(precapturaRow.comision) > 0) comicion = Number(precapturaRow.comision);
     else comicion = Math.round(venta * (comicionPercent / 100));
-    if (precapturaRow.supervision !== undefined) supervision = Number(precapturaRow.supervision);
+    if (precapturaRow.supervision !== undefined && Number(precapturaRow.supervision) > 0) supervision = Number(precapturaRow.supervision);
     else supervision = Math.round(venta * (supervisionPercent / 100));
     if (precapturaRow.adelantosEntrantes !== undefined) adelEnt = Number(precapturaRow.adelantosEntrantes);
     if (precapturaRow.adelantosSalientes !== undefined) adelSal = Number(precapturaRow.adelantosSalientes);
@@ -203,12 +205,14 @@ export function computePromotoraWeekMetrics({
     diferencia = precapturaRow.diferencia !== undefined ? Number(precapturaRow.diferencia) : (efectivo - debeEntregar);
     deuda = Math.max(0, debeEntregar - efectivo);
   } else if (savedSettlement) {
-    if (savedSettlement.venta !== undefined && savedSettlement.venta > 0) venta = Number(savedSettlement.venta);
+    if (savedSettlement.venta !== undefined && (Number(savedSettlement.venta) > 0 || realVenta === 0)) {
+      venta = Number(savedSettlement.venta);
+    }
     if (savedSettlement.comicionPercent !== undefined) comicionPercent = Number(savedSettlement.comicionPercent);
     if (savedSettlement.supervisionPercent !== undefined) supervisionPercent = Number(savedSettlement.supervisionPercent);
-    if (savedSettlement.comicion !== undefined) comicion = Number(savedSettlement.comicion);
+    if (savedSettlement.comicion !== undefined && Number(savedSettlement.comicion) > 0) comicion = Number(savedSettlement.comicion);
     else comicion = Math.round(venta * (comicionPercent / 100));
-    if (savedSettlement.supervision !== undefined) supervision = Number(savedSettlement.supervision);
+    if (savedSettlement.supervision !== undefined && Number(savedSettlement.supervision) > 0) supervision = Number(savedSettlement.supervision);
     else supervision = Math.round(venta * (supervisionPercent / 100));
     if (savedSettlement.adelEnt !== undefined) adelEnt = Number(savedSettlement.adelEnt);
     if (savedSettlement.adelSal !== undefined) adelSal = Number(savedSettlement.adelSal);

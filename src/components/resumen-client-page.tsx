@@ -234,15 +234,36 @@ export function ResumenClientPage({
         if (saved) {
           savedCount++;
           if (saved.isClosed) closedCount++;
-          sumVenta += Number(saved.venta) || 0;
+
+          let effectiveVenta = Number(saved.venta) || 0;
+          if (!saved.isClosed && effectiveVenta === 0) {
+            const wTime = parseLocalDate(w).getTime();
+            const realV = pLoans
+              .filter(l => getSaturdayOfWeek(parseLocalDate(l.startDate)).getTime() === wTime)
+              .reduce((sum, l) => sum + (Number(l.amount) || 0), 0);
+            if (realV > 0) {
+              effectiveVenta = realV;
+            }
+          }
+
+          let effectiveComision = Number(saved.comicion) || 0;
+          if (!saved.isClosed && effectiveComision === 0 && effectiveVenta > 0 && saved.comicionPercent) {
+            effectiveComision = Math.round(effectiveVenta * (saved.comicionPercent / 100));
+          }
+          let effectiveSupervision = Number(saved.supervision) || 0;
+          if (!saved.isClosed && effectiveSupervision === 0 && effectiveVenta > 0 && saved.supervisionPercent) {
+            effectiveSupervision = Math.round(effectiveVenta * (saved.supervisionPercent / 100));
+          }
+
+          sumVenta += effectiveVenta;
           sumDebe += Number(saved.debeEntregar) || 0;
           sumFalla += Number(saved.falla) || 0;
           sumEfectivo += Number(saved.efectivo) || 0;
           sumRecuperado += Number(saved.recuperado) || 0;
           sumTotalCobrado += Number(saved.total) || 0;
           sumDiferencia += Number(saved.diferencia) || 0;
-          sumComision += Number(saved.comicion) || 0;
-          sumSupervision += Number(saved.supervision) || 0;
+          sumComision += effectiveComision;
+          sumSupervision += effectiveSupervision;
           sumAdelEnt += Number(saved.adelEnt) || 0;
           sumAdelSal += Number(saved.adelSal) || 0;
           sumSemExt += Number(saved.semExt) || 0;
