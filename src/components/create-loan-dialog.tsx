@@ -1094,11 +1094,87 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
         if (data.name) form.setValue('clientName', data.name.toUpperCase());
         if (data.street) form.setValue('street', data.street.toUpperCase());
         if (data.neighborhood) form.setValue('neighborhood', data.neighborhood.toUpperCase());
-        if (data.postalCode) form.setValue('postalCode', data.postalCode.toUpperCase());
+        if (data.postalCode) {
+          form.setValue('postalCode', data.postalCode.toUpperCase());
+          handlePostalCodeLookup(data.postalCode, 'client');
+        }
         if (data.city) form.setValue('city', data.city.toUpperCase());
 
         setSelectedClient(null);
         setActiveLoanDetails(null);
+    };
+
+    const handlePostalCodeLookup = async (
+      rawCp: string,
+      target: 'client' | 'endorsement',
+      force = false
+    ) => {
+      const cleanedCp = (rawCp || '').replace(/\D/g, '').trim();
+      if (!cleanedCp || (cleanedCp.length !== 5 && (!force || cleanedCp.length < 4))) {
+        return;
+      }
+
+      const formattedCp = cleanedCp.padStart(5, '0');
+
+      // 1. Verificación rápida en memoria si ya existen clientes con ese C.P.
+      const match = clients.find(c => (c.postalCode || '').trim() === formattedCp && (c.neighborhood || c.city));
+      if (match) {
+        if (target === 'client') {
+          if (match.neighborhood) form.setValue('neighborhood', match.neighborhood.toUpperCase());
+          if (match.city) form.setValue('city', match.city.toUpperCase());
+        } else {
+          if (match.neighborhood) form.setValue('endorsementNeighborhood', match.neighborhood.toUpperCase());
+          if (match.city) form.setValue('endorsementCity', match.city.toUpperCase());
+        }
+        return;
+      }
+
+      // 2. Consulta a la API de código postal
+      try {
+        const res = await fetch(`/api/postal-code/${formattedCp}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.success && (data.colony || data.city)) {
+            if (target === 'client') {
+              if (data.colony) form.setValue('neighborhood', data.colony.toUpperCase());
+              if (data.city) form.setValue('city', data.city.toUpperCase());
+            } else {
+              if (data.colony) form.setValue('endorsementNeighborhood', data.colony.toUpperCase());
+              if (data.city) form.setValue('endorsementCity', data.city.toUpperCase());
+            }
+            return;
+          }
+        }
+      } catch {
+        // Fallback a consulta directa
+      }
+
+      // 3. Fallback directo en el cliente a zippopotam (CORS público)
+      try {
+        const directRes = await fetch(`https://api.zippopotam.us/mx/${formattedCp}`);
+        if (directRes.ok) {
+          const directData = await directRes.json();
+          const place = directData.places?.[0];
+          if (place) {
+            const placeName = (place['place name'] || '').toUpperCase();
+            let extractedCity = placeName;
+            let extractedColony = placeName;
+            if (placeName.includes('CENTRO')) {
+              extractedCity = placeName.replace(/\s*CENTRO\b/i, '').trim() || placeName;
+              extractedColony = 'CENTRO';
+            }
+            if (target === 'client') {
+              form.setValue('neighborhood', extractedColony);
+              form.setValue('city', extractedCity);
+            } else {
+              form.setValue('endorsementNeighborhood', extractedColony);
+              form.setValue('endorsementCity', extractedCity);
+            }
+          }
+        }
+      } catch {
+        // Silencioso según requerimientos
+      }
     };
 
   return (
@@ -1451,7 +1527,20 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
                                 placeholder="63000" 
                                 {...field} 
                                 value={field.value || ''} 
-                                onKeyDown={(e) => handleFieldEnter(e, 'city')}
+                                onChange={(e) => {
+                                  field.onChange(e);
+                                  handlePostalCodeLookup(e.target.value, 'client');
+                                }}
+                                onBlur={(e) => {
+                                  field.onBlur();
+                                  handlePostalCodeLookup(e.target.value, 'client', true);
+                                }}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') {
+                                    handlePostalCodeLookup(e.currentTarget.value, 'client', true);
+                                  }
+                                  handleFieldEnter(e, 'city');
+                                }}
                                 className="h-9 text-xs uppercase font-bold placeholder:text-zinc-400 placeholder:normal-case placeholder:font-normal" 
                               />
                             </FormControl>
@@ -1651,7 +1740,20 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
                                 placeholder="63000" 
                                 {...field} 
                                 value={field.value || ''} 
-                                onKeyDown={(e) => handleFieldEnter(e, 'endorsementCity')}
+                                onChange={(e) => {
+                                  field.onChange(e);
+                                  handlePostalCodeLookup(e.target.value, 'endorsement');
+                                }}
+                                onBlur={(e) => {
+                                  field.onBlur();
+                                  handlePostalCodeLookup(e.target.value, 'endorsement', true);
+                                }}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') {
+                                    handlePostalCodeLookup(e.currentTarget.value, 'endorsement', true);
+                                  }
+                                  handleFieldEnter(e, 'endorsementCity');
+                                }}
                                 className="h-9 text-xs uppercase font-bold placeholder:text-zinc-400 placeholder:normal-case placeholder:font-normal" 
                               />
                             </FormControl>
