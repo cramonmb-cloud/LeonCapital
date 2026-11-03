@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/hooks/use-auth';
 import { useState, useEffect, useRef } from 'react';
-import { LayoutDashboard, Users, Landmark, FileWarning, Wallet, Settings, Activity, Search, History, type LucideIcon } from 'lucide-react';
+import { LayoutDashboard, Users, Landmark, FileWarning, Wallet, Settings, Activity, Search, History, Gift, type LucideIcon } from 'lucide-react';
 
 const allLinks: { href: string; label: string; id: string, icon: LucideIcon, color: string }[] = [
   { href: '/inicio', label: 'Inicio', id: 'dashboard', icon: LayoutDashboard, color: '#3b82f6' },
@@ -14,6 +14,7 @@ const allLinks: { href: string; label: string; id: string, icon: LucideIcon, col
   { href: '/inicio/prestamos', label: 'Pagos', id: 'loans', icon: Landmark, color: '#3b82f6' },
   { href: '/inicio/pendientes', label: 'Pendientes', id: 'overduePortfolio', icon: FileWarning, color: '#f97316' },
   { href: '/inicio/cartera-vencida', label: 'Vencida', id: 'carteraVencida', icon: History, color: '#dc2626' },
+  { href: '/inicio/aguinaldos', label: 'Aguinaldos', id: 'aguinaldos', icon: Gift, color: '#4f46e5' },
   { href: '/inicio/bitacora', label: 'Bitacora', id: 'wallet', icon: Wallet, color: '#3b82f6' },
   { href: '/inicio/control', label: 'Control', id: 'control', icon: Activity, color: '#2563eb' },
   { href: '/inicio/ajustes', label: 'Ajustes', id: 'settings', icon: Settings, color: '#3b82f6' },

@@ -203,6 +203,7 @@ export type UserPermissions = {
     precaptura: boolean;
     cierreSemanal: boolean;
     resumen: boolean;
+    aguinaldos?: boolean;
     // Granular settings
     manageUsers: boolean;
     manageZones: boolean;

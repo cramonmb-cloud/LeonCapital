@@ -47,7 +47,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { PlusCircle, Loader2, Trash, Edit, ShieldCheck, Lock, UserPlus, Users, LayoutDashboard, Landmark, FileWarning, Wallet, History, Activity, Search, AlertCircle, Smartphone, MapPin, Wrench, Settings, ArrowRightLeft, KeyRound, Building, CheckCircle2, Coins, Megaphone, UserCheck, Printer, FileSpreadsheet, BarChart3 } from 'lucide-react';
+import { PlusCircle, Loader2, Trash, Edit, ShieldCheck, Lock, UserPlus, Users, LayoutDashboard, Landmark, FileWarning, Wallet, History, Activity, Search, AlertCircle, Smartphone, MapPin, Wrench, Settings, ArrowRightLeft, KeyRound, Building, CheckCircle2, Coins, Megaphone, UserCheck, Printer, FileSpreadsheet, BarChart3, Gift } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/hooks/use-auth';
@@ -78,6 +78,7 @@ const permissionsSchema = z.object({
   precaptura: z.boolean().default(false),
   cierreSemanal: z.boolean().default(false),
   resumen: z.boolean().default(false),
+  aguinaldos: z.boolean().default(false),
   // Granular settings
   manageUsers: z.boolean().default(false),
   manageZones: z.boolean().default(false),
@@ -123,6 +124,7 @@ const permissionLabels: { id: keyof Omit<UserPermissions, 'showMobileNavBar' | '
     { id: 'carteraVencida', label: 'Cartera Vencida', description: 'Cuentas incobrables post-vencimiento', icon: History },
     { id: 'debes', label: 'Debes', description: 'Liquidación semanal de promotoras', icon: Coins },
     { id: 'resumen', label: 'Resumen Operativo', description: 'Tabla de resumen consolidado semanal y por rangos', icon: BarChart3 },
+    { id: 'aguinaldos', label: 'Aguinaldos', description: 'Cálculo de gratificación anual y aguinaldos a promotoras', icon: Gift },
     { id: 'precaptura', label: 'Precaptura', description: 'Precaptura por plaza con registro de gastos', icon: FileSpreadsheet },
     { id: 'cierreSemanal', label: 'Cierre Semanal', description: 'Cierre y congelamiento definitivo de semanas', icon: Lock },
     { id: 'wallet', label: 'Bitacora', description: 'Flujo de caja y movimientos', icon: Wallet },
@@ -224,6 +226,10 @@ export function UserManagement({ users }: UserManagementProps) {
         debes: true,
         imprenta: true,
         avales: true,
+        precaptura: false,
+        cierreSemanal: false,
+        resumen: false,
+        aguinaldos: false,
         manageUsers: false,
         manageZones: true,
         manageMigration: false,
@@ -264,6 +270,10 @@ export function UserManagement({ users }: UserManagementProps) {
             debes: selectedUser.permissions?.debes ?? false,
             imprenta: selectedUser.permissions?.imprenta ?? false,
             avales: selectedUser.permissions?.avales ?? false,
+            precaptura: selectedUser.permissions?.precaptura ?? false,
+            cierreSemanal: selectedUser.permissions?.cierreSemanal ?? false,
+            resumen: selectedUser.permissions?.resumen ?? false,
+            aguinaldos: selectedUser.permissions?.aguinaldos ?? false,
             manageUsers: selectedUser.permissions?.manageUsers ?? false,
             manageZones: selectedUser.permissions?.manageZones ?? false,
             manageMigration: selectedUser.permissions?.manageMigration ?? false,
