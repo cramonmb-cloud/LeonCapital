@@ -15,11 +15,12 @@ import {
   BarChart3, Calendar, Building, Search, Download, 
   Printer, Eye, CheckCircle2, AlertCircle, Clock,
   ArrowUpDown, Filter, RefreshCw, DollarSign, TrendingUp,
-  Coins, FileSpreadsheet
+  Coins, FileSpreadsheet, Loader2
 } from 'lucide-react';
 import { cn, getSaturdayOfWeek, getMexicoNow, parseLocalDate } from '@/lib/utils';
 import type { Client, LoanPlan, Loan, Plaza, Localidad, Promotora, AppConfig, PromotoraSettlement, WeeklyClosure } from '@/lib/types';
 import { computePromotoraWeekMetrics } from '@/lib/settlement-calculator';
+import { syncResumenWeekAction, syncResumenWeeksRangeAction, syncSinglePromotoraInResumenAction } from '@/app/inicio/resumen/actions';
 import jsPDF from 'jspdf';
 import 'jspdf-autotable';
 import type { UserOptions } from 'jspdf-autotable';
@@ -130,6 +131,9 @@ export function ResumenClientPage({
 
   // Mode and date selection
   const [timeMode, setTimeMode] = useState<'single' | 'range'>('single');
+  const [calcMode, setCalcMode] = useState<'hybrid' | 'live'>('hybrid');
+  const [isSyncing, setIsSyncing] = useState<boolean>(false);
+  const [syncingPromotoraId, setSyncingPromotoraId] = useState<string | null>(null);
   const [selectedWeek, setSelectedWeek] = useState<string>(latestWeekStr);
   const [startWeek, setStartWeek] = useState<string>(
     allAvailableWeeks[Math.min(3, allAvailableWeeks.length - 1)]?.toISOString().split('T')[0] || latestWeekStr
@@ -229,44 +233,73 @@ export function ResumenClientPage({
 
       activeWeeks.forEach(w => {
         const docId = `${pId}_${w}`;
-        const saved = settlementLookup.get(docId);
+        const saved = calcMode === 'live' ? null : settlementLookup.get(docId);
 
         if (saved) {
           savedCount++;
           if (saved.isClosed) closedCount++;
 
           let effectiveVenta = Number(saved.venta) || 0;
-          if (!saved.isClosed && effectiveVenta === 0) {
-            const wTime = parseLocalDate(w).getTime();
-            const realV = pLoans
-              .filter(l => getSaturdayOfWeek(parseLocalDate(l.startDate)).getTime() === wTime)
-              .reduce((sum, l) => sum + (Number(l.amount) || 0), 0);
-            if (realV > 0) {
-              effectiveVenta = realV;
-            }
-          }
-
+          let effectiveDebe = Number(saved.debeEntregar) || 0;
+          let effectiveFalla = Number(saved.falla) || 0;
+          let effectiveEfectivo = Number(saved.efectivo) || 0;
+          let effectiveRecuperado = Number(saved.recuperado) || 0;
+          let effectiveTotal = Number(saved.total) || 0;
+          let effectiveDiferencia = Number(saved.diferencia) || 0;
           let effectiveComision = Number(saved.comicion) || 0;
-          if (!saved.isClosed && effectiveComision === 0 && effectiveVenta > 0 && saved.comicionPercent) {
-            effectiveComision = Math.round(effectiveVenta * (saved.comicionPercent / 100));
-          }
           let effectiveSupervision = Number(saved.supervision) || 0;
-          if (!saved.isClosed && effectiveSupervision === 0 && effectiveVenta > 0 && saved.supervisionPercent) {
-            effectiveSupervision = Math.round(effectiveVenta * (saved.supervisionPercent / 100));
+          let effectiveAdelEnt = Number(saved.adelEnt) || 0;
+          let effectiveAdelSal = Number(saved.adelSal) || 0;
+          let effectiveSemExt = Number(saved.semExt) || 0;
+
+          // Si el registro guardado no está cerrado y tiene valores en 0 o desactualizados
+          // frente a los préstamos reales capturados, recalcular dinámicamente:
+          if (!saved.isClosed) {
+            const computed = computePromotoraWeekMetrics({
+              promotoraId: pId,
+              promotoraName: promotora.name,
+              targetWeekStr: w,
+              loans: pLoans,
+              loanPlans,
+              config,
+            });
+
+            if (effectiveVenta === 0 && computed.venta > 0) {
+              effectiveVenta = computed.venta;
+            }
+            if (effectiveDebe === 0 && computed.debeEntregar > 0) {
+              effectiveDebe = computed.debeEntregar;
+              effectiveFalla = computed.falla;
+              effectiveEfectivo = computed.efectivo;
+              effectiveRecuperado = computed.recuperado;
+              effectiveTotal = computed.total;
+              effectiveDiferencia = computed.diferencia;
+            }
+            if (effectiveComision === 0 && effectiveVenta > 0) {
+              const cPerc = saved.comicionPercent !== undefined && saved.comicionPercent > 0 ? saved.comicionPercent : (computed.comicionPercent ?? 0);
+              effectiveComision = Math.round(effectiveVenta * (cPerc / 100));
+            }
+            if (effectiveSupervision === 0 && effectiveVenta > 0) {
+              const sPerc = saved.supervisionPercent !== undefined && saved.supervisionPercent > 0 ? saved.supervisionPercent : (computed.supervisionPercent ?? 0);
+              effectiveSupervision = Math.round(effectiveVenta * (sPerc / 100));
+            }
+            if (effectiveAdelEnt === 0 && (computed.adelEnt ?? 0) > 0) effectiveAdelEnt = computed.adelEnt ?? 0;
+            if (effectiveAdelSal === 0 && (computed.adelSal ?? 0) > 0) effectiveAdelSal = computed.adelSal ?? 0;
+            if (effectiveSemExt === 0 && (computed.semExt ?? 0) > 0) effectiveSemExt = computed.semExt ?? 0;
           }
 
           sumVenta += effectiveVenta;
-          sumDebe += Number(saved.debeEntregar) || 0;
-          sumFalla += Number(saved.falla) || 0;
-          sumEfectivo += Number(saved.efectivo) || 0;
-          sumRecuperado += Number(saved.recuperado) || 0;
-          sumTotalCobrado += Number(saved.total) || 0;
-          sumDiferencia += Number(saved.diferencia) || 0;
+          sumDebe += effectiveDebe;
+          sumFalla += effectiveFalla;
+          sumEfectivo += effectiveEfectivo;
+          sumRecuperado += effectiveRecuperado;
+          sumTotalCobrado += effectiveTotal;
+          sumDiferencia += effectiveDiferencia;
           sumComision += effectiveComision;
           sumSupervision += effectiveSupervision;
-          sumAdelEnt += Number(saved.adelEnt) || 0;
-          sumAdelSal += Number(saved.adelSal) || 0;
-          sumSemExt += Number(saved.semExt) || 0;
+          sumAdelEnt += effectiveAdelEnt;
+          sumAdelSal += effectiveAdelSal;
+          sumSemExt += effectiveSemExt;
         } else {
           // Dynamic calculation
           const computed = computePromotoraWeekMetrics({
@@ -295,10 +328,12 @@ export function ResumenClientPage({
 
       const porcentajeFalla = sumDebe > 0 ? (sumFalla / sumDebe) * 100 : 0;
       let status: 'closed' | 'saved' | 'computed' = 'computed';
-      if (closedCount === activeWeeks.length && closedCount > 0) {
-        status = 'closed';
-      } else if (savedCount > 0) {
-        status = 'saved';
+      if (calcMode !== 'live') {
+        if (closedCount === activeWeeks.length && closedCount > 0) {
+          status = 'closed';
+        } else if (savedCount > 0) {
+          status = 'saved';
+        }
       }
 
       return {
@@ -325,7 +360,7 @@ export function ResumenClientPage({
         totalWeeksEvaluated: activeWeeks.length,
       };
     });
-  }, [activeWeeks, promotoras, locMap, plazaMap, loansByPromotora, loanPlans, config, settlementLookup]);
+  }, [activeWeeks, promotoras, locMap, plazaMap, loansByPromotora, loanPlans, config, settlementLookup, calcMode]);
 
   // Filtered and sorted rows
   const filteredRows = useMemo(() => {
@@ -418,6 +453,79 @@ export function ResumenClientPage({
     if (selectedPlaza === 'ALL') return 'TODAS LAS PLAZAS';
     return plazaMap.get(selectedPlaza)?.name || 'PLAZA';
   }, [selectedPlaza, plazaMap]);
+
+  // Synchronize selection with live loans
+  const handleSyncSelection = async () => {
+    if (isSyncing) return;
+    const username = appUser?.username || 'Usuario';
+    setIsSyncing(true);
+
+    try {
+      let res;
+      if (timeMode === 'single') {
+        res = await syncResumenWeekAction({ weekDate: selectedWeek, username });
+      } else {
+        res = await syncResumenWeeksRangeAction({ weekDates: activeWeeks, username });
+      }
+
+      if (res.success) {
+        toast({
+          title: 'Sincronización Completada',
+          description: res.message,
+        });
+      } else {
+        toast({
+          title: 'Error al sincronizar',
+          description: res.message,
+          variant: 'destructive',
+        });
+      }
+    } catch (err: any) {
+      toast({
+        title: 'Error inesperado',
+        description: err.message,
+        variant: 'destructive',
+      });
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  const handleSyncSinglePromotora = async (promotoraId: string, promotoraName?: string) => {
+    if (syncingPromotoraId) return;
+    const username = appUser?.username || 'Usuario';
+    setSyncingPromotoraId(promotoraId);
+
+    try {
+      const targetWeek = timeMode === 'single' ? selectedWeek : activeWeeks[0] || selectedWeek;
+      const res = await syncSinglePromotoraInResumenAction({
+        promotoraId,
+        weekDate: targetWeek,
+        username,
+      });
+
+      if (res.success) {
+        toast({
+          title: 'Grupo Sincronizado',
+          description: promotoraName ? `${promotoraName}: ${res.message}` : res.message,
+        });
+      } else {
+        toast({
+          title: 'Error al sincronizar grupo',
+          description: res.message,
+          variant: 'destructive',
+        });
+      }
+    } catch (err: any) {
+      toast({
+        title: 'Error inesperado',
+        description: err.message,
+        variant: 'destructive',
+      });
+    } finally {
+      setSyncingPromotoraId(null);
+    }
+  };
 
   // Export to CSV
   const handleExportCSV = () => {
@@ -869,8 +977,56 @@ export function ResumenClientPage({
               </div>
             </div>
 
-            {/* Actions: Export PDF, Export CSV */}
+            {/* Actions: Modo En Vivo / Guardados, Sincronizar, Export PDF, Export CSV */}
             <div className="flex items-center gap-2 flex-wrap">
+              {/* Toggle Modo Guardados vs En Vivo */}
+              <div className="flex items-center p-0.5 bg-slate-100 dark:bg-zinc-900 rounded-md border border-slate-300 dark:border-zinc-700">
+                <button
+                  type="button"
+                  onClick={() => setCalcMode('hybrid')}
+                  className={cn(
+                    "text-xs font-semibold px-2.5 py-1.5 rounded transition-all",
+                    calcMode === 'hybrid'
+                      ? "bg-slate-800 text-white shadow-sm"
+                      : "text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white"
+                  )}
+                  title="Muestra los datos oficiales guardados en precapturas/cierres"
+                >
+                  Guardados
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCalcMode('live')}
+                  className={cn(
+                    "text-xs font-semibold px-2.5 py-1.5 rounded transition-all flex items-center gap-1.5",
+                    calcMode === 'live'
+                      ? "bg-emerald-600 text-white shadow-sm"
+                      : "text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white"
+                  )}
+                  title="Calcula en tiempo real sumando los préstamos actuales de la semana"
+                >
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-300 animate-pulse" />
+                  En Vivo
+                </button>
+              </div>
+
+              {/* Botón Sincronizar Préstamos de la semana */}
+              <Button
+                onClick={handleSyncSelection}
+                disabled={isSyncing}
+                size="sm"
+                variant="outline"
+                className="h-9 text-xs border-blue-300 dark:border-blue-800 text-blue-900 dark:text-blue-300 bg-blue-50/60 dark:bg-blue-950/40 hover:bg-blue-100 dark:hover:bg-blue-900 font-semibold"
+                title="Recalcula y actualiza en la base de datos la venta y montos desde los préstamos capturados"
+              >
+                {isSyncing ? (
+                  <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+                ) : (
+                  <RefreshCw className="w-3.5 h-3.5 mr-1.5" />
+                )}
+                {isSyncing ? 'Sincronizando...' : 'Sincronizar Préstamos'}
+              </Button>
+
               <Button
                 onClick={handleExportCSV}
                 variant="outline"
@@ -1295,17 +1451,33 @@ export function ResumenClientPage({
                       )}
                     </TableCell>
 
-                    {/* Ver Detalle / Auditoría */}
+                    {/* Ver Detalle / Auditoría y Sincronización */}
                     <TableCell className="py-1.5 px-1 text-center">
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        onClick={() => setDetailPromotora(row)}
-                        className="h-6 w-6 text-slate-600 dark:text-zinc-400 hover:text-blue-900 dark:hover:text-blue-400"
-                        title="Ver auditoría de créditos y cobranza"
-                      >
-                        <Eye className="w-3.5 h-3.5" />
-                      </Button>
+                      <div className="flex items-center justify-center gap-0.5">
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          onClick={() => setDetailPromotora(row)}
+                          className="h-6 w-6 text-slate-600 dark:text-zinc-400 hover:text-blue-900 dark:hover:text-blue-400"
+                          title="Ver auditoría de créditos y cobranza"
+                        >
+                          <Eye className="w-3.5 h-3.5" />
+                        </Button>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          disabled={syncingPromotoraId === row.promotoraId || isSyncing}
+                          onClick={() => handleSyncSinglePromotora(row.promotoraId, row.promotoraName)}
+                          className="h-6 w-6 text-slate-500 hover:text-blue-600 dark:hover:text-blue-400"
+                          title="Sincronizar este grupo con sus préstamos actuales"
+                        >
+                          {syncingPromotoraId === row.promotoraId ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-600" />
+                          ) : (
+                            <RefreshCw className="w-3 h-3" />
+                          )}
+                        </Button>
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))
@@ -1370,7 +1542,7 @@ export function ResumenClientPage({
       <Dialog open={Boolean(detailPromotora)} onOpenChange={(open) => !open && setDetailPromotora(null)}>
         <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto">
           <DialogHeader>
-            <div className="flex items-center justify-between border-b pb-3">
+            <div className="flex items-center justify-between border-b pb-3 pr-6">
               <div>
                 <DialogTitle className="text-base font-black text-slate-900 dark:text-zinc-100 flex items-center gap-2">
                   <BarChart3 className="w-4 h-4 text-blue-900" />
@@ -1380,9 +1552,26 @@ export function ResumenClientPage({
                   Plaza: {detailPromotora?.plazaName} | Período: {periodLabel}
                 </DialogDescription>
               </div>
-              <Badge className="bg-blue-900 text-white font-bold text-xs">
-                {detailPromotora?.status === 'closed' ? 'Cerrado' : (detailPromotora?.status === 'saved' ? 'Guardado' : 'Calculado')}
-              </Badge>
+              <div className="flex items-center gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={syncingPromotoraId === detailPromotora?.promotoraId || isSyncing}
+                  onClick={() => detailPromotora && handleSyncSinglePromotora(detailPromotora.promotoraId, detailPromotora.promotoraName)}
+                  className="h-7 text-xs border-blue-200 dark:border-blue-800 text-blue-900 dark:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-950 font-semibold"
+                  title="Recalcula este grupo con sus préstamos actuales"
+                >
+                  {syncingPromotoraId === detailPromotora?.promotoraId ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin mr-1 text-blue-600" />
+                  ) : (
+                    <RefreshCw className="w-3.5 h-3.5 mr-1 text-blue-600" />
+                  )}
+                  Sincronizar Grupo
+                </Button>
+                <Badge className="bg-blue-900 text-white font-bold text-xs">
+                  {detailPromotora?.status === 'closed' ? 'Cerrado' : (detailPromotora?.status === 'saved' ? 'Guardado' : 'Calculado')}
+                </Badge>
+              </div>
             </div>
           </DialogHeader>
 
