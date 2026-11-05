@@ -17,7 +17,7 @@ import {
   RotateCcw, ArrowUpDown, Filter, Landmark, Users
 } from 'lucide-react';
 import { cn, parseLocalDate, getMexicoNow } from '@/lib/utils';
-import type { Client, LoanPlan, Loan, Plaza, Localidad, Promotora, AppConfig } from '@/lib/types';
+import type { Client, LoanPlan, Loan, Plaza, Localidad, Promotora, AppConfig, PromotoraSettlement } from '@/lib/types';
 import jsPDF from 'jspdf';
 import 'jspdf-autotable';
 import type { UserOptions } from 'jspdf-autotable';
@@ -34,6 +34,27 @@ interface AguinaldosClientPageProps {
   initialClients: Client[];
   initialLoanPlans: LoanPlan[];
   initialConfig?: AppConfig | null;
+  initialSettlements?: PromotoraSettlement[];
+}
+
+export interface RecoveredPaymentDetail {
+  loanId: string;
+  clientId: string;
+  clientName: string;
+  weekNumber: number;
+  dateStr: string;
+  amount: number;
+}
+
+export interface FallaPaymentDetail {
+  loanId: string;
+  clientId: string;
+  clientName: string;
+  weekNumber: number;
+  dateStr: string;
+  weeklyPayment: number;
+  amountPaid: number;
+  fallaAmount: number;
 }
 
 interface PromotoraAguinaldoRow {
@@ -48,7 +69,12 @@ interface PromotoraAguinaldoRow {
   ratePerThousand: number;
   isCustomRate: boolean;
   aguinaldo: number;
+  falla: number;
+  recuperado: number;
+  totalGeneral: number;
   loans: Loan[];
+  recoveredPayments: RecoveredPaymentDetail[];
+  fallaPayments: FallaPaymentDetail[];
 }
 
 export function AguinaldosClientPage({
@@ -59,6 +85,7 @@ export function AguinaldosClientPage({
   initialClients,
   initialLoanPlans,
   initialConfig,
+  initialSettlements = [],
 }: AguinaldosClientPageProps) {
   const { toast } = useToast();
   const { appUser } = useAuth();
@@ -71,6 +98,7 @@ export function AguinaldosClientPage({
     plazas: initialPlazas,
     localidades: initialLocalidades,
     promotoras: initialPromotoras,
+    promotoraSettlements: initialSettlements,
   });
 
   const loans = realtime?.loans?.length ? realtime.loans : initialLoans;
@@ -79,6 +107,7 @@ export function AguinaldosClientPage({
   const plazas = realtime?.plazas?.length ? realtime.plazas : initialPlazas;
   const clients = realtime?.clients?.length ? realtime.clients : initialClients;
   const loanPlans = realtime?.loanPlans?.length ? realtime.loanPlans : initialLoanPlans;
+  const settlements = realtime?.promotoraSettlements?.length ? realtime.promotoraSettlements : initialSettlements;
 
   // Initialize dates: Year start to today
   const today = getMexicoNow();
@@ -93,11 +122,12 @@ export function AguinaldosClientPage({
   const [selectedPlaza, setSelectedPlaza] = useState<string>('ALL');
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [onlyWithSales, setOnlyWithSales] = useState<boolean>(false);
-  const [sortBy, setSortBy] = useState<'promotora' | 'plaza' | 'venta' | 'aguinaldo' | 'prestamos'>('venta');
+  const [sortBy, setSortBy] = useState<'promotora' | 'plaza' | 'venta' | 'aguinaldo' | 'prestamos' | 'falla' | 'recuperado' | 'totalGeneral'>('venta');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
 
   // Detail Modal
   const [detailRow, setDetailRow] = useState<PromotoraAguinaldoRow | null>(null);
+  const [detailTab, setDetailTab] = useState<'loans' | 'fallas' | 'recuperados'>('loans');
 
   // Lookup maps
   const locMap = useMemo(() => {
@@ -165,18 +195,18 @@ export function AguinaldosClientPage({
     }
   };
 
-  // Group loans by promotora within the selected date range
+  // Group loans and settlements by promotora within the selected date range
   const rows: PromotoraAguinaldoRow[] = useMemo(() => {
     if (!startDate || !endDate) return [];
 
-    // Filter all loans within the date range
+    // Filter all loans placed within the date range (for Venta Colocada and Préstamos count)
     const loansInRange = loans.filter(l => {
       if (!l.promotoraId) return false;
       const loanDateStr = getLoanDateStr(l.startDate);
       return loanDateStr >= startDate && loanDateStr <= endDate;
     });
 
-    // Map loans by promotoraId
+    // Map loans placed in range by promotoraId
     const loansByPromotora = new Map<string, Loan[]>();
     loansInRange.forEach(loan => {
       const pId = loan.promotoraId;
@@ -187,16 +217,124 @@ export function AguinaldosClientPage({
       loansByPromotora.get(pId)!.push(loan);
     });
 
+    // Map ALL loans by promotoraId (to audit recovered payments across all active/past loans of the promotora)
+    const allLoansByPromotora = new Map<string, Loan[]>();
+    loans.forEach(loan => {
+      const pId = loan.promotoraId;
+      if (!pId) return;
+      if (!allLoansByPromotora.has(pId)) {
+        allLoansByPromotora.set(pId, []);
+      }
+      allLoansByPromotora.get(pId)!.push(loan);
+    });
+
+    // Filter settlements within the date range by weekDate
+    const settlementsInRange = settlements.filter(s => {
+      if (!s.promotoraId) return false;
+      const sDate = s.weekDate ? s.weekDate.slice(0, 10) : '';
+      return sDate >= startDate && sDate <= endDate;
+    });
+
+    // Map settlements by promotoraId
+    const settlementsByPromotora = new Map<string, PromotoraSettlement[]>();
+    settlementsInRange.forEach(s => {
+      const pId = s.promotoraId;
+      if (!pId) return;
+      if (!settlementsByPromotora.has(pId)) {
+        settlementsByPromotora.set(pId, []);
+      }
+      settlementsByPromotora.get(pId)!.push(s);
+    });
+
     // Generate row for each promotora
     return promotoras.map(promotora => {
       const loc = locMap.get(promotora.localidadId);
       const plaza = loc ? plazaMap.get(loc.plazaId) : undefined;
       const pLoans = loansByPromotora.get(promotora.id) || [];
+      const allPLoans = allLoansByPromotora.get(promotora.id) || [];
+      const pSettlements = settlementsByPromotora.get(promotora.id) || [];
 
       const totalVenta = pLoans.reduce((sum, l) => sum + (Number(l.amount) || 0), 0);
       const isCustomRate = customRates[promotora.id] !== undefined;
       const ratePerThousand = isCustomRate ? customRates[promotora.id] : globalRatePerThousand;
       const aguinaldo = Math.round((totalVenta / 1000) * ratePerThousand);
+
+      // Audit all payments in the group's loans during the period for both Falla and Recuperados
+      let loanRecuperados = 0;
+      let loanFallas = 0;
+      const recoveredDetails: RecoveredPaymentDetail[] = [];
+      const fallaDetails: FallaPaymentDetail[] = [];
+
+      allPLoans.forEach(loan => {
+        const client = clientMap.get(loan.clientId);
+        const clientName = client?.name || 'Cliente sin registrar';
+        const plan = planMap.get(loan.loanPlanId);
+        const weeklyPayment = plan ? Math.round((loan.amount / 1000) * (plan.weeklyPaymentRate || 0)) : 0;
+
+        (loan.payments || []).forEach(p => {
+          if (p.isReverted) return;
+
+          // Determine date of transaction
+          let pDateStr = '';
+          if (p.date) {
+            try {
+              pDateStr = parseLocalDate(p.date).toISOString().split('T')[0];
+            } catch {}
+          }
+          if (!pDateStr && p.registeredWeekDate) {
+            try {
+              pDateStr = parseLocalDate(p.registeredWeekDate).toISOString().split('T')[0];
+            } catch {}
+          }
+          if (!pDateStr && loan.startDate) {
+            try {
+              pDateStr = parseLocalDate(loan.startDate).toISOString().split('T')[0];
+            } catch {}
+          }
+
+          if (pDateStr >= startDate && pDateStr <= endDate) {
+            // 1. Recuperado
+            if (p.isRecovered || p.paymentType === 'recovered') {
+              const amt = Number(p.amount) || 0;
+              loanRecuperados += amt;
+              recoveredDetails.push({
+                loanId: loan.id,
+                clientId: loan.clientId,
+                clientName,
+                weekNumber: p.weekNumber || 0,
+                dateStr: pDateStr,
+                amount: amt,
+              });
+            }
+            // 2. Falla (no adelantos, no asumidos)
+            else if (!p.isAdvance && p.paymentType !== 'adelanto_entrante' && p.paymentType !== 'assumed') {
+              const amt = Number(p.amount) || 0;
+              if (amt < weeklyPayment && weeklyPayment > 0) {
+                const missing = weeklyPayment - amt;
+                loanFallas += missing;
+                fallaDetails.push({
+                  loanId: loan.id,
+                  clientId: loan.clientId,
+                  clientName,
+                  weekNumber: p.weekNumber || 0,
+                  dateStr: pDateStr,
+                  weeklyPayment,
+                  amountPaid: amt,
+                  fallaAmount: missing,
+                });
+              }
+            }
+          }
+        });
+      });
+
+      const settlementFalla = pSettlements.reduce((sum, s) => sum + (Number(s.falla) || 0), 0);
+      const settlementRecuperado = pSettlements.reduce((sum, s) => sum + (Number(s.recuperado) || 0), 0);
+
+      // Primary is direct loan analysis; if weekly closures have higher or specific recorded closures, we ensure no undercounting
+      const falla = Math.max(loanFallas, settlementFalla);
+      const recuperado = loanRecuperados + settlementRecuperado;
+      const totalGeneral = totalVenta - falla + recuperado;
 
       return {
         promotoraId: promotora.id,
@@ -210,10 +348,15 @@ export function AguinaldosClientPage({
         ratePerThousand,
         isCustomRate,
         aguinaldo,
+        falla,
+        recuperado,
+        totalGeneral,
         loans: pLoans,
+        recoveredPayments: recoveredDetails,
+        fallaPayments: fallaDetails,
       };
     });
-  }, [promotoras, loans, startDate, endDate, globalRatePerThousand, customRates, locMap, plazaMap]);
+  }, [promotoras, loans, settlements, startDate, endDate, globalRatePerThousand, customRates, locMap, plazaMap, clientMap, planMap]);
 
   // Filter and sort rows
   const filteredRows = useMemo(() => {
@@ -248,6 +391,12 @@ export function AguinaldosClientPage({
         cmp = a.aguinaldo - b.aguinaldo;
       } else if (sortBy === 'prestamos') {
         cmp = a.loansCount - b.loansCount;
+      } else if (sortBy === 'falla') {
+        cmp = a.falla - b.falla;
+      } else if (sortBy === 'recuperado') {
+        cmp = a.recuperado - b.recuperado;
+      } else if (sortBy === 'totalGeneral') {
+        cmp = a.totalGeneral - b.totalGeneral;
       }
       return sortOrder === 'asc' ? cmp : -cmp;
     });
@@ -259,11 +408,17 @@ export function AguinaldosClientPage({
     let aguinaldo = 0;
     let prestamos = 0;
     let promotorasConVenta = 0;
+    let falla = 0;
+    let recuperado = 0;
+    let totalGeneral = 0;
 
     filteredRows.forEach(r => {
       venta += r.totalVenta;
       aguinaldo += r.aguinaldo;
       prestamos += r.loansCount;
+      falla += r.falla;
+      recuperado += r.recuperado;
+      totalGeneral += r.totalGeneral;
       if (r.totalVenta > 0) promotorasConVenta++;
     });
 
@@ -276,6 +431,9 @@ export function AguinaldosClientPage({
       promotorasConVenta,
       totalPromotoras: filteredRows.length,
       promedioAguinaldo,
+      falla,
+      recuperado,
+      totalGeneral,
     };
   }, [filteredRows]);
 
@@ -311,7 +469,10 @@ export function AguinaldosClientPage({
       'Préstamos Colocados',
       'Venta Total Colocada ($)',
       'Valor x Cada $1,000 ($)',
-      'Aguinaldo Calculado ($)'
+      'Aguinaldo Calculado ($)',
+      'Falla ($)',
+      'Recuperados ($)',
+      'Total General ($)'
     ];
 
     const dataLines = filteredRows.map((r, idx) => [
@@ -322,7 +483,10 @@ export function AguinaldosClientPage({
       r.loansCount,
       r.totalVenta,
       `$${r.ratePerThousand.toFixed(2)}`,
-      r.aguinaldo
+      r.aguinaldo,
+      r.falla,
+      r.recuperado,
+      r.totalGeneral
     ].join(','));
 
     // Totals line
@@ -334,7 +498,10 @@ export function AguinaldosClientPage({
       totals.prestamos,
       totals.venta,
       `"$${globalRatePerThousand.toFixed(2)} base x $1,000"`,
-      totals.aguinaldo
+      totals.aguinaldo,
+      totals.falla,
+      totals.recuperado,
+      totals.totalGeneral
     ].join(',');
 
     const csvContent = '\uFEFF' + [headers.join(','), ...dataLines, totalsLine].join('\n');
@@ -391,7 +558,7 @@ export function AguinaldosClientPage({
 
       // Table data
       const tableHeaders = [
-        ['#', 'Plaza', 'Grupo / Promotora', 'Localidad', 'Préstamos', 'Venta Colocada', '$ x Cada Mil', 'Monto Aguinaldo']
+        ['#', 'Plaza', 'Grupo / Promotora', 'Localidad', 'Prést.', 'Venta Colocada', '$ x Mil', 'Aguinaldo', 'Falla (-)', 'Recuperados (+)', 'Total General']
       ];
 
       const tableData = filteredRows.map((r, i) => [
@@ -402,7 +569,10 @@ export function AguinaldosClientPage({
         r.loansCount.toString(),
         formatCurrency(r.totalVenta),
         `$${r.ratePerThousand.toFixed(2)}${r.isCustomRate ? ' *' : ''}`,
-        formatCurrency(r.aguinaldo)
+        formatCurrency(r.aguinaldo),
+        r.falla > 0 ? `-${formatCurrency(r.falla)}` : '$0.00',
+        r.recuperado > 0 ? `+${formatCurrency(r.recuperado)}` : '$0.00',
+        formatCurrency(r.totalGeneral)
       ]);
 
       // Totals row
@@ -414,7 +584,10 @@ export function AguinaldosClientPage({
         totals.prestamos.toString(),
         formatCurrency(totals.venta),
         `$${globalRatePerThousand.toFixed(2)} base`,
-        formatCurrency(totals.aguinaldo)
+        formatCurrency(totals.aguinaldo),
+        `-${formatCurrency(totals.falla)}`,
+        `+${formatCurrency(totals.recuperado)}`,
+        formatCurrency(totals.totalGeneral)
       ]);
 
       doc.autoTable({
@@ -424,8 +597,8 @@ export function AguinaldosClientPage({
         theme: 'plain',
         margin: { left: marginX, right: marginX, bottom: 45 },
         styles: {
-          fontSize: 7.5,
-          cellPadding: 4,
+          fontSize: 7,
+          cellPadding: 3.5,
           textColor: [15, 23, 42],
           font: 'helvetica'
         },
@@ -434,17 +607,20 @@ export function AguinaldosClientPage({
           textColor: [255, 255, 255],
           fontStyle: 'bold',
           halign: 'left',
-          fontSize: 8
+          fontSize: 7.5
         },
         columnStyles: {
-          0: { cellWidth: 24, halign: 'center' },
-          1: { cellWidth: 85 },
-          2: { cellWidth: 160, fontStyle: 'bold' },
-          3: { cellWidth: 120 },
-          4: { cellWidth: 60, halign: 'center' },
-          5: { cellWidth: 95, halign: 'right', fontStyle: 'bold' },
-          6: { cellWidth: 65, halign: 'center' },
-          7: { cellWidth: 95, halign: 'right', fontStyle: 'bold' }
+          0: { cellWidth: 20, halign: 'center' },
+          1: { cellWidth: 65 },
+          2: { cellWidth: 125, fontStyle: 'bold' },
+          3: { cellWidth: 85 },
+          4: { cellWidth: 35, halign: 'center' },
+          5: { cellWidth: 72, halign: 'right', fontStyle: 'bold' },
+          6: { cellWidth: 46, halign: 'center' },
+          7: { cellWidth: 70, halign: 'right', fontStyle: 'bold' },
+          8: { cellWidth: 65, halign: 'right', textColor: [190, 18, 60] },
+          9: { cellWidth: 65, halign: 'right' },
+          10: { cellWidth: 80, halign: 'right', fontStyle: 'bold' }
         },
         alternateRowStyles: {
           fillColor: [248, 250, 252]
@@ -727,6 +903,20 @@ export function AguinaldosClientPage({
         <div className="overflow-x-auto">
           <Table className="text-xs">
             <TableHeader className="bg-slate-100/90 dark:bg-zinc-900 sticky top-0 z-10 border-b border-slate-200 dark:border-zinc-800">
+              {/* Row 1: Section Dividers */}
+              <TableRow className="border-b border-slate-200 dark:border-zinc-800 bg-slate-50/80 dark:bg-zinc-900/80 hover:bg-transparent">
+                <TableHead colSpan={8} className="py-1.5 px-3 text-left font-black text-[11px] uppercase tracking-wider text-slate-800 dark:text-zinc-200 border-r-2 border-slate-300 dark:border-zinc-700 bg-indigo-50/40 dark:bg-indigo-950/20">
+                  Venta y Aguinaldos
+                </TableHead>
+                <TableHead colSpan={3} className="py-1.5 px-3 text-left font-black text-[11px] uppercase tracking-wider text-slate-800 dark:text-zinc-200 border-r-2 border-slate-300 dark:border-zinc-700 bg-slate-100/70 dark:bg-zinc-800/60">
+                  Calculo para bonos
+                </TableHead>
+                <TableHead className="py-1.5 px-2 text-center font-bold text-[10px] uppercase text-slate-400 hover:bg-transparent">
+                  Acción
+                </TableHead>
+              </TableRow>
+
+              {/* Row 2: Column Headers */}
               <TableRow className="hover:bg-transparent">
                 <TableHead className="w-10 py-2.5 px-2 text-center text-[11px] font-bold text-slate-700 dark:text-zinc-300">
                   #
@@ -790,13 +980,53 @@ export function AguinaldosClientPage({
                     if (sortBy === 'aguinaldo') setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
                     else { setSortBy('aguinaldo'); setSortOrder('desc'); }
                   }}
-                  className="py-2.5 px-2 text-right text-[11px] font-bold text-slate-700 dark:text-zinc-300 cursor-pointer select-none"
+                  className="py-2.5 px-2 text-right text-[11px] font-bold text-slate-700 dark:text-zinc-300 cursor-pointer select-none border-r-2 border-slate-300 dark:border-zinc-700"
                 >
                   <div className="flex items-center justify-end gap-1">
                     Aguinaldo Calculado
                     <ArrowUpDown className="w-3 h-3 text-slate-400" />
                   </div>
                 </TableHead>
+
+                {/* Right block: Falla, Recuperados, Total General */}
+                <TableHead 
+                  onClick={() => {
+                    if (sortBy === 'falla') setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
+                    else { setSortBy('falla'); setSortOrder('desc'); }
+                  }}
+                  className="py-2.5 px-2 text-right text-[11px] font-bold text-rose-700 dark:text-rose-400 cursor-pointer select-none bg-rose-50/20 dark:bg-rose-950/10"
+                >
+                  <div className="flex items-center justify-end gap-1">
+                    Falla (-)
+                    <ArrowUpDown className="w-3 h-3 text-rose-400" />
+                  </div>
+                </TableHead>
+                <TableHead 
+                  onClick={() => {
+                    if (sortBy === 'recuperado') setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
+                    else { setSortBy('recuperado'); setSortOrder('desc'); }
+                  }}
+                  className="py-2.5 px-2 text-right text-[11px] font-bold text-slate-700 dark:text-zinc-300 cursor-pointer select-none"
+                >
+                  <div className="flex items-center justify-end gap-1">
+                    Recuperados (+)
+                    <ArrowUpDown className="w-3 h-3 text-slate-400" />
+                  </div>
+                </TableHead>
+                <TableHead 
+                  onClick={() => {
+                    if (sortBy === 'totalGeneral') setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
+                    else { setSortBy('totalGeneral'); setSortOrder('desc'); }
+                  }}
+                  className="py-2.5 px-2 text-right text-[11px] font-black text-slate-900 dark:text-white cursor-pointer select-none border-r-2 border-slate-300 dark:border-zinc-700 bg-slate-100/60 dark:bg-zinc-800/40"
+                  title="Total General = Venta Colocada - Falla + Recuperados"
+                >
+                  <div className="flex items-center justify-end gap-1">
+                    Total General (=)
+                    <ArrowUpDown className="w-3 h-3 text-slate-400" />
+                  </div>
+                </TableHead>
+
                 <TableHead className="py-2.5 px-2 text-center text-[11px] font-bold text-slate-700 dark:text-zinc-300 w-16">
                   Detalle
                 </TableHead>
@@ -805,7 +1035,7 @@ export function AguinaldosClientPage({
             <TableBody>
               {filteredRows.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={9} className="py-8 text-center text-slate-500">
+                  <TableCell colSpan={12} className="py-8 text-center text-slate-500">
                     No se encontraron grupos con los filtros seleccionados.
                   </TableCell>
                 </TableRow>
@@ -877,18 +1107,43 @@ export function AguinaldosClientPage({
                       </div>
                     </TableCell>
 
-                    <TableCell className="py-2 px-2 text-right font-black tabular-nums text-slate-900 dark:text-zinc-100">
+                    <TableCell className="py-2 px-2 text-right font-black tabular-nums text-slate-900 dark:text-zinc-100 border-r-2 border-slate-300 dark:border-zinc-700">
                       {row.aguinaldo > 0 ? formatCurrency(row.aguinaldo) : '$0.00'}
+                    </TableCell>
+
+                    {/* Right block: Falla, Recuperado, Total General */}
+                    <TableCell className="py-2 px-2 text-right font-bold tabular-nums text-rose-600 dark:text-rose-400 bg-rose-50/20 dark:bg-rose-950/10">
+                      {row.falla > 0 ? `-${formatCurrency(row.falla)}` : '$0.00'}
+                    </TableCell>
+
+                    <TableCell className="py-2 px-2 text-right font-bold tabular-nums text-slate-900 dark:text-zinc-100">
+                      {row.recuperado > 0 ? `+${formatCurrency(row.recuperado)}` : '$0.00'}
+                    </TableCell>
+
+                    <TableCell className={cn(
+                      "py-2 px-2 text-right font-black tabular-nums border-r-2 border-slate-300 dark:border-zinc-700 bg-slate-100/40 dark:bg-zinc-900/40",
+                      row.totalGeneral >= 0 ? "text-slate-900 dark:text-zinc-100" : "text-rose-600 dark:text-rose-400"
+                    )}>
+                      {formatCurrency(row.totalGeneral)}
                     </TableCell>
 
                     <TableCell className="py-2 px-2 text-center">
                       <Button
                         size="icon"
                         variant="ghost"
-                        onClick={() => setDetailRow(row)}
-                        disabled={row.loansCount === 0}
+                        onClick={() => {
+                          setDetailRow(row);
+                          setDetailTab(
+                            row.loansCount > 0 
+                              ? 'loans' 
+                              : (row.fallaPayments?.length || 0) > 0 
+                                ? 'fallas' 
+                                : 'recuperados'
+                          );
+                        }}
+                        disabled={row.loansCount === 0 && row.recuperado === 0 && row.falla === 0}
                         className="h-7 w-7 text-slate-500 hover:text-indigo-900 dark:hover:text-indigo-300"
-                        title="Ver auditoría de créditos que integran la venta"
+                        title="Ver auditoría de colocación, fallas y recuperados"
                       >
                         <Eye className="w-3.5 h-3.5" />
                       </Button>
@@ -918,8 +1173,17 @@ export function AguinaldosClientPage({
                   <TableCell className="py-2 px-2 text-center text-slate-600 dark:text-zinc-400 font-normal text-[11px]">
                     ${globalRatePerThousand.toFixed(2)} base x $1,000
                   </TableCell>
-                  <TableCell className="py-2 px-2 text-right tabular-nums text-slate-900 dark:text-white font-black">
+                  <TableCell className="py-2 px-2 text-right tabular-nums text-slate-900 dark:text-white font-black border-r-2 border-slate-400 dark:border-zinc-600">
                     {formatCurrency(totals.aguinaldo)}
+                  </TableCell>
+                  <TableCell className="py-2 px-2 text-right tabular-nums font-black text-rose-700 dark:text-rose-400 bg-rose-100/40 dark:bg-rose-950/30">
+                    -{formatCurrency(totals.falla)}
+                  </TableCell>
+                  <TableCell className="py-2 px-2 text-right tabular-nums font-black text-slate-900 dark:text-white">
+                    +{formatCurrency(totals.recuperado)}
+                  </TableCell>
+                  <TableCell className="py-2 px-2 text-right tabular-nums font-black text-slate-900 dark:text-white border-r-2 border-slate-400 dark:border-zinc-600 bg-slate-300/40 dark:bg-zinc-700/40">
+                    {formatCurrency(totals.totalGeneral)}
                   </TableCell>
                   <TableCell className="py-2 px-2 text-center">
                     —
@@ -953,65 +1217,251 @@ export function AguinaldosClientPage({
 
           {/* Quick Metrics */}
           {detailRow && (
-            <div className="grid grid-cols-3 gap-2 my-2 text-center text-xs">
-              <div className="p-2.5 bg-slate-50 dark:bg-zinc-900 rounded border">
-                <span className="text-slate-500 text-[10px] uppercase font-bold block">Venta Total Acumulada</span>
-                <span className="font-black text-sm text-slate-900 dark:text-zinc-100">{formatCurrency(detailRow.totalVenta)}</span>
-              </div>
-              <div className="p-2.5 bg-slate-50 dark:bg-zinc-900 rounded border">
-                <span className="text-slate-500 text-[10px] uppercase font-bold block">Préstamos Otorgados</span>
-                <span className="font-black text-sm text-indigo-900 dark:text-indigo-300">{detailRow.loansCount} créditos</span>
-              </div>
-              <div className="p-2.5 bg-slate-50 dark:bg-zinc-900 rounded border">
-                <span className="text-slate-500 text-[10px] uppercase font-bold block">Aguinaldo Calculado</span>
-                <span className="font-black text-sm text-slate-900 dark:text-zinc-100">{formatCurrency(detailRow.aguinaldo)}</span>
+            <div className="space-y-2 my-2">
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-center text-xs">
+                <div className="p-2.5 bg-slate-50 dark:bg-zinc-900 rounded border">
+                  <span className="text-slate-500 text-[10px] uppercase font-bold block">Venta Colocada</span>
+                  <span className="font-black text-sm text-slate-900 dark:text-zinc-100">{formatCurrency(detailRow.totalVenta)}</span>
+                  <span className="text-[10px] text-slate-400 block">{detailRow.loansCount} créditos</span>
+                </div>
+                <div className="p-2.5 bg-slate-50 dark:bg-zinc-900 rounded border">
+                  <span className="text-slate-500 text-[10px] uppercase font-bold block">Aguinaldo</span>
+                  <span className="font-black text-sm text-slate-900 dark:text-zinc-100">{formatCurrency(detailRow.aguinaldo)}</span>
+                  <span className="text-[10px] text-slate-400 block">${detailRow.ratePerThousand.toFixed(2)} x $1,000</span>
+                </div>
+                <div className="p-2.5 bg-rose-50/50 dark:bg-rose-950/20 rounded border border-rose-200 dark:border-rose-900">
+                  <span className="text-rose-600 dark:text-rose-400 text-[10px] uppercase font-bold block">Falla (-)</span>
+                  <span className="font-black text-sm text-rose-700 dark:text-rose-400">-{formatCurrency(detailRow.falla)}</span>
+                  <span className="text-[10px] text-rose-500/80 block">Acumulada</span>
+                </div>
+                <div className="p-2.5 bg-slate-50 dark:bg-zinc-900 rounded border">
+                  <span className="text-slate-500 text-[10px] uppercase font-bold block">Recuperados (+)</span>
+                  <span className="font-black text-sm text-slate-900 dark:text-zinc-100">+{formatCurrency(detailRow.recuperado)}</span>
+                  <span className="text-[10px] text-slate-400 block">Cobranza recuperada</span>
+                </div>
+                <div className="p-2.5 bg-indigo-50/50 dark:bg-indigo-950/20 rounded border border-indigo-200 dark:border-indigo-900 col-span-2 sm:col-span-1">
+                  <span className="text-indigo-900 dark:text-indigo-300 text-[10px] uppercase font-bold block">Total General (=)</span>
+                  <span className="font-black text-sm text-indigo-950 dark:text-white">{formatCurrency(detailRow.totalGeneral)}</span>
+                  <span className="text-[10px] text-indigo-600 dark:text-indigo-400 block font-semibold">Venta - Falla + Recup.</span>
+                </div>
               </div>
             </div>
           )}
 
-          {/* Loans List */}
-          <div className="border rounded-md overflow-hidden mt-3">
-            <Table className="text-xs">
-              <TableHeader className="bg-slate-100 dark:bg-zinc-900">
-                <TableRow>
-                  <TableHead className="py-2 px-2 text-slate-700 dark:text-zinc-300 font-bold">Fecha</TableHead>
-                  <TableHead className="py-2 px-2 text-slate-700 dark:text-zinc-300 font-bold">Cliente</TableHead>
-                  <TableHead className="py-2 px-2 text-slate-700 dark:text-zinc-300 font-bold">Plan</TableHead>
-                  <TableHead className="py-2 px-2 text-right text-slate-700 dark:text-zinc-300 font-bold">Monto</TableHead>
-                  <TableHead className="py-2 px-2 text-center text-slate-700 dark:text-zinc-300 font-bold">Estado</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {detailRow?.loans.map(loan => {
-                  const client = clientMap.get(loan.clientId);
-                  const plan = planMap.get(loan.loanPlanId);
-                  const dateStr = getLoanDateStr(loan.startDate);
+          {/* Tabs for Colocación vs Fallas vs Recuperados */}
+          <div className="flex items-center gap-2 border-b border-slate-200 dark:border-zinc-800 pb-2 mt-4 flex-wrap">
+            <button
+              type="button"
+              onClick={() => setDetailTab('loans')}
+              className={cn(
+                "text-xs font-bold px-3 py-1.5 rounded-md transition-all flex items-center gap-1.5",
+                detailTab === 'loans'
+                  ? "bg-indigo-900 text-white shadow-sm"
+                  : "text-slate-600 hover:bg-slate-100 dark:text-zinc-400 dark:hover:bg-zinc-800"
+              )}
+            >
+              <span>Préstamos Colocados</span>
+              <Badge variant="outline" className={cn("text-[10px] px-1 py-0", detailTab === 'loans' ? "border-white/40 text-white bg-indigo-800" : "border-slate-300 text-slate-600")}>
+                {detailRow?.loansCount || 0}
+              </Badge>
+            </button>
 
-                  return (
-                    <TableRow key={loan.id} className="hover:bg-slate-50 dark:hover:bg-zinc-900">
-                      <TableCell className="py-1.5 px-2 font-mono text-[11px] text-slate-600 dark:text-zinc-400">
-                        {dateStr}
-                      </TableCell>
-                      <TableCell className="py-1.5 px-2 font-bold text-slate-900 dark:text-zinc-100">
-                        {client?.name || 'Cliente sin registrar'}
-                      </TableCell>
-                      <TableCell className="py-1.5 px-2 text-slate-600 dark:text-zinc-400">
-                        {plan?.name || (plan?.termInWeeks ? `${plan.termInWeeks} semanas` : 'Crédito')}
-                      </TableCell>
-                      <TableCell className="py-1.5 px-2 text-right font-black tabular-nums text-slate-900 dark:text-zinc-100">
-                        {formatCurrency(loan.amount)}
-                      </TableCell>
-                      <TableCell className="py-1.5 px-2 text-center">
-                        <Badge variant="outline" className="text-[10px] px-1 py-0 border-slate-300">
-                          {loan.status}
-                        </Badge>
+            <button
+              type="button"
+              onClick={() => setDetailTab('fallas')}
+              className={cn(
+                "text-xs font-bold px-3 py-1.5 rounded-md transition-all flex items-center gap-1.5",
+                detailTab === 'fallas'
+                  ? "bg-rose-700 text-white shadow-sm"
+                  : "text-slate-600 hover:bg-slate-100 dark:text-zinc-400 dark:hover:bg-zinc-800"
+              )}
+            >
+              <span>Fallas Registradas</span>
+              <Badge variant="outline" className={cn("text-[10px] px-1 py-0", detailTab === 'fallas' ? "border-white/40 text-white bg-rose-800" : "border-rose-300 text-rose-700")}>
+                {detailRow?.fallaPayments?.length || 0} (-{detailRow && formatCurrency(detailRow.falla)})
+              </Badge>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setDetailTab('recuperados')}
+              className={cn(
+                "text-xs font-bold px-3 py-1.5 rounded-md transition-all flex items-center gap-1.5",
+                detailTab === 'recuperados'
+                  ? "bg-slate-800 text-white shadow-sm"
+                  : "text-slate-600 hover:bg-slate-100 dark:text-zinc-400 dark:hover:bg-zinc-800"
+              )}
+            >
+              <span>Abonos Recuperados</span>
+              <Badge variant="outline" className={cn("text-[10px] px-1 py-0", detailTab === 'recuperados' ? "border-white/40 text-white bg-slate-950" : "border-slate-300 text-slate-700")}>
+                {detailRow?.recoveredPayments?.length || 0} (+{detailRow && formatCurrency(detailRow.recuperado)})
+              </Badge>
+            </button>
+          </div>
+
+          {/* Tab 1: Placed Loans */}
+          {detailTab === 'loans' && (
+            <div className="border rounded-md overflow-hidden mt-3">
+              <Table className="text-xs">
+                <TableHeader className="bg-slate-100 dark:bg-zinc-900">
+                  <TableRow>
+                    <TableHead className="py-2 px-2 text-slate-700 dark:text-zinc-300 font-bold">Fecha</TableHead>
+                    <TableHead className="py-2 px-2 text-slate-700 dark:text-zinc-300 font-bold">Cliente</TableHead>
+                    <TableHead className="py-2 px-2 text-slate-700 dark:text-zinc-300 font-bold">Plan</TableHead>
+                    <TableHead className="py-2 px-2 text-right text-slate-700 dark:text-zinc-300 font-bold">Monto</TableHead>
+                    <TableHead className="py-2 px-2 text-center text-slate-700 dark:text-zinc-300 font-bold">Estado</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {!detailRow?.loans || detailRow.loans.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={5} className="py-8 text-center text-slate-500">
+                        No se otorgaron préstamos para este grupo en el período seleccionado.
                       </TableCell>
                     </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
-          </div>
+                  ) : (
+                    detailRow.loans.map(loan => {
+                      const client = clientMap.get(loan.clientId);
+                      const plan = planMap.get(loan.loanPlanId);
+                      const dateStr = getLoanDateStr(loan.startDate);
+
+                      return (
+                        <TableRow key={loan.id} className="hover:bg-slate-50 dark:hover:bg-zinc-900">
+                          <TableCell className="py-1.5 px-2 font-mono text-[11px] text-slate-600 dark:text-zinc-400">
+                            {dateStr}
+                          </TableCell>
+                          <TableCell className="py-1.5 px-2 font-bold text-slate-900 dark:text-zinc-100">
+                            {client?.name || 'Cliente sin registrar'}
+                          </TableCell>
+                          <TableCell className="py-1.5 px-2 text-slate-600 dark:text-zinc-400">
+                            {plan?.name || (plan?.termInWeeks ? `${plan.termInWeeks} semanas` : 'Crédito')}
+                          </TableCell>
+                          <TableCell className="py-1.5 px-2 text-right font-black tabular-nums text-slate-900 dark:text-zinc-100">
+                            {formatCurrency(loan.amount)}
+                          </TableCell>
+                          <TableCell className="py-1.5 px-2 text-center">
+                            <Badge variant="outline" className="text-[10px] px-1 py-0 border-slate-300">
+                              {loan.status}
+                            </Badge>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+
+          {/* Tab 2: Registered Fallas */}
+          {detailTab === 'fallas' && (
+            <div className="border rounded-md overflow-hidden mt-3">
+              <Table className="text-xs">
+                <TableHeader className="bg-rose-50/70 dark:bg-rose-950/20">
+                  <TableRow>
+                    <TableHead className="py-2 px-2 text-rose-950 dark:text-rose-200 font-bold">Fecha</TableHead>
+                    <TableHead className="py-2 px-2 text-rose-950 dark:text-rose-200 font-bold">Cliente</TableHead>
+                    <TableHead className="py-2 px-2 text-center text-rose-950 dark:text-rose-200 font-bold">Semana #</TableHead>
+                    <TableHead className="py-2 px-2 text-right text-rose-950 dark:text-rose-200 font-bold">Cuota Semanal</TableHead>
+                    <TableHead className="py-2 px-2 text-right text-rose-950 dark:text-rose-200 font-bold">Pagado</TableHead>
+                    <TableHead className="py-2 px-2 text-right text-rose-950 dark:text-rose-200 font-bold">Falla (-)</TableHead>
+                    <TableHead className="py-2 px-2 text-center text-rose-950 dark:text-rose-200 font-bold">Tipo</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {!detailRow?.fallaPayments || detailRow.fallaPayments.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={7} className="py-8 text-center text-slate-500">
+                        No se registraron fallas para este grupo en el período seleccionado.
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    detailRow.fallaPayments.map((f, idx) => (
+                      <TableRow key={`${f.loanId}_${f.weekNumber}_${idx}`} className="hover:bg-slate-50 dark:hover:bg-zinc-900">
+                        <TableCell className="py-1.5 px-2 font-mono text-[11px] text-slate-600 dark:text-zinc-400">
+                          {f.dateStr}
+                        </TableCell>
+                        <TableCell className="py-1.5 px-2 font-bold text-slate-900 dark:text-zinc-100">
+                          {f.clientName}
+                        </TableCell>
+                        <TableCell className="py-1.5 px-2 text-center text-slate-600 dark:text-zinc-400 font-semibold">
+                          Semana {f.weekNumber}
+                        </TableCell>
+                        <TableCell className="py-1.5 px-2 text-right tabular-nums text-slate-600 dark:text-zinc-400">
+                          {formatCurrency(f.weeklyPayment)}
+                        </TableCell>
+                        <TableCell className="py-1.5 px-2 text-right tabular-nums text-slate-600 dark:text-zinc-400">
+                          {f.amountPaid > 0 ? formatCurrency(f.amountPaid) : '$0.00'}
+                        </TableCell>
+                        <TableCell className="py-1.5 px-2 text-right font-black tabular-nums text-rose-700 dark:text-rose-400">
+                          -{formatCurrency(f.fallaAmount)}
+                        </TableCell>
+                        <TableCell className="py-1.5 px-2 text-center">
+                          {f.amountPaid === 0 ? (
+                            <Badge className="bg-rose-50 dark:bg-rose-950 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800 text-[10px] px-1.5 py-0 font-bold">
+                              Falla Total ($0)
+                            </Badge>
+                          ) : (
+                            <Badge className="bg-amber-50 dark:bg-amber-950 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800 text-[10px] px-1.5 py-0 font-bold">
+                              Parcial
+                            </Badge>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+
+          {/* Tab 3: Recovered Payments */}
+          {detailTab === 'recuperados' && (
+            <div className="border rounded-md overflow-hidden mt-3">
+              <Table className="text-xs">
+                <TableHeader className="bg-slate-100 dark:bg-zinc-900">
+                  <TableRow>
+                    <TableHead className="py-2 px-2 text-slate-700 dark:text-zinc-300 font-bold">Fecha Abono</TableHead>
+                    <TableHead className="py-2 px-2 text-slate-700 dark:text-zinc-300 font-bold">Cliente</TableHead>
+                    <TableHead className="py-2 px-2 text-center text-slate-700 dark:text-zinc-300 font-bold">Semana #</TableHead>
+                    <TableHead className="py-2 px-2 text-right text-slate-700 dark:text-zinc-300 font-bold">Monto Recuperado</TableHead>
+                    <TableHead className="py-2 px-2 text-center text-slate-700 dark:text-zinc-300 font-bold">Tipo</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {!detailRow?.recoveredPayments || detailRow.recoveredPayments.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={5} className="py-8 text-center text-slate-500">
+                        No se registraron abonos marcados como recuperados en este período.
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    detailRow.recoveredPayments.map((rec, idx) => (
+                      <TableRow key={`${rec.loanId}_${rec.weekNumber}_${idx}`} className="hover:bg-slate-50 dark:hover:bg-zinc-900">
+                        <TableCell className="py-1.5 px-2 font-mono text-[11px] text-slate-600 dark:text-zinc-400">
+                          {rec.dateStr}
+                        </TableCell>
+                        <TableCell className="py-1.5 px-2 font-bold text-slate-900 dark:text-zinc-100">
+                          {rec.clientName}
+                        </TableCell>
+                        <TableCell className="py-1.5 px-2 text-center text-slate-600 dark:text-zinc-400 font-semibold">
+                          Semana {rec.weekNumber}
+                        </TableCell>
+                        <TableCell className="py-1.5 px-2 text-right font-black tabular-nums text-slate-900 dark:text-zinc-100">
+                          +{formatCurrency(rec.amount)}
+                        </TableCell>
+                        <TableCell className="py-1.5 px-2 text-center">
+                          <Badge variant="outline" className="border-slate-300 dark:border-zinc-700 text-slate-800 dark:text-zinc-200 text-[10px] px-1.5 py-0 font-bold">
+                            Recuperado
+                          </Badge>
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </div>

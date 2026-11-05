@@ -1,5 +1,8 @@
 import { getLoans, getPromotoras, getLocalidades, getPlazas, getClients, getLoanPlans, getAppConfig } from '@/lib/firestore-data';
+import { db } from '@/lib/firebase';
+import { collection, getDocs } from 'firebase/firestore';
 import { AguinaldosClientPage } from '@/components/aguinaldos-client-page';
+import type { PromotoraSettlement } from '@/lib/types';
 
 export const metadata = {
   title: 'Cálculo de Aguinaldos | CrediControl',
@@ -7,7 +10,7 @@ export const metadata = {
 };
 
 export default async function AguinaldosPage() {
-  const [loans, promotoras, localidades, plazas, clients, loanPlans, appConfig] = await Promise.all([
+  const [loans, promotoras, localidades, plazas, clients, loanPlans, appConfig, settlementsSnap] = await Promise.all([
     getLoans().catch(() => []),
     getPromotoras().catch(() => []),
     getLocalidades().catch(() => []),
@@ -15,7 +18,12 @@ export default async function AguinaldosPage() {
     getClients().catch(() => []),
     getLoanPlans().catch(() => []),
     getAppConfig().catch(() => null),
+    getDocs(collection(db, 'promotoraSettlements')).catch(() => null),
   ]);
+
+  const settlements: PromotoraSettlement[] = settlementsSnap
+    ? settlementsSnap.docs.map(d => ({ id: d.id, ...d.data() } as PromotoraSettlement))
+    : [];
 
   return (
     <AguinaldosClientPage
@@ -26,6 +34,7 @@ export default async function AguinaldosPage() {
       initialClients={clients}
       initialLoanPlans={loanPlans}
       initialConfig={appConfig}
+      initialSettlements={settlements}
     />
   );
 }
