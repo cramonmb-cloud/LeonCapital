@@ -9,12 +9,15 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { useToast } from '@/hooks/use-toast';
-import { useRealtimeData } from '@/hooks/use-realtime-data';
 import { useAuth } from '@/hooks/use-auth';
+import { db } from '@/lib/firebase';
+import { collection, getDocs } from 'firebase/firestore';
+import { getLoans } from '@/lib/firestore-data';
 import { 
   Gift, Calendar, Building, Search, Download, 
   Printer, Eye, DollarSign, TrendingUp, Sparkles,
-  RotateCcw, ArrowUpDown, Filter, Landmark, Users
+  RotateCcw, ArrowUpDown, Filter, Landmark, Users,
+  RefreshCw, CheckCircle2, AlertTriangle
 } from 'lucide-react';
 import { cn, parseLocalDate, getMexicoNow } from '@/lib/utils';
 import type { Client, LoanPlan, Loan, Plaza, Localidad, Promotora, AppConfig, PromotoraSettlement } from '@/lib/types';
@@ -73,8 +76,6 @@ interface PromotoraAguinaldoRow {
   recuperado: number;
   totalGeneral: number;
   loans: Loan[];
-  recoveredPayments: RecoveredPaymentDetail[];
-  fallaPayments: FallaPaymentDetail[];
 }
 
 export function AguinaldosClientPage({
@@ -90,24 +91,44 @@ export function AguinaldosClientPage({
   const { toast } = useToast();
   const { appUser } = useAuth();
 
-  // Realtime subscriptions
-  const { data: realtime } = useRealtimeData({
-    loans: initialLoans,
-    clients: initialClients,
-    loanPlans: initialLoanPlans,
-    plazas: initialPlazas,
-    localidades: initialLocalidades,
-    promotoras: initialPromotoras,
-    promotoraSettlements: initialSettlements,
-  });
+  // Instant local state from SSR props (zero background WebSocket lag)
+  const [loans, setLoans] = useState<Loan[]>(initialLoans);
+  const [promotoras] = useState<Promotora[]>(initialPromotoras);
+  const [localidades] = useState<Localidad[]>(initialLocalidades);
+  const [plazas] = useState<Plaza[]>(initialPlazas);
+  const [clients] = useState<Client[]>(initialClients);
+  const [loanPlans] = useState<LoanPlan[]>(initialLoanPlans);
+  const [settlements, setSettlements] = useState<PromotoraSettlement[]>(initialSettlements);
+  const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
 
-  const loans = realtime?.loans?.length ? realtime.loans : initialLoans;
-  const promotoras = realtime?.promotoras?.length ? realtime.promotoras : initialPromotoras;
-  const localidades = realtime?.localidades?.length ? realtime.localidades : initialLocalidades;
-  const plazas = realtime?.plazas?.length ? realtime.plazas : initialPlazas;
-  const clients = realtime?.clients?.length ? realtime.clients : initialClients;
-  const loanPlans = realtime?.loanPlans?.length ? realtime.loanPlans : initialLoanPlans;
-  const settlements = realtime?.promotoraSettlements?.length ? realtime.promotoraSettlements : initialSettlements;
+  // Manual refresh handler
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    try {
+      const [newLoans, settlementsSnap] = await Promise.all([
+        getLoans().catch(() => initialLoans),
+        getDocs(collection(db, 'promotoraSettlements')).catch(() => null),
+      ]);
+      const newSettlements = settlementsSnap
+        ? settlementsSnap.docs.map(d => ({ id: d.id, ...d.data() } as PromotoraSettlement))
+        : initialSettlements;
+
+      setLoans(newLoans);
+      setSettlements(newSettlements);
+      toast({
+        title: "Datos actualizados",
+        description: "Se han recargado los últimos préstamos y cierres con éxito.",
+      });
+    } catch (err) {
+      toast({
+        title: "Error al actualizar",
+        description: "No se pudieron recargar los datos.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
 
   // Initialize dates: Year start to today
   const today = getMexicoNow();
@@ -184,166 +205,126 @@ export function AguinaldosClientPage({
     setEndDate(end);
   };
 
-  // Helper to extract loan start date string
-  const getLoanDateStr = (dateInput: any): string => {
-    if (!dateInput) return '';
-    try {
-      const parsed = parseLocalDate(dateInput);
-      return parsed.toISOString().split('T')[0];
-    } catch {
-      return '';
-    }
-  };
-
-  // Group loans and settlements by promotora within the selected date range
+  // Ultra-fast single-pass O(N) calculation of table totals
   const rows: PromotoraAguinaldoRow[] = useMemo(() => {
     if (!startDate || !endDate) return [];
 
-    // Filter all loans placed within the date range (for Venta Colocada and Préstamos count)
-    const loansInRange = loans.filter(l => {
-      if (!l.promotoraId) return false;
-      const loanDateStr = getLoanDateStr(l.startDate);
-      return loanDateStr >= startDate && loanDateStr <= endDate;
-    });
+    // Pre-create stats accumulator for all promotoras in O(P)
+    const statsMap = new Map<string, {
+      loansCount: number;
+      totalVenta: number;
+      loanFalla: number;
+      loanRecuperado: number;
+      settlementFalla: number;
+      settlementRecuperado: number;
+      loans: Loan[];
+    }>();
 
-    // Map loans placed in range by promotoraId
-    const loansByPromotora = new Map<string, Loan[]>();
-    loansInRange.forEach(loan => {
+    for (let i = 0; i < promotoras.length; i++) {
+      statsMap.set(promotoras[i].id, {
+        loansCount: 0,
+        totalVenta: 0,
+        loanFalla: 0,
+        loanRecuperado: 0,
+        settlementFalla: 0,
+        settlementRecuperado: 0,
+        loans: [],
+      });
+    }
+
+    // Single fast pass over all loans in O(L + Payments)
+    for (let i = 0; i < loans.length; i++) {
+      const loan = loans[i];
       const pId = loan.promotoraId;
-      if (!pId) return;
-      if (!loansByPromotora.has(pId)) {
-        loansByPromotora.set(pId, []);
+      if (!pId) continue;
+      const stats = statsMap.get(pId);
+      if (!stats) continue;
+
+      const sDate = typeof loan.startDate === 'string' && loan.startDate.length >= 10
+        ? loan.startDate.slice(0, 10)
+        : '';
+
+      // 1. Check if loan was placed in the selected range
+      if (sDate >= startDate && sDate <= endDate) {
+        stats.loansCount++;
+        stats.totalVenta += (Number(loan.amount) || 0);
+        stats.loans.push(loan);
       }
-      loansByPromotora.get(pId)!.push(loan);
-    });
 
-    // Map ALL loans by promotoraId (to audit recovered payments across all active/past loans of the promotora)
-    const allLoansByPromotora = new Map<string, Loan[]>();
-    loans.forEach(loan => {
-      const pId = loan.promotoraId;
-      if (!pId) return;
-      if (!allLoansByPromotora.has(pId)) {
-        allLoansByPromotora.set(pId, []);
+      // 2. Pre-calculate weekly payment for this loan
+      const plan = planMap.get(loan.loanPlanId);
+      const weeklyPayment = plan ? Math.round(((Number(loan.amount) || 0) / 1000) * (plan.weeklyPaymentRate || 0)) : 0;
+
+      // 3. Scan payments for Falla and Recuperados in the range
+      const payments = loan.payments;
+      if (payments && payments.length > 0) {
+        for (let j = 0; j < payments.length; j++) {
+          const p = payments[j];
+          if (p.isReverted) continue;
+
+          let pDate = '';
+          if (typeof p.date === 'string' && p.date.length >= 10) {
+            pDate = p.date.slice(0, 10);
+          } else if (typeof p.registeredWeekDate === 'string' && p.registeredWeekDate.length >= 10) {
+            pDate = p.registeredWeekDate.slice(0, 10);
+          } else {
+            pDate = sDate;
+          }
+
+          if (pDate >= startDate && pDate <= endDate) {
+            if (p.isRecovered || p.paymentType === 'recovered') {
+              stats.loanRecuperado += (Number(p.amount) || 0);
+            } else if (!p.isAdvance && p.paymentType !== 'adelanto_entrante' && p.paymentType !== 'assumed') {
+              const amt = Number(p.amount) || 0;
+              if (amt < weeklyPayment && weeklyPayment > 0) {
+                stats.loanFalla += (weeklyPayment - amt);
+              }
+            }
+          }
+        }
       }
-      allLoansByPromotora.get(pId)!.push(loan);
-    });
+    }
 
-    // Filter settlements within the date range by weekDate
-    const settlementsInRange = settlements.filter(s => {
-      if (!s.promotoraId) return false;
-      const sDate = s.weekDate ? s.weekDate.slice(0, 10) : '';
-      return sDate >= startDate && sDate <= endDate;
-    });
-
-    // Map settlements by promotoraId
-    const settlementsByPromotora = new Map<string, PromotoraSettlement[]>();
-    settlementsInRange.forEach(s => {
+    // Single fast pass over settlements in O(S)
+    for (let i = 0; i < settlements.length; i++) {
+      const s = settlements[i];
       const pId = s.promotoraId;
-      if (!pId) return;
-      if (!settlementsByPromotora.has(pId)) {
-        settlementsByPromotora.set(pId, []);
-      }
-      settlementsByPromotora.get(pId)!.push(s);
-    });
+      if (!pId) continue;
+      const stats = statsMap.get(pId);
+      if (!stats) continue;
 
-    // Generate row for each promotora
-    return promotoras.map(promotora => {
+      const sDate = typeof s.weekDate === 'string' && s.weekDate.length >= 10 ? s.weekDate.slice(0, 10) : '';
+      if (sDate >= startDate && sDate <= endDate) {
+        stats.settlementFalla += (Number(s.falla) || 0);
+        stats.settlementRecuperado += (Number(s.recuperado) || 0);
+      }
+    }
+
+    // Build final table rows in O(P)
+    const result: PromotoraAguinaldoRow[] = new Array(promotoras.length);
+    for (let i = 0; i < promotoras.length; i++) {
+      const promotora = promotoras[i];
       const loc = locMap.get(promotora.localidadId);
       const plaza = loc ? plazaMap.get(loc.plazaId) : undefined;
-      const pLoans = loansByPromotora.get(promotora.id) || [];
-      const allPLoans = allLoansByPromotora.get(promotora.id) || [];
-      const pSettlements = settlementsByPromotora.get(promotora.id) || [];
+      const stats = statsMap.get(promotora.id)!;
 
-      const totalVenta = pLoans.reduce((sum, l) => sum + (Number(l.amount) || 0), 0);
+      const totalVenta = stats.totalVenta;
       const isCustomRate = customRates[promotora.id] !== undefined;
       const ratePerThousand = isCustomRate ? customRates[promotora.id] : globalRatePerThousand;
       const aguinaldo = Math.round((totalVenta / 1000) * ratePerThousand);
 
-      // Audit all payments in the group's loans during the period for both Falla and Recuperados
-      let loanRecuperados = 0;
-      let loanFallas = 0;
-      const recoveredDetails: RecoveredPaymentDetail[] = [];
-      const fallaDetails: FallaPaymentDetail[] = [];
-
-      allPLoans.forEach(loan => {
-        const client = clientMap.get(loan.clientId);
-        const clientName = client?.name || 'Cliente sin registrar';
-        const plan = planMap.get(loan.loanPlanId);
-        const weeklyPayment = plan ? Math.round((loan.amount / 1000) * (plan.weeklyPaymentRate || 0)) : 0;
-
-        (loan.payments || []).forEach(p => {
-          if (p.isReverted) return;
-
-          // Determine date of transaction
-          let pDateStr = '';
-          if (p.date) {
-            try {
-              pDateStr = parseLocalDate(p.date).toISOString().split('T')[0];
-            } catch {}
-          }
-          if (!pDateStr && p.registeredWeekDate) {
-            try {
-              pDateStr = parseLocalDate(p.registeredWeekDate).toISOString().split('T')[0];
-            } catch {}
-          }
-          if (!pDateStr && loan.startDate) {
-            try {
-              pDateStr = parseLocalDate(loan.startDate).toISOString().split('T')[0];
-            } catch {}
-          }
-
-          if (pDateStr >= startDate && pDateStr <= endDate) {
-            // 1. Recuperado
-            if (p.isRecovered || p.paymentType === 'recovered') {
-              const amt = Number(p.amount) || 0;
-              loanRecuperados += amt;
-              recoveredDetails.push({
-                loanId: loan.id,
-                clientId: loan.clientId,
-                clientName,
-                weekNumber: p.weekNumber || 0,
-                dateStr: pDateStr,
-                amount: amt,
-              });
-            }
-            // 2. Falla (no adelantos, no asumidos)
-            else if (!p.isAdvance && p.paymentType !== 'adelanto_entrante' && p.paymentType !== 'assumed') {
-              const amt = Number(p.amount) || 0;
-              if (amt < weeklyPayment && weeklyPayment > 0) {
-                const missing = weeklyPayment - amt;
-                loanFallas += missing;
-                fallaDetails.push({
-                  loanId: loan.id,
-                  clientId: loan.clientId,
-                  clientName,
-                  weekNumber: p.weekNumber || 0,
-                  dateStr: pDateStr,
-                  weeklyPayment,
-                  amountPaid: amt,
-                  fallaAmount: missing,
-                });
-              }
-            }
-          }
-        });
-      });
-
-      const settlementFalla = pSettlements.reduce((sum, s) => sum + (Number(s.falla) || 0), 0);
-      const settlementRecuperado = pSettlements.reduce((sum, s) => sum + (Number(s.recuperado) || 0), 0);
-
-      // Primary is direct loan analysis; if weekly closures have higher or specific recorded closures, we ensure no undercounting
-      const falla = Math.max(loanFallas, settlementFalla);
-      const recuperado = loanRecuperados + settlementRecuperado;
+      const falla = Math.max(stats.loanFalla, stats.settlementFalla);
+      const recuperado = stats.loanRecuperado + stats.settlementRecuperado;
       const totalGeneral = totalVenta - falla + recuperado;
 
-      return {
+      result[i] = {
         promotoraId: promotora.id,
         promotoraName: promotora.name,
         localidadId: promotora.localidadId,
         localidadName: loc?.name || 'Sin Localidad',
         plazaId: plaza?.id || 'SIN_PLAZA',
         plazaName: plaza?.name || 'Sin Plaza',
-        loansCount: pLoans.length,
+        loansCount: stats.loansCount,
         totalVenta,
         ratePerThousand,
         isCustomRate,
@@ -351,12 +332,77 @@ export function AguinaldosClientPage({
         falla,
         recuperado,
         totalGeneral,
-        loans: pLoans,
-        recoveredPayments: recoveredDetails,
-        fallaPayments: fallaDetails,
+        loans: stats.loans,
       };
-    });
-  }, [promotoras, loans, settlements, startDate, endDate, globalRatePerThousand, customRates, locMap, plazaMap, clientMap, planMap]);
+    }
+
+    return result;
+  }, [promotoras, loans, settlements, startDate, endDate, globalRatePerThousand, customRates, locMap, plazaMap, planMap]);
+
+  // Lazy detail computation: Only runs when the modal is opened for a specific promotora
+  const { detailFallaPayments, detailRecoveredPayments } = useMemo(() => {
+    if (!detailRow) return { detailFallaPayments: [], detailRecoveredPayments: [] };
+
+    const pId = detailRow.promotoraId;
+    const pLoans = loans.filter(l => l.promotoraId === pId);
+    const fallas: FallaPaymentDetail[] = [];
+    const recovered: RecoveredPaymentDetail[] = [];
+
+    for (let i = 0; i < pLoans.length; i++) {
+      const loan = pLoans[i];
+      const client = clientMap.get(loan.clientId);
+      const clientName = client?.name || 'Cliente sin registrar';
+      const plan = planMap.get(loan.loanPlanId);
+      const weeklyPayment = plan ? Math.round(((Number(loan.amount) || 0) / 1000) * (plan.weeklyPaymentRate || 0)) : 0;
+      const sDate = typeof loan.startDate === 'string' && loan.startDate.length >= 10 ? loan.startDate.slice(0, 10) : '';
+
+      const payments = loan.payments;
+      if (!payments || payments.length === 0) continue;
+
+      for (let j = 0; j < payments.length; j++) {
+        const p = payments[j];
+        if (p.isReverted) continue;
+
+        let pDate = '';
+        if (typeof p.date === 'string' && p.date.length >= 10) {
+          pDate = p.date.slice(0, 10);
+        } else if (typeof p.registeredWeekDate === 'string' && p.registeredWeekDate.length >= 10) {
+          pDate = p.registeredWeekDate.slice(0, 10);
+        } else {
+          pDate = sDate;
+        }
+
+        if (pDate >= startDate && pDate <= endDate) {
+          if (p.isRecovered || p.paymentType === 'recovered') {
+            recovered.push({
+              loanId: loan.id,
+              clientId: loan.clientId,
+              clientName,
+              weekNumber: p.weekNumber || 0,
+              dateStr: pDate,
+              amount: Number(p.amount) || 0,
+            });
+          } else if (!p.isAdvance && p.paymentType !== 'adelanto_entrante' && p.paymentType !== 'assumed') {
+            const amt = Number(p.amount) || 0;
+            if (amt < weeklyPayment && weeklyPayment > 0) {
+              fallas.push({
+                loanId: loan.id,
+                clientId: loan.clientId,
+                clientName,
+                weekNumber: p.weekNumber || 0,
+                dateStr: pDate,
+                weeklyPayment,
+                amountPaid: amt,
+                fallaAmount: weeklyPayment - amt,
+              });
+            }
+          }
+        }
+      }
+    }
+
+    return { detailFallaPayments: fallas, detailRecoveredPayments: recovered };
+  }, [detailRow, loans, startDate, endDate, clientMap, planMap]);
 
   // Filter and sort rows
   const filteredRows = useMemo(() => {
@@ -699,8 +745,20 @@ export function AguinaldosClientPage({
               </h1>
             </div>
 
-            {/* Actions: Export PDF, Export CSV */}
+            {/* Actions: Refresh, Export PDF, Export CSV */}
             <div className="flex items-center gap-2 flex-wrap">
+              <Button
+                onClick={handleRefresh}
+                variant="outline"
+                size="sm"
+                disabled={isRefreshing}
+                className="h-9 text-xs border-slate-300 dark:border-zinc-700 text-slate-700 dark:text-zinc-200 hover:bg-slate-100 dark:hover:bg-zinc-800"
+                title="Actualizar datos desde el servidor"
+              >
+                <RefreshCw className={cn("w-3.5 h-3.5 mr-1.5", isRefreshing && "animate-spin text-indigo-600")} />
+                {isRefreshing ? 'Actualizando...' : 'Actualizar'}
+              </Button>
+
               <Button
                 onClick={handleExportCSV}
                 variant="outline"
@@ -1136,7 +1194,7 @@ export function AguinaldosClientPage({
                           setDetailTab(
                             row.loansCount > 0 
                               ? 'loans' 
-                              : (row.fallaPayments?.length || 0) > 0 
+                              : row.falla > 0 
                                 ? 'fallas' 
                                 : 'recuperados'
                           );
@@ -1278,7 +1336,7 @@ export function AguinaldosClientPage({
             >
               <span>Fallas Registradas</span>
               <Badge variant="outline" className={cn("text-[10px] px-1 py-0", detailTab === 'fallas' ? "border-white/40 text-white bg-rose-800" : "border-rose-300 text-rose-700")}>
-                {detailRow?.fallaPayments?.length || 0} (-{detailRow && formatCurrency(detailRow.falla)})
+                {detailFallaPayments.length} (-{detailRow && formatCurrency(detailRow.falla)})
               </Badge>
             </button>
 
@@ -1294,7 +1352,7 @@ export function AguinaldosClientPage({
             >
               <span>Abonos Recuperados</span>
               <Badge variant="outline" className={cn("text-[10px] px-1 py-0", detailTab === 'recuperados' ? "border-white/40 text-white bg-slate-950" : "border-slate-300 text-slate-700")}>
-                {detailRow?.recoveredPayments?.length || 0} (+{detailRow && formatCurrency(detailRow.recuperado)})
+                {detailRecoveredPayments.length} (+{detailRow && formatCurrency(detailRow.recuperado)})
               </Badge>
             </button>
           </div>
@@ -1323,7 +1381,7 @@ export function AguinaldosClientPage({
                     detailRow.loans.map(loan => {
                       const client = clientMap.get(loan.clientId);
                       const plan = planMap.get(loan.loanPlanId);
-                      const dateStr = getLoanDateStr(loan.startDate);
+                      const dateStr = typeof loan.startDate === 'string' && loan.startDate.length >= 10 ? loan.startDate.slice(0, 10) : '';
 
                       return (
                         <TableRow key={loan.id} className="hover:bg-slate-50 dark:hover:bg-zinc-900">
@@ -1369,14 +1427,14 @@ export function AguinaldosClientPage({
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {!detailRow?.fallaPayments || detailRow.fallaPayments.length === 0 ? (
+                  {detailFallaPayments.length === 0 ? (
                     <TableRow>
                       <TableCell colSpan={7} className="py-8 text-center text-slate-500">
                         No se registraron fallas para este grupo en el período seleccionado.
                       </TableCell>
                     </TableRow>
                   ) : (
-                    detailRow.fallaPayments.map((f, idx) => (
+                    detailFallaPayments.map((f, idx) => (
                       <TableRow key={`${f.loanId}_${f.weekNumber}_${idx}`} className="hover:bg-slate-50 dark:hover:bg-zinc-900">
                         <TableCell className="py-1.5 px-2 font-mono text-[11px] text-slate-600 dark:text-zinc-400">
                           {f.dateStr}
@@ -1429,14 +1487,14 @@ export function AguinaldosClientPage({
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {!detailRow?.recoveredPayments || detailRow.recoveredPayments.length === 0 ? (
+                  {detailRecoveredPayments.length === 0 ? (
                     <TableRow>
                       <TableCell colSpan={5} className="py-8 text-center text-slate-500">
                         No se registraron abonos marcados como recuperados en este período.
                       </TableCell>
                     </TableRow>
                   ) : (
-                    detailRow.recoveredPayments.map((rec, idx) => (
+                    detailRecoveredPayments.map((rec, idx) => (
                       <TableRow key={`${rec.loanId}_${rec.weekNumber}_${idx}`} className="hover:bg-slate-50 dark:hover:bg-zinc-900">
                         <TableCell className="py-1.5 px-2 font-mono text-[11px] text-slate-600 dark:text-zinc-400">
                           {rec.dateStr}

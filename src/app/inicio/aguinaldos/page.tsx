@@ -2,7 +2,7 @@ import { getLoans, getPromotoras, getLocalidades, getPlazas, getClients, getLoan
 import { db } from '@/lib/firebase';
 import { collection, getDocs } from 'firebase/firestore';
 import { AguinaldosClientPage } from '@/components/aguinaldos-client-page';
-import type { PromotoraSettlement } from '@/lib/types';
+import type { PromotoraSettlement, Client } from '@/lib/types';
 
 export const metadata = {
   title: 'Cálculo de Aguinaldos | CrediControl',
@@ -25,13 +25,19 @@ export default async function AguinaldosPage() {
     ? settlementsSnap.docs.map(d => ({ id: d.id, ...d.data() } as PromotoraSettlement))
     : [];
 
+  // Lightweight client records (only id and name) to minimize network payload and client memory
+  const lightClients = clients.map(c => ({
+    id: c.id,
+    name: c.name || 'Sin nombre',
+  } as Client));
+
   return (
     <AguinaldosClientPage
       initialLoans={loans}
       initialPromotoras={promotoras}
       initialLocalidades={localidades}
       initialPlazas={plazas}
-      initialClients={clients}
+      initialClients={lightClients}
       initialLoanPlans={loanPlans}
       initialConfig={appConfig}
       initialSettlements={settlements}
