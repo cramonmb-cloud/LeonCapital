@@ -275,6 +275,10 @@ export function ResumenClientPage({
               effectiveTotal = computed.total;
               effectiveDiferencia = computed.diferencia;
             }
+            if (computed.recuperado > 0 && computed.recuperado !== effectiveRecuperado) {
+              effectiveRecuperado = computed.recuperado;
+              effectiveTotal = effectiveEfectivo + effectiveRecuperado;
+            }
             if (effectiveComision === 0 && effectiveVenta > 0) {
               const cPerc = saved.comicionPercent !== undefined && saved.comicionPercent > 0 ? saved.comicionPercent : (computed.comicionPercent ?? 0);
               effectiveComision = Math.round(effectiveVenta * (cPerc / 100));
@@ -537,7 +541,7 @@ export function ResumenClientPage({
     const headers = [
       'Plaza', 'Grupo', 'Localidad', 'Venta', 'Debe Entregar',
       'Falla', '% Falla', 'Efectivo', 'Recuperado', 'Total Cobrado',
-      'Diferencia', 'Comisión', 'Supervisión', 'Adel. Ent.', 'Adel. Sal.', 'Sem. Extra', 'Estado'
+      'Diferencia', 'Adel. Ent.', 'Adel. Sal.', 'Sem. Extra', 'Estado'
     ];
 
     const dataLines = filteredRows.map(r => [
@@ -552,8 +556,6 @@ export function ResumenClientPage({
       r.recuperado,
       r.totalCobrado,
       r.diferencia,
-      r.comision,
-      r.supervision,
       r.adelEnt,
       r.adelSal,
       r.semExt,
@@ -571,8 +573,6 @@ export function ResumenClientPage({
       totals.recuperado,
       totals.totalCobrado,
       totals.diferencia,
-      totals.comision,
-      totals.supervision,
       totals.adelEnt,
       totals.adelSal,
       totals.semExt,
@@ -717,7 +717,7 @@ export function ResumenClientPage({
         {
           label: 'BALANCE NETO',
           val: formatCurrency(balanceNeto),
-          sub: `Dif: ${formatCurrency(totals.diferencia)} | Com: ${formatCurrency(totals.comision)}`
+          sub: `Dif: ${formatCurrency(totals.diferencia)} | Cobrado: ${formatCurrency(totals.totalCobrado)}`
         }
       ];
 
@@ -767,8 +767,6 @@ export function ResumenClientPage({
         'RECUP.',
         'TOTAL COB.',
         'DIFERENCIA',
-        'COMISIÓN',
-        'SUPERV.',
         'ADEL. ENT.',
         'ADEL. SAL.',
         'ESTADO'
@@ -785,8 +783,6 @@ export function ResumenClientPage({
         formatCurrency(r.recuperado),
         formatCurrency(r.totalCobrado),
         formatCurrency(r.diferencia),
-        formatCurrency(r.comision),
-        formatCurrency(r.supervision),
         formatCurrency(r.adelEnt),
         formatCurrency(r.adelSal),
         r.status === 'closed' ? 'CERRADO' : (r.status === 'saved' ? 'GUARDADO' : 'CALC.')
@@ -803,8 +799,6 @@ export function ResumenClientPage({
         formatCurrency(totals.recuperado),
         formatCurrency(totals.totalCobrado),
         formatCurrency(totals.diferencia),
-        formatCurrency(totals.comision),
-        formatCurrency(totals.supervision),
         formatCurrency(totals.adelEnt),
         formatCurrency(totals.adelSal),
         ''
@@ -851,21 +845,19 @@ export function ResumenClientPage({
           lineWidth: 0.75,
         },
         columnStyles: {
-          0: { cellWidth: 62, halign: 'left', fontStyle: 'bold' },
-          1: { cellWidth: 84, halign: 'left' },
-          2: { cellWidth: 44, halign: 'right' },
-          3: { cellWidth: 48, halign: 'right', fontStyle: 'bold' },
-          4: { cellWidth: 44, halign: 'right' },
-          5: { cellWidth: 36, halign: 'center' },
-          6: { cellWidth: 44, halign: 'right' },
-          7: { cellWidth: 42, halign: 'right' },
-          8: { cellWidth: 48, halign: 'right', fontStyle: 'bold' },
-          9: { cellWidth: 44, halign: 'right' },
-          10: { cellWidth: 40, halign: 'right' },
-          11: { cellWidth: 38, halign: 'right' },
-          12: { cellWidth: 40, halign: 'right' },
-          13: { cellWidth: 40, halign: 'right' },
-          14: { cellWidth: 44, halign: 'center', fontStyle: 'bold' },
+          0: { cellWidth: 70, halign: 'left', fontStyle: 'bold' },
+          1: { cellWidth: 98, halign: 'left' },
+          2: { cellWidth: 48, halign: 'right' },
+          3: { cellWidth: 54, halign: 'right', fontStyle: 'bold' },
+          4: { cellWidth: 48, halign: 'right' },
+          5: { cellWidth: 38, halign: 'center' },
+          6: { cellWidth: 50, halign: 'right' },
+          7: { cellWidth: 50, halign: 'right' },
+          8: { cellWidth: 56, halign: 'right', fontStyle: 'bold' },
+          9: { cellWidth: 48, halign: 'right' },
+          10: { cellWidth: 44, halign: 'right' },
+          11: { cellWidth: 44, halign: 'right' },
+          12: { cellWidth: 48, halign: 'center', fontStyle: 'bold' },
         }
       });
 
@@ -1201,7 +1193,7 @@ export function ResumenClientPage({
       {/* Global Summary KPI Cards */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5">
         <Card className="border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 p-3 shadow-sm">
-          <div className="text-[10px] font-bold text-slate-500 dark:text-zinc-400 uppercase tracking-wider">
+          <div className="text-[10px] font-bold text-blue-600 dark:text-blue-400 uppercase tracking-wider">
             Venta Colocada
           </div>
           <div className="text-base sm:text-lg font-black text-slate-900 dark:text-white tabular-nums mt-0.5">
@@ -1237,7 +1229,7 @@ export function ResumenClientPage({
         </Card>
 
         <Card className="border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 p-3 shadow-sm">
-          <div className="text-[10px] font-bold text-slate-500 dark:text-zinc-400 uppercase tracking-wider">
+          <div className="text-[10px] font-bold text-red-600 dark:text-red-400 uppercase tracking-wider">
             Falla Total
           </div>
           <div className="text-base sm:text-lg font-black text-slate-900 dark:text-white tabular-nums mt-0.5">
@@ -1249,14 +1241,14 @@ export function ResumenClientPage({
         </Card>
 
         <Card className="border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 p-3 shadow-sm">
-          <div className="text-[10px] font-bold text-slate-500 dark:text-zinc-400 uppercase tracking-wider">
+          <div className="text-[10px] font-bold text-purple-600 dark:text-purple-400 uppercase tracking-wider">
             Recuperado
           </div>
           <div className="text-base sm:text-lg font-black text-slate-900 dark:text-white tabular-nums mt-0.5">
             {formatCurrency(totals.recuperado)}
           </div>
           <div className="text-[10px] text-slate-500 mt-0.5">
-            Pagos sobre cuota
+            Abonos recuperados
           </div>
         </Card>
 
@@ -1268,7 +1260,7 @@ export function ResumenClientPage({
             {formatCurrency(balanceNeto)}
           </div>
           <div className="text-[10px] text-slate-500 mt-0.5">
-            Menos comisiones
+            Diferencia de cobranza
           </div>
         </Card>
       </div>
@@ -1294,38 +1286,32 @@ export function ResumenClientPage({
                 <TableHead className="font-bold text-slate-900 dark:text-zinc-100 py-2 px-2 text-left w-[10%] truncate">
                   Plaza
                 </TableHead>
-                <TableHead className="font-bold text-slate-900 dark:text-zinc-100 py-2 px-2 text-left w-[13%] truncate">
+                <TableHead className="font-bold text-slate-900 dark:text-zinc-100 py-2 px-2 text-left w-[15%] truncate">
                   Grupo (Promotora)
                 </TableHead>
-                <TableHead className="font-bold text-slate-900 dark:text-zinc-100 py-2 px-1 text-right w-[7%]">
+                <TableHead className="font-bold text-slate-900 dark:text-zinc-100 py-2 px-1 text-right w-[8%]">
                   Venta
                 </TableHead>
-                <TableHead className="font-bold text-slate-900 dark:text-zinc-100 py-2 px-1 text-right w-[8%]">
+                <TableHead className="font-bold text-slate-900 dark:text-zinc-100 py-2 px-1 text-right w-[8.5%]">
                   Debe Ent.
                 </TableHead>
-                <TableHead className="font-bold text-slate-900 dark:text-zinc-100 py-2 px-1 text-right w-[7%]">
+                <TableHead className="font-bold text-slate-900 dark:text-zinc-100 py-2 px-1 text-right w-[7.5%]">
                   Falla
                 </TableHead>
                 <TableHead className="font-bold text-slate-900 dark:text-zinc-100 py-2 px-0.5 text-center w-[5%]">
                   % Falla
                 </TableHead>
-                <TableHead className="font-bold text-slate-900 dark:text-zinc-100 py-2 px-1 text-right w-[7.5%]">
+                <TableHead className="font-bold text-slate-900 dark:text-zinc-100 py-2 px-1 text-right w-[8%]">
                   Efectivo
                 </TableHead>
-                <TableHead className="font-bold text-slate-900 dark:text-zinc-100 py-2 px-1 text-right w-[6.5%]">
+                <TableHead className="font-bold text-purple-700 dark:text-purple-400 py-2 px-1 text-right w-[8%]">
                   Recuperado
                 </TableHead>
-                <TableHead className="font-bold text-slate-900 dark:text-zinc-100 py-2 px-1 text-right w-[8%]">
+                <TableHead className="font-bold text-slate-900 dark:text-zinc-100 py-2 px-1 text-right w-[8.5%]">
                   Total Cob.
                 </TableHead>
-                <TableHead className="font-bold text-slate-900 dark:text-zinc-100 py-2 px-1 text-right w-[6.5%]">
+                <TableHead className="font-bold text-slate-900 dark:text-zinc-100 py-2 px-1 text-right w-[7%]">
                   Diferencia
-                </TableHead>
-                <TableHead className="font-bold text-slate-900 dark:text-zinc-100 py-2 px-1 text-right w-[6%]">
-                  Comisión
-                </TableHead>
-                <TableHead className="font-bold text-slate-900 dark:text-zinc-100 py-2 px-1 text-right w-[6%]">
-                  Supervisión
                 </TableHead>
                 <TableHead className="font-bold text-slate-900 dark:text-zinc-100 py-2 px-0.5 text-center w-[5%]">
                   Adel. Ent.
@@ -1345,7 +1331,7 @@ export function ResumenClientPage({
             <TableBody>
               {filteredRows.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={16} className="h-28 text-center text-muted-foreground font-semibold">
+                  <TableCell colSpan={14} className="h-28 text-center text-muted-foreground font-semibold">
                     No se encontraron registros para los filtros seleccionados.
                   </TableCell>
                 </TableRow>
@@ -1397,7 +1383,10 @@ export function ResumenClientPage({
                     </TableCell>
 
                     {/* Recuperado */}
-                    <TableCell className="py-1.5 px-1 text-right font-medium text-slate-800 dark:text-zinc-200 tabular-nums">
+                    <TableCell className={cn(
+                      "py-1.5 px-1 text-right tabular-nums font-semibold",
+                      row.recuperado > 0 ? "text-purple-700 dark:text-purple-400 font-bold" : "text-slate-400"
+                    )}>
                       {row.recuperado > 0 ? formatCurrency(row.recuperado) : '—'}
                     </TableCell>
 
@@ -1412,16 +1401,6 @@ export function ResumenClientPage({
                       row.diferencia < 0 ? "text-slate-900 dark:text-zinc-100" : (row.diferencia > 0 ? "text-slate-900 dark:text-zinc-100" : "text-slate-400")
                     )}>
                       {row.diferencia !== 0 ? formatCurrency(row.diferencia) : '0.00'}
-                    </TableCell>
-
-                    {/* Comisión */}
-                    <TableCell className="py-1.5 px-1 text-right font-medium text-slate-800 dark:text-zinc-200 tabular-nums">
-                      {row.comision > 0 ? formatCurrency(row.comision) : '—'}
-                    </TableCell>
-
-                    {/* Supervisión */}
-                    <TableCell className="py-1.5 px-1 text-right font-medium text-slate-800 dark:text-zinc-200 tabular-nums">
-                      {row.supervision > 0 ? formatCurrency(row.supervision) : '—'}
                     </TableCell>
 
                     {/* Adelantos Entrantes */}
@@ -1507,7 +1486,7 @@ export function ResumenClientPage({
                   <TableCell className="py-2 px-1 text-right tabular-nums">
                     {formatCurrency(totals.efectivo)}
                   </TableCell>
-                  <TableCell className="py-2 px-1 text-right tabular-nums">
+                  <TableCell className="py-2 px-1 text-right tabular-nums text-purple-700 dark:text-purple-300">
                     {formatCurrency(totals.recuperado)}
                   </TableCell>
                   <TableCell className="py-2 px-1 text-right tabular-nums">
@@ -1515,12 +1494,6 @@ export function ResumenClientPage({
                   </TableCell>
                   <TableCell className="py-2 px-1 text-right tabular-nums">
                     {formatCurrency(totals.diferencia)}
-                  </TableCell>
-                  <TableCell className="py-2 px-1 text-right tabular-nums">
-                    {formatCurrency(totals.comision)}
-                  </TableCell>
-                  <TableCell className="py-2 px-1 text-right tabular-nums">
-                    {formatCurrency(totals.supervision)}
                   </TableCell>
                   <TableCell className="py-2 px-0.5 text-center tabular-nums">
                     {totals.adelEnt > 0 ? formatCurrency(totals.adelEnt) : '—'}

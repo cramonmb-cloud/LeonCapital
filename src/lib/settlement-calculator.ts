@@ -121,6 +121,24 @@ export function computePromotoraWeekMetrics({
     realEfectivo += loanEfectivo;
     realRecuperado += loanRecuperado;
 
+    // Sumar abonos de semanas anteriores marcados como recuperados cobrados en esta semana operativa
+    (loan.payments || []).forEach(p => {
+      if (p.isReverted) return;
+      const isRec = Boolean(p.isRecovered || p.paymentType === 'recovered');
+      if (!isRec) return;
+
+      const pCollectionDate = p.registeredWeekDate ? parseLocalDate(p.registeredWeekDate) : (p.date ? parseLocalDate(p.date) : null);
+      const pSatTime = pCollectionDate ? getSaturdayOfWeek(pCollectionDate).getTime() : 0;
+      if (pSatTime !== weekTime) return;
+
+      // Si pertenece a una semana diferente a targetWeekNumber (o si en targetWeekNumber no se cobró como cuota esperada)
+      if (!p.weekNumber || p.weekNumber !== targetWeekNumber) {
+        realRecuperado += p.amount;
+      } else if (expectedForLoan === 0) {
+        realRecuperado += p.amount;
+      }
+    });
+
     // Adelantos entrantes
     const advPayments = (loan.payments || []).filter(p => !p.isReverted && (p.isAdvance || p.paymentType === 'adelanto_entrante'));
     if (loanSaturdayTime === weekTime) {
