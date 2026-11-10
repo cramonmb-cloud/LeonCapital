@@ -797,8 +797,8 @@ export function PrecapturaClientPage({
       const targetSettlementId = `${pId}_${selectedWeek}`;
       const savedTarget = savedSettlements.find(s => s.id === targetSettlementId);
 
-      // If already closed or saved in database, load instantly with zero calculations!
-      if (savedTarget) {
+      // If already closed in database, load instantly with zero calculations!
+      if (savedTarget && savedTarget.isClosed) {
         resultMap[pId] = {
           debeEntregar: savedTarget.debeEntregar || 0,
           adelEnt: savedTarget.adelEnt || 0,
@@ -878,8 +878,8 @@ export function PrecapturaClientPage({
         if (weekStr === selectedWeek) {
           targetResult = {
             debeEntregar: currentDebeEntregar,
-            adelEnt: saved?.adelEnt !== undefined && saved.adelEnt > 0 ? saved.adelEnt : metrics.realAdelEnt,
-            adelSal: saved?.adelSal !== undefined && saved.adelSal > 0 ? saved.adelSal : metrics.realAdelSal,
+            adelEnt: (saved?.isClosed && saved?.adelEnt !== undefined && saved.adelEnt > 0) ? saved.adelEnt : metrics.realAdelEnt,
+            adelSal: (saved?.isClosed && saved?.adelSal !== undefined && saved.adelSal > 0) ? saved.adelSal : metrics.realAdelSal,
             defaultFalla: effectiveFalla,
             defaultRecuperado: (saved?.recuperado !== undefined) ? saved.recuperado : metrics.realRecuperado
           };

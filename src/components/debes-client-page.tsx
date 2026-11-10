@@ -196,8 +196,8 @@ export function DebesClientPage({
       const directSaved = savedSettlements.find(s => s.id === selectedSettlementId);
       const local = overrides[pId] || {};
 
-      // 1. Direct saved in database and no local edits: load instantly with zero calculations!
-      if (directSaved && Object.keys(local).length === 0) {
+      // 1. Direct saved in database and finalized/closed: load instantly with zero calculations!
+      if (directSaved && directSaved.isClosed && Object.keys(local).length === 0) {
         return {
           id: directSaved.id,
           promotoraId: pId,
@@ -516,12 +516,12 @@ export function DebesClientPage({
         const recuperado = local.recuperado !== undefined ? local.recuperado : (saved?.recuperado !== undefined ? saved.recuperado : defaultRecuperado);
         const adelEnt = local.adelEnt !== undefined 
           ? local.adelEnt 
-          : (saved?.adelEnt !== undefined && saved.adelEnt > 0 
+          : (saved?.isClosed && saved?.adelEnt !== undefined && saved.adelEnt > 0 
               ? saved.adelEnt 
               : defaultAdelEnt);
         const adelSal = local.adelSal !== undefined 
           ? local.adelSal 
-          : (saved?.adelSal !== undefined && saved.adelSal > 0 
+          : (saved?.isClosed && saved?.adelSal !== undefined && saved.adelSal > 0 
               ? saved.adelSal 
               : defaultAdelSal);
 

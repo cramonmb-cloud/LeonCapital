@@ -249,6 +249,9 @@ export async function changeLoansPromotoraAction(loanIds: string[], targetPromot
 
 export async function registerPaymentAction(loanId: string, paymentStartDate: Date, amountPaid: number, startingWeekNumber: number, userId?: string) {
     try {
+        let targetPromotoraId: string | undefined;
+        const paymentWeekDateStr: string = getSaturdayOfWeek(getMexicoNow()).toISOString().split('T')[0];
+
         await runTransaction(db, async (transaction) => {
             const loanRef = doc(db, 'loans', loanId);
             const loanSnap = await transaction.get(loanRef);
@@ -262,6 +265,7 @@ export async function registerPaymentAction(loanId: string, paymentStartDate: Da
             }
 
             const loan = loanSnap.data() as Loan;
+            targetPromotoraId = loan.promotoraId;
             const client = await getClient(loan.clientId);
             const loanPlan = await getLoanPlan(loan.loanPlanId);
             const walletRef = doc(db, 'wallet', 'main');
@@ -276,6 +280,11 @@ export async function registerPaymentAction(loanId: string, paymentStartDate: Da
                 date: parseFirestoreDate(p.date).toISOString()
             }));
 
+            const loanStartDate = parseFirestoreDate(loan.startDate);
+            const loanStartSat = getSaturdayOfWeek(loanStartDate);
+            const currentLoanWeek = Math.max(1, getCurrentLoanWeekNumber(loanStartDate));
+            const baseTerm = loanPlan.termInWeeks;
+
             // Reemplazar o añadir el pago con distribución o procesar eliminación
             let allPayments: Payment[] = [];
 
@@ -283,32 +292,44 @@ export async function registerPaymentAction(loanId: string, paymentStartDate: Da
                 // Modo eliminación: eliminar el pago por completo
                 allPayments = currentPayments.filter(p => p.weekNumber !== startingWeekNumber);
             } else {
-                // Modo registro/ajuste: lógica existente de distribución
+                // 1. Identificar fallas anteriores REALES (semanas estrictamente < startingWeekNumber)
+                // En CrediControl, una semana anterior solo es falla si se registró explícitamente con abono < cuota
+                // y NO es un abono asumido ni revertido. Las semanas sin registro previo son asumidas pagadas.
                 const missedWeeks: { weekNumber: number; paidSoFar: number }[] = [];
                 for (let i = 1; i < startingWeekNumber; i++) {
                     const existing = currentPayments.find(p => p.weekNumber === i);
-                    const paidSoFar = existing ? existing.amount : 0;
-                    if (paidSoFar < weeklyPayment) {
-                        missedWeeks.push({ weekNumber: i, paidSoFar });
+                    if (!existing || existing.isReverted || existing.paymentType === 'assumed') {
+                        continue;
+                    }
+                    if (existing.amount < weeklyPayment) {
+                        missedWeeks.push({ weekNumber: i, paidSoFar: existing.amount });
                     }
                 }
 
-                const loanStartDate = parseFirestoreDate(loan.startDate);
-                const currentLoanWeek = Math.max(1, getCurrentLoanWeekNumber(loanStartDate));
-
                 let remaining = amountPaid;
-                const updatedPaymentsMap = new Map<number, { amount: number; isRecovered?: boolean; isReverted?: boolean; isAdvance?: boolean; isAccumulated?: boolean; paymentType?: 'regular' | 'recovered' | 'adelanto_entrante' | 'assumed' }>();
+                const updatedPaymentsMap = new Map<number, { 
+                    amount: number; 
+                    date?: string;
+                    isRecovered?: boolean; 
+                    isReverted?: boolean; 
+                    isAdvance?: boolean; 
+                    isAccumulated?: boolean; 
+                    paymentType?: 'regular' | 'recovered' | 'adelanto_entrante' | 'assumed';
+                    registeredWeekDate?: string;
+                }>();
 
                 // Inicializar el mapa con los pagos existentes excluyendo la semana de inicio
                 currentPayments.forEach(p => {
                     if (p.weekNumber !== startingWeekNumber) {
                         updatedPaymentsMap.set(p.weekNumber, { 
                             amount: p.amount, 
+                            date: p.date,
                             isRecovered: p.isRecovered, 
                             isReverted: p.isReverted,
                             isAdvance: p.isAdvance,
                             isAccumulated: p.isAccumulated,
-                            paymentType: p.paymentType
+                            paymentType: p.paymentType,
+                            registeredWeekDate: p.registeredWeekDate
                         });
                     }
                 });
@@ -318,15 +339,17 @@ export async function registerPaymentAction(loanId: string, paymentStartDate: Da
                 const existingStartP = currentPayments.find(p => p.weekNumber === startingWeekNumber);
                 const isRecoveredStart = Boolean(
                     existingStartP?.isRecovered || 
-                    (existingStartP && existingStartP.isAccumulated && existingStartP.amount < weeklyPayment && existingStartP.paymentType !== 'assumed')
+                    (existingStartP && existingStartP.amount < weeklyPayment && existingStartP.paymentType !== 'assumed' && !existingStartP.isReverted)
                 );
                 const neededStart = weeklyPayment;
+
                 if (remaining <= neededStart) {
                     updatedPaymentsMap.set(startingWeekNumber, { 
                         amount: remaining, 
                         isRecovered: isRecoveredStart,
                         isAdvance: isStartAdvance,
-                        paymentType: isStartAdvance ? 'adelanto_entrante' : isRecoveredStart ? 'recovered' : 'regular'
+                        paymentType: isStartAdvance ? 'adelanto_entrante' : isRecoveredStart ? 'recovered' : 'regular',
+                        registeredWeekDate: isStartAdvance ? paymentWeekDateStr : existingStartP?.registeredWeekDate
                     });
                     remaining = 0;
                 } else {
@@ -334,31 +357,36 @@ export async function registerPaymentAction(loanId: string, paymentStartDate: Da
                         amount: weeklyPayment, 
                         isRecovered: isRecoveredStart,
                         isAdvance: isStartAdvance,
-                        paymentType: isStartAdvance ? 'adelanto_entrante' : isRecoveredStart ? 'recovered' : 'regular'
+                        paymentType: isStartAdvance ? 'adelanto_entrante' : isRecoveredStart ? 'recovered' : 'regular',
+                        registeredWeekDate: isStartAdvance ? paymentWeekDateStr : existingStartP?.registeredWeekDate
                     });
                     remaining -= neededStart;
 
                     // 2. Cubrir semanas de fallo anteriores (la más antigua primero)
+                    // "Recuerda que se cubre primero las fallas y despues los adelantos"
                     for (const mw of missedWeeks) {
                         if (remaining <= 0) break;
                         const needed = weeklyPayment - mw.paidSoFar;
-                        const existingMwP = currentPayments.find(p => p.weekNumber === mw.weekNumber);
-                        const isActuallyRec = Boolean(
-                            existingMwP?.isRecovered || 
-                            (existingMwP && existingMwP.isAccumulated && existingMwP.amount < weeklyPayment && existingMwP.paymentType !== 'assumed')
-                        );
+                        if (needed <= 0) continue;
+
                         if (remaining >= needed) {
                             updatedPaymentsMap.set(mw.weekNumber, { 
                                 amount: weeklyPayment, 
-                                isRecovered: isActuallyRec,
-                                paymentType: isActuallyRec ? 'recovered' : 'regular'
+                                isRecovered: true,
+                                isAdvance: false,
+                                isAccumulated: true,
+                                paymentType: 'recovered',
+                                registeredWeekDate: paymentWeekDateStr
                             });
                             remaining -= needed;
                         } else {
                             updatedPaymentsMap.set(mw.weekNumber, { 
                                 amount: mw.paidSoFar + remaining, 
-                                isRecovered: isActuallyRec,
-                                paymentType: isActuallyRec ? 'recovered' : 'regular'
+                                isRecovered: true,
+                                isAdvance: false,
+                                isAccumulated: true,
+                                paymentType: 'recovered',
+                                registeredWeekDate: paymentWeekDateStr
                             });
                             remaining = 0;
                         }
@@ -366,16 +394,32 @@ export async function registerPaymentAction(loanId: string, paymentStartDate: Da
 
                     // 3. Adelantar saldo sobrante a semanas futuras (Adelantos Entrantes)
                     let nextWeek = startingWeekNumber + 1;
+                    const tempPaymentsForPenalty: Payment[] = [];
+                    updatedPaymentsMap.forEach((val, wk) => {
+                        tempPaymentsForPenalty.push({ weekNumber: wk, amount: val.amount, paymentType: val.paymentType, isRecovered: val.isRecovered, isAccumulated: val.isAccumulated } as Payment);
+                    });
+                    const willHavePenalty = doesLoanHavePenalty({ ...loan, payments: tempPaymentsForPenalty }, baseTerm, weeklyPayment, penaltyThreshold);
+                    const maxAllowedWeek = baseTerm + (willHavePenalty ? 1 : 0);
+
                     while (remaining > 0) {
                         const existingNext = updatedPaymentsMap.get(nextWeek)?.amount || 0;
                         const neededNext = Math.max(0, weeklyPayment - existingNext);
+                        
+                        if (neededNext <= 0) {
+                            nextWeek++;
+                            if (nextWeek > maxAllowedWeek + 5) break;
+                            continue;
+                        }
+
                         const isAdv = nextWeek > currentLoanWeek;
                         if (remaining >= neededNext) {
                             updatedPaymentsMap.set(nextWeek, { 
                                 amount: weeklyPayment, 
                                 isRecovered: false,
                                 isAdvance: isAdv,
-                                paymentType: isAdv ? 'adelanto_entrante' : 'regular'
+                                isAccumulated: true,
+                                paymentType: isAdv ? 'adelanto_entrante' : 'regular',
+                                registeredWeekDate: isAdv ? paymentWeekDateStr : undefined
                             });
                             remaining -= neededNext;
                             nextWeek++;
@@ -384,7 +428,9 @@ export async function registerPaymentAction(loanId: string, paymentStartDate: Da
                                 amount: existingNext + remaining, 
                                 isRecovered: false,
                                 isAdvance: isAdv,
-                                paymentType: isAdv ? 'adelanto_entrante' : 'regular'
+                                isAccumulated: true,
+                                paymentType: isAdv ? 'adelanto_entrante' : 'regular',
+                                registeredWeekDate: isAdv ? paymentWeekDateStr : undefined
                             });
                             remaining = 0;
                         }
@@ -392,35 +438,37 @@ export async function registerPaymentAction(loanId: string, paymentStartDate: Da
                 }
 
                 // Convertir el mapa de regreso al arreglo de pagos
-                const paymentWeekDateStr = getSaturdayOfWeek(getMexicoNow()).toISOString().split('T')[0];
                 updatedPaymentsMap.forEach((val, wk) => {
                     const existingP = currentPayments.find(p => p.weekNumber === wk);
-                    const existingDate = existingP?.date || new Date().toISOString();
+                    const weekSat = new Date(loanStartSat.getTime() + (wk * 7 * 24 * 3600 * 1000));
+                    const weekSatIso = weekSat.toISOString();
+                    const paymentDate = existingP?.date || val.date || weekSatIso;
+
                     const isAdv = val.isAdvance ?? (wk > currentLoanWeek);
+                    const isRec = val.isRecovered || false;
                     
                     const paymentObj: Payment = {
-                        date: existingDate,
+                        date: paymentDate,
                         amount: val.amount,
                         weekNumber: wk,
-                        isRecovered: val.isRecovered || false,
+                        isRecovered: isRec,
                         isReverted: val.isReverted || false,
                         isAdvance: isAdv,
-                        isAccumulated: val.isAccumulated || false,
-                        paymentType: val.paymentType || (val.isRecovered ? 'recovered' : isAdv ? 'adelanto_entrante' : 'regular'),
+                        isAccumulated: val.isAccumulated ?? (isAdv || isRec || Boolean(existingP?.isAccumulated)),
+                        paymentType: val.paymentType || (isRec ? 'recovered' : isAdv ? 'adelanto_entrante' : 'regular'),
                     };
 
-                    const regDate = isAdv ? (paymentWeekDateStr || existingP?.registeredWeekDate) : existingP?.registeredWeekDate;
-                    if (isAdv && regDate) {
+                    const regDate = val.registeredWeekDate || (isAdv || isRec ? paymentWeekDateStr : existingP?.registeredWeekDate);
+                    if (regDate) {
                         paymentObj.registeredWeekDate = regDate;
                     }
 
                     allPayments.push(paymentObj);
                 });
+
+                allPayments.sort((a, b) => Number(a.weekNumber) - Number(b.weekNumber));
             }
             
-            const loanStartDate = parseFirestoreDate(loan.startDate);
-            const currentLoanWeek = Math.max(1, getCurrentLoanWeekNumber(loanStartDate));
-
             const originalTotalPaid = (loan.payments || []).reduce((acc, p) => acc + p.amount, 0);
             const newTotalPaid = allPayments.reduce((acc, p) => acc + p.amount, 0);
             const walletAdjustment = newTotalPaid - originalTotalPaid;
@@ -442,22 +490,41 @@ export async function registerPaymentAction(loanId: string, paymentStartDate: Da
                 transaction.update(walletRef, { balance: increment(walletAdjustment) });
             }
 
-            const baseTerm = loanPlan.termInWeeks;
-            
             // REGLA DINÁMICA DE CARTERA VENCIDA Y PENALIZACIÓN
             const hasPenalty = doesLoanHavePenalty({ ...loan, payments: allPayments }, baseTerm, weeklyPayment, penaltyThreshold);
-            
             const isExpired = currentLoanWeek > baseTerm;
             const totalTerm = baseTerm + (hasPenalty ? 1 : 0);
             const totalExpected = totalTerm * weeklyPayment;
             const balance = Math.max(0, totalExpected - newTotalPaid);
+
+            // Verificar si el préstamo está completamente cubierto en todas sus semanas (1 a totalTerm)
+            let isFullyPaid = balance <= 0;
+            if (!isFullyPaid) {
+                let allWeeksCovered = true;
+                for (let w = 1; w <= totalTerm; w++) {
+                    const p = allPayments.find(pay => pay.weekNumber === w);
+                    if (p && !p.isReverted) {
+                        if (p.amount < weeklyPayment) {
+                            allWeeksCovered = false;
+                            break;
+                        }
+                    } else if (w > currentLoanWeek) {
+                        allWeeksCovered = false;
+                        break;
+                    }
+                    // Si w <= currentLoanWeek y no tiene p, en CrediControl es un abono asumido pagado
+                }
+                if (allWeeksCovered) {
+                    isFullyPaid = true;
+                }
+            }
 
             const totalPaidInBaseTerm = allPayments
                 .filter(p => p.weekNumber >= 1 && p.weekNumber <= baseTerm && !p.isReverted)
                 .reduce((sum, p) => sum + p.amount, 0);
 
             let newStatus: Loan['status'] = loan.status;
-            if (balance <= 0) {
+            if (isFullyPaid) {
                 newStatus = (isExpired && totalPaidInBaseTerm < (baseTerm * weeklyPayment)) ? 'Pagado desde CV' : 'Paid Off';
             } else {
                 newStatus = (isExpired || currentLoanWeek > totalTerm) ? 'Overdue' : 'Active';
@@ -469,6 +536,13 @@ export async function registerPaymentAction(loanId: string, paymentStartDate: Da
                 hasPenalty: hasPenalty ? true : false
             }));
         });
+
+        // Sincronizar automáticamente la liquidación de la promotora en Firestore
+        if (targetPromotoraId && paymentWeekDateStr) {
+            await syncPromotoraSettlementsFromWeek(targetPromotoraId, paymentWeekDateStr).catch(err => {
+                console.error('Error syncing promotora settlements after payment:', err);
+            });
+        }
 
         revalidatePath('/inicio', 'layout');
         

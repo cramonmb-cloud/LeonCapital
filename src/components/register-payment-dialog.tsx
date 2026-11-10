@@ -96,9 +96,11 @@ export function RegisterPaymentDialog({
     const missed: { weekNumber: number; paidSoFar: number }[] = [];
     for (let i = 1; i < weekNumber; i++) {
       const existing = currentPayments.find(p => p.weekNumber === i);
-      const paidSoFar = existing ? existing.amount : 0;
-      if (paidSoFar < weeklyPaymentAmount) {
-        missed.push({ weekNumber: i, paidSoFar });
+      if (!existing || existing.isReverted || existing.paymentType === 'assumed') {
+        continue;
+      }
+      if (existing.amount < weeklyPaymentAmount) {
+        missed.push({ weekNumber: i, paidSoFar: existing.amount });
       }
     }
     return missed;
@@ -113,6 +115,7 @@ export function RegisterPaymentDialog({
     for (const mw of missedWeeks) {
       if (remaining <= 0) break;
       const needed = weeklyPaymentAmount - mw.paidSoFar;
+      if (needed <= 0) continue;
       if (remaining >= needed) {
         recovered.push({ weekNumber: mw.weekNumber, amount: needed, isFull: true });
         remaining -= needed;
@@ -122,9 +125,64 @@ export function RegisterPaymentDialog({
       }
     }
 
-    const advancedAmount = remaining;
-    return { recovered, advancedAmount };
-  }, [amountPaid, weeklyPaymentAmount, missedWeeks]);
+    const advances: { weekNumber: number; amount: number; isFull: boolean }[] = [];
+    let nextWk = weekNumber + 1;
+    const currentPayments = loan.payments || [];
+    const totalTerm = loanPlan ? loanPlan.termInWeeks : 13;
+
+    while (remaining > 0 && nextWk <= totalTerm + 3) {
+      const existing = currentPayments.find(p => p.weekNumber === nextWk);
+      const existingAmt = existing && !existing.isReverted ? existing.amount : 0;
+      const needed = Math.max(0, weeklyPaymentAmount - existingAmt);
+
+      if (needed <= 0) {
+        nextWk++;
+        continue;
+      }
+
+      if (remaining >= needed) {
+        advances.push({ weekNumber: nextWk, amount: needed, isFull: true });
+        remaining -= needed;
+        nextWk++;
+      } else {
+        advances.push({ weekNumber: nextWk, amount: remaining, isFull: false });
+        remaining = 0;
+      }
+    }
+
+    // Comprobar si con este pago queda liquidado el préstamo
+    let willPayOff = false;
+    if (loanPlan) {
+      const totalTermWeeks = loanPlan.termInWeeks;
+      let allCovered = true;
+      for (let w = 1; w <= totalTermWeeks; w++) {
+        if (w < weekNumber) {
+          const rec = recovered.find(r => r.weekNumber === w);
+          if (rec && !rec.isFull) allCovered = false;
+          const miss = missedWeeks.find(m => m.weekNumber === w);
+          if (miss && !rec) allCovered = false;
+        } else if (w === weekNumber) {
+          // Semana en curso cubierta
+        } else {
+          // w > weekNumber
+          const adv = advances.find(a => a.weekNumber === w);
+          const existingAdv = currentPayments.find(p => p.weekNumber === w);
+          const existingAmt = existingAdv && !existingAdv.isReverted ? existingAdv.amount : 0;
+          const totalAdvAmt = (adv ? adv.amount : 0) + existingAmt;
+          if (totalAdvAmt < weeklyPaymentAmount) allCovered = false;
+        }
+      }
+      willPayOff = allCovered;
+    }
+
+    return { 
+      recovered, 
+      advances, 
+      advancedAmount: advances.reduce((sum, a) => sum + a.amount, 0),
+      willPayOff,
+      surplus: remaining 
+    };
+  }, [amountPaid, weeklyPaymentAmount, missedWeeks, weekNumber, loan, loanPlan]);
 
   useEffect(() => {
     if (isOpen) {
@@ -240,39 +298,53 @@ export function RegisterPaymentDialog({
 
             {/* Excedente / Distribución */}
             {amountPaid > weeklyPaymentAmount && paymentDistribution && (
-              <div className="bg-purple-50 dark:bg-purple-950/10 p-3.5 rounded-xl border border-purple-100 dark:border-purple-900/30 text-xs space-y-2">
+              <div className="bg-purple-50 dark:bg-purple-950/10 p-3.5 rounded-xl border border-purple-100 dark:border-purple-900/30 text-xs space-y-2.5">
                 <div className="flex justify-between items-center border-b border-purple-100/50 dark:border-purple-900/20 pb-1.5 mb-1">
-                  <span className="uppercase text-[9px] tracking-wider font-bold text-purple-700 dark:text-purple-400">Excedente</span>
+                  <span className="uppercase text-[9px] tracking-wider font-bold text-purple-700 dark:text-purple-400">Distribución del Abono</span>
                   <span className="font-extrabold text-sm text-purple-700 dark:text-purple-400">
                     +{new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(amountPaid - weeklyPaymentAmount)}
                   </span>
                 </div>
-                <div className="space-y-1.5 text-slate-600 dark:text-slate-300 font-medium">
-                  <p>
-                    Se registrará el abono completo de la semana en curso (<strong className="text-slate-800 dark:text-slate-200">S{weekNumber}</strong>) por{' '}
-                    <strong className="text-slate-800 dark:text-slate-200">
+                <div className="space-y-1.5 text-slate-600 dark:text-slate-300 font-medium text-[11px]">
+                  <p className="flex items-center gap-1.5">
+                    <span className="h-1.5 w-1.5 rounded-full bg-slate-400 inline-block"></span>
+                    <span>Semana en curso (<strong className="text-slate-800 dark:text-slate-200">S{weekNumber}</strong>):</span>
+                    <strong className="text-slate-800 dark:text-slate-200 ml-auto font-black">
                       {new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(weeklyPaymentAmount)}
-                    </strong>.
+                    </strong>
                   </p>
                   
                   {paymentDistribution.recovered.map((r) => (
-                    <p key={r.weekNumber} className="text-purple-700 dark:text-purple-400 pl-2 border-l border-purple-200 dark:border-purple-800">
-                      • Se recuperará la <strong className="text-purple-800 dark:text-purple-300">Semana {r.weekNumber}</strong> (Falla anterior) con{' '}
-                      <strong>
+                    <p key={r.weekNumber} className="flex items-center gap-1.5 text-purple-700 dark:text-purple-300 pl-2 border-l-2 border-purple-300 dark:border-purple-700">
+                      <span>• Se recupera <strong className="font-extrabold">Semana {r.weekNumber}</strong> (Falla):</span>
+                      <strong className="ml-auto font-black">
                         {new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(r.amount)}
                       </strong>
-                      {r.isFull ? ' (Completo)' : ' (Parcial)'}.
+                      <span className="text-[9px] text-purple-600 font-semibold">{r.isFull ? '(Completo)' : '(Parcial)'}</span>
                     </p>
                   ))}
 
-                  {paymentDistribution.advancedAmount > 0 && (
-                    <p className="text-blue-600 dark:text-blue-400 pl-2 border-l border-blue-200 dark:border-blue-800">
-                      • Se registrará como <strong className="font-extrabold uppercase">Adelanto Entrante</strong> por{' '}
-                      <strong>
-                        {new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(paymentDistribution.advancedAmount)}
-                      </strong>{' '}
-                      a las semanas siguientes (a partir de S{weekNumber + 1}).
+                  {paymentDistribution.advances.map((a) => (
+                    <p key={a.weekNumber} className="flex items-center gap-1.5 text-blue-600 dark:text-blue-400 pl-2 border-l-2 border-blue-300 dark:border-blue-700">
+                      <span>• Adelanto a <strong className="font-extrabold">Semana {a.weekNumber}</strong>:</span>
+                      <strong className="ml-auto font-black">
+                        {new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(a.amount)}
+                      </strong>
+                      <span className="text-[9px] text-blue-500 font-semibold">{a.isFull ? '(Completo)' : '(Parcial)'}</span>
                     </p>
+                  ))}
+
+                  {paymentDistribution.surplus > 0 && (
+                    <p className="text-amber-600 dark:text-amber-400 pl-2 border-l-2 border-amber-300">
+                      • Sobrante no asignable: <strong>{new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(paymentDistribution.surplus)}</strong>
+                    </p>
+                  )}
+
+                  {paymentDistribution.willPayOff && (
+                    <div className="mt-2 pt-2 border-t border-purple-100 dark:border-purple-900/30 flex items-center gap-1.5 text-green-700 dark:text-green-400 font-bold text-xs bg-green-50/80 dark:bg-green-950/30 p-2 rounded-lg">
+                      <span>✓</span>
+                      <span>¡Con este abono el préstamo quedará completamente <strong>LIQUIDADO</strong>!</span>
+                    </div>
                   )}
                 </div>
               </div>

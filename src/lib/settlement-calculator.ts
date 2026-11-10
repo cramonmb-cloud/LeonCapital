@@ -214,8 +214,17 @@ export function computePromotoraWeekMetrics({
     else comicion = Math.round(venta * (comicionPercent / 100));
     if (savedSettlement.supervision !== undefined && Number(savedSettlement.supervision) > 0) supervision = Number(savedSettlement.supervision);
     else supervision = Math.round(venta * (supervisionPercent / 100));
-    if (savedSettlement.adelEnt !== undefined) adelEnt = Number(savedSettlement.adelEnt);
-    if (savedSettlement.adelSal !== undefined) adelSal = Number(savedSettlement.adelSal);
+    if (savedSettlement.adelEnt !== undefined && savedSettlement.isClosed) adelEnt = Number(savedSettlement.adelEnt);
+    if (savedSettlement.isClosed && savedSettlement.adelSal !== undefined) {
+      adelSal = Number(savedSettlement.adelSal);
+    } else {
+      adelSal = realAdelSal;
+      debeEntregar = Math.max(0, abonoSemanal - adelSal);
+      efectivo = debeEntregar - falla;
+      total = efectivo + recuperado;
+      diferencia = efectivo - debeEntregar;
+      deuda = Math.max(0, debeEntregar - efectivo);
+    }
     if (savedSettlement.semExt !== undefined) semExt = Number(savedSettlement.semExt);
   }
 
