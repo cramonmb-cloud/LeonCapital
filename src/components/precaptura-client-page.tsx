@@ -12,7 +12,7 @@ import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { useToast } from '@/hooks/use-toast';
 import { useRealtimeData } from '@/hooks/use-realtime-data';
-import { collection, query, where, doc, onSnapshot } from 'firebase/firestore';
+import { collection, query, where, doc, onSnapshot, limit } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { cn, getSaturdayOfWeek, getMexicoNow, parseLocalDate, getLoanAbonoSalienteForWeek } from '@/lib/utils';
 import type { Client, LoanPlan, Loan, Plaza, Localidad, Promotora, AppConfig, Precaptura, PrecapturaRow, PrecapturaGasto, Personal } from '@/lib/types';
@@ -435,6 +435,35 @@ export function PrecapturaClientPage({
   const [selectedPlaza, setSelectedPlaza] = useState<string>('');
   const [selectedWeek, setSelectedWeek] = useState<string>('');
   
+  // Verificar si ya existen préstamos registrados para la semana en curso (o posterior)
+  const [hasCurrentWeekLoans, setHasCurrentWeekLoans] = useState(false);
+
+  useEffect(() => {
+    const today = getMexicoNow();
+    const currentSaturday = getSaturdayOfWeek(today);
+    const startOfCurrentWeek = new Date(currentSaturday);
+    startOfCurrentWeek.setDate(startOfCurrentWeek.getDate() - 6);
+    startOfCurrentWeek.setHours(0, 0, 0, 0);
+    const startOfCurrentWeekStr = startOfCurrentWeek.toISOString().split('T')[0];
+
+    const loansCol = collection(db, 'loans');
+    const q = query(
+      loansCol,
+      where('startDate', '>=', startOfCurrentWeekStr),
+      limit(1)
+    );
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      setHasCurrentWeekLoans(!snapshot.empty);
+    }, (err) => {
+      console.error('Error al verificar préstamos de la semana actual:', err);
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  const isNextWeekAllowed = hasCurrentWeekLoans;
+
   // Available weeks (Saturdays descending)
   const allAvailableWeeks = useMemo(() => {
     const saturdays: Date[] = [];
@@ -443,7 +472,11 @@ export function PrecapturaClientPage({
     const startLimitDate = new Date('2026-07-04T00:00:00');
     const startSaturday = getSaturdayOfWeek(startLimitDate);
 
-    const maxDate = new Date(currentSaturday);
+    let maxDate = new Date(currentSaturday);
+    if (isNextWeekAllowed) {
+      maxDate.setDate(maxDate.getDate() + 7);
+    }
+
     const currentTemp = new Date(startSaturday);
 
     while (currentTemp <= maxDate) {
@@ -451,12 +484,18 @@ export function PrecapturaClientPage({
       currentTemp.setDate(currentTemp.getDate() + 7);
     }
     return saturdays.sort((a, b) => b.getTime() - a.getTime());
-  }, []);
+  }, [isNextWeekAllowed]);
 
   // Set default week to current Saturday
   useEffect(() => {
     if (allAvailableWeeks.length > 0 && !selectedWeek) {
-      setSelectedWeek(allAvailableWeeks[0].toISOString().split('T')[0]);
+      const currentSatStr = getSaturdayOfWeek(getMexicoNow()).toISOString().split('T')[0];
+      const hasCurrent = allAvailableWeeks.some(w => w.toISOString().split('T')[0] === currentSatStr);
+      if (hasCurrent) {
+        setSelectedWeek(currentSatStr);
+      } else {
+        setSelectedWeek(allAvailableWeeks[0].toISOString().split('T')[0]);
+      }
     }
   }, [allAvailableWeeks, selectedWeek]);
 

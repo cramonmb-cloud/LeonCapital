@@ -8,7 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { useToast } from '@/hooks/use-toast';
 import { useRealtimeData } from '@/hooks/use-realtime-data';
-import { collection, query, where } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, limit } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { cn, getSaturdayOfWeek, getMexicoNow, getExtraWeekThreshold, getLoanAbonoSalienteForWeek, isLoanInSemanaExtraForWeek, getLoanSemanaExtraPaidAmountForWeek } from '@/lib/utils';
 import type { Client, LoanPlan, Loan, Plaza, Localidad, Promotora, PromotoraSettlement } from '@/lib/types';
@@ -64,6 +64,36 @@ export function DebesClientPage({
   const [selectedLocalidad, setSelectedLocalidad] = useState<string>('');
   const [isBorradorModalOpen, setIsBorradorModalOpen] = useState<boolean>(false);
 
+  // Verificar si ya existen préstamos registrados para la semana en curso (o posterior)
+  const [hasCurrentWeekLoans, setHasCurrentWeekLoans] = useState(false);
+
+  useEffect(() => {
+    const today = getMexicoNow();
+    const currentSaturday = getSaturdayOfWeek(today);
+    // Inicio de la semana operativa en curso (domingo previo, 6 días antes del sábado actual)
+    const startOfCurrentWeek = new Date(currentSaturday);
+    startOfCurrentWeek.setDate(startOfCurrentWeek.getDate() - 6);
+    startOfCurrentWeek.setHours(0, 0, 0, 0);
+    const startOfCurrentWeekStr = startOfCurrentWeek.toISOString().split('T')[0];
+
+    const loansCol = collection(db, 'loans');
+    const q = query(
+      loansCol,
+      where('startDate', '>=', startOfCurrentWeekStr),
+      limit(1)
+    );
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      setHasCurrentWeekLoans(!snapshot.empty);
+    }, (err) => {
+      console.error('Error al verificar préstamos de la semana actual:', err);
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  const isNextWeekAllowed = hasCurrentWeekLoans;
+
   // Get Saturdays list where there was activity, sorted descending (newest first)
   const allAvailableWeeks = useMemo(() => {
     const saturdays: Date[] = [];
@@ -72,7 +102,12 @@ export function DebesClientPage({
     const startLimitDate = new Date('2026-07-04T00:00:00');
     const startSaturday = getSaturdayOfWeek(startLimitDate);
 
-    const maxDate = new Date(currentSaturday);
+    // Si ya hay préstamos registrados para la semana en curso, extender para permitir consultar la siguiente semana
+    let maxDate = new Date(currentSaturday);
+    if (isNextWeekAllowed) {
+      maxDate.setDate(maxDate.getDate() + 7);
+    }
+
     const currentTemp = new Date(startSaturday);
 
     while (currentTemp <= maxDate) {
@@ -80,14 +115,20 @@ export function DebesClientPage({
       currentTemp.setDate(currentTemp.getDate() + 7);
     }
     return saturdays.sort((a, b) => b.getTime() - a.getTime());
-  }, []);
+  }, [isNextWeekAllowed]);
 
   const [selectedWeek, setSelectedWeek] = useState<string>('');
 
-  // Initialize selectedWeek to the latest Saturday once
+  // Initialize selectedWeek to current Saturday (or latest available) once
   useEffect(() => {
     if (allAvailableWeeks.length > 0 && !selectedWeek) {
-      setSelectedWeek(allAvailableWeeks[0].toISOString().split('T')[0]);
+      const currentSatStr = getSaturdayOfWeek(getMexicoNow()).toISOString().split('T')[0];
+      const hasCurrent = allAvailableWeeks.some(w => w.toISOString().split('T')[0] === currentSatStr);
+      if (hasCurrent) {
+        setSelectedWeek(currentSatStr);
+      } else {
+        setSelectedWeek(allAvailableWeeks[0].toISOString().split('T')[0]);
+      }
     }
   }, [allAvailableWeeks, selectedWeek]);
 
@@ -350,14 +391,14 @@ export function DebesClientPage({
       }
 
       const saturdays: Date[] = [];
-      const maxDate = new Date(currentSaturday);
+      const maxDate = new Date(Math.max(currentSaturday.getTime(), targetWeekDate.getTime()));
       const currentTemp = new Date(startSaturday);
 
       while (currentTemp <= maxDate) {
         saturdays.push(new Date(currentTemp));
         currentTemp.setDate(currentTemp.getDate() + 7);
       }
-      const filteredSaturdays = saturdays.filter(d => d.getTime() <= currentSaturday.getTime());
+      const filteredSaturdays = saturdays.filter(d => d.getTime() <= maxDate.getTime());
       const chronoWeeks = filteredSaturdays.sort((a, b) => a.getTime() - b.getTime());
 
       const computedChronoRows: any[] = [];
