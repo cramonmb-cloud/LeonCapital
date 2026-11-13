@@ -47,7 +47,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { PlusCircle, Loader2, Trash, Edit, ShieldCheck, Lock, UserPlus, Users, LayoutDashboard, Landmark, FileWarning, Wallet, History, Activity, Search, AlertCircle, Smartphone, MapPin, Wrench, Settings, ArrowRightLeft, KeyRound, Building, CheckCircle2, Coins, Megaphone, UserCheck, Printer, FileSpreadsheet, BarChart3, Gift } from 'lucide-react';
+import { PlusCircle, Loader2, Trash, Edit, ShieldCheck, Lock, Unlock, UserPlus, Users, LayoutDashboard, Landmark, FileWarning, Wallet, History, Activity, Search, AlertCircle, Smartphone, MapPin, Wrench, Settings, ArrowRightLeft, KeyRound, Building, CheckCircle2, Coins, Megaphone, UserCheck, Printer, FileSpreadsheet, BarChart3, Gift } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/hooks/use-auth';
@@ -79,6 +79,7 @@ const permissionsSchema = z.object({
   cierreSemanal: z.boolean().default(false),
   resumen: z.boolean().default(false),
   aguinaldos: z.boolean().default(false),
+  unlockLoans: z.boolean().default(false),
   // Granular settings
   manageUsers: z.boolean().default(false),
   manageZones: z.boolean().default(false),
@@ -120,6 +121,7 @@ const permissionLabels: { id: keyof Omit<UserPermissions, 'showMobileNavBar' | '
     { id: 'clients', label: 'Clientes', description: 'Listado y registro de clientes', icon: Users },
     { id: 'consultarCliente', label: 'Consultar Cliente', description: 'Búsqueda rápida de perfiles', icon: Search },
     { id: 'loans', label: 'Préstamos', description: 'Hojas de cobranza semanal', icon: Landmark },
+    { id: 'unlockLoans', label: 'Desbloquear Préstamos', description: 'Permite desbloquear abonos de semanas en hojas para corregir fallas o pagos', icon: Unlock },
     { id: 'overduePortfolio', label: 'Pagos Pendientes', description: 'Clientes con fallos vigentes', icon: FileWarning },
     { id: 'carteraVencida', label: 'Cartera Vencida', description: 'Cuentas incobrables post-vencimiento', icon: History },
     { id: 'debes', label: 'Debes', description: 'Liquidación semanal de promotoras', icon: Coins },
@@ -230,6 +232,7 @@ export function UserManagement({ users }: UserManagementProps) {
         cierreSemanal: false,
         resumen: false,
         aguinaldos: false,
+        unlockLoans: false,
         manageUsers: false,
         manageZones: true,
         manageMigration: false,
@@ -274,6 +277,7 @@ export function UserManagement({ users }: UserManagementProps) {
             cierreSemanal: selectedUser.permissions?.cierreSemanal ?? false,
             resumen: selectedUser.permissions?.resumen ?? false,
             aguinaldos: selectedUser.permissions?.aguinaldos ?? false,
+            unlockLoans: selectedUser.permissions?.unlockLoans ?? false,
             manageUsers: selectedUser.permissions?.manageUsers ?? false,
             manageZones: selectedUser.permissions?.manageZones ?? false,
             manageMigration: selectedUser.permissions?.manageMigration ?? false,

@@ -348,6 +348,7 @@ export async function registerPaymentAction(loanId: string, paymentStartDate: Da
                         amount: remaining, 
                         isRecovered: isRecoveredStart,
                         isAdvance: isStartAdvance,
+                        isAccumulated: true,
                         paymentType: isStartAdvance ? 'adelanto_entrante' : isRecoveredStart ? 'recovered' : 'regular',
                         registeredWeekDate: isStartAdvance ? paymentWeekDateStr : existingStartP?.registeredWeekDate
                     });
@@ -357,6 +358,7 @@ export async function registerPaymentAction(loanId: string, paymentStartDate: Da
                         amount: weeklyPayment, 
                         isRecovered: isRecoveredStart,
                         isAdvance: isStartAdvance,
+                        isAccumulated: true,
                         paymentType: isStartAdvance ? 'adelanto_entrante' : isRecoveredStart ? 'recovered' : 'regular',
                         registeredWeekDate: isStartAdvance ? paymentWeekDateStr : existingStartP?.registeredWeekDate
                     });

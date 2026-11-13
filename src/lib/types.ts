@@ -204,6 +204,7 @@ export type UserPermissions = {
     cierreSemanal: boolean;
     resumen: boolean;
     aguinaldos?: boolean;
+    unlockLoans?: boolean;
     // Granular settings
     manageUsers: boolean;
     manageZones: boolean;

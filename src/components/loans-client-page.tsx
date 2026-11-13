@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useMemo } from 'react';
-import { MoreHorizontal, CheckCircle2, XCircle, Circle, AlertCircle, FileDown, Loader2, CalendarCog, BadgeDollarSign, Filter, ChevronDown, ChevronUp, RotateCcw, Search, Coins, ArrowUpRight, Check, History, ShieldAlert, UserCog, CalendarX2 } from 'lucide-react';
+import { MoreHorizontal, CheckCircle2, XCircle, Circle, AlertCircle, FileDown, Loader2, CalendarCog, BadgeDollarSign, Filter, ChevronDown, ChevronUp, RotateCcw, Search, Coins, ArrowUpRight, Check, History, ShieldAlert, UserCog, CalendarX2, Unlock } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   Card,
@@ -171,6 +171,95 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
   const [overdueAbonos, setOverdueAbonos] = useState<Record<string, number>>({});
   const [overdueGestores, setOverdueGestores] = useState<Record<string, string>>({});
   const [applyingAbonoLoanId, setApplyingAbonoLoanId] = useState<string | null>(null);
+
+  // Préstamos desbloqueados para corrección de abonos
+  const [unlockedLoanIds, setUnlockedLoanIds] = useState<Set<string>>(new Set());
+  const [securityWarningOpen, setSecurityWarningOpen] = useState(false);
+  const [pendingNavigationAction, setPendingNavigationAction] = useState<(() => void) | null>(null);
+
+  const canUnlockLoans = useMemo(() => {
+    return appUser?.role === 'admin' || Boolean(appUser?.permissions?.unlockLoans) || isCristobal;
+  }, [appUser, isCristobal]);
+
+  const handleToggleUnlockLoan = (loanId: string) => {
+    setUnlockedLoanIds(prev => {
+      const next = new Set(prev);
+      if (next.has(loanId)) {
+        next.delete(loanId);
+        toast({
+          title: 'Préstamo Bloqueado',
+          description: 'Las semanas del préstamo han vuelto a protegerse contra edición.',
+        });
+      } else {
+        next.add(loanId);
+        toast({
+          title: 'Préstamo Desbloqueado',
+          description: 'Ahora puedes hacer clic en cualquier semana registrada para corregir o registrar su abono.',
+        });
+      }
+      return next;
+    });
+  };
+
+  const unlockedClientNames = useMemo(() => {
+    if (unlockedLoanIds.size === 0) return [];
+    const names: string[] = [];
+    unlockedLoanIds.forEach(id => {
+      const l = loans.find(item => item.id === id);
+      if (l) {
+        const client = clients.find(c => c.id === l.clientId);
+        if (client?.name) {
+          names.push(client.name);
+        }
+      }
+    });
+    return names;
+  }, [unlockedLoanIds, loans, clients]);
+
+  const guardedAction = (action: () => void) => {
+    if (unlockedLoanIds.size > 0) {
+      setPendingNavigationAction(() => () => {
+        setUnlockedLoanIds(new Set());
+        action();
+      });
+      setSecurityWarningOpen(true);
+      return;
+    }
+    action();
+  };
+
+  useEffect(() => {
+    if (unlockedLoanIds.size === 0) return;
+
+    const handleAnchorClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement | null;
+      const anchor = target?.closest('a');
+      if (!anchor) return;
+
+      const href = anchor.getAttribute('href');
+      if (!href || href.startsWith('#') || href.startsWith('javascript:')) return;
+
+      e.preventDefault();
+      e.stopPropagation();
+
+      guardedAction(() => {
+        router.push(href);
+      });
+    };
+
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = '';
+    };
+
+    document.addEventListener('click', handleAnchorClick, true);
+    window.addEventListener('beforeunload', handleBeforeUnload);
+
+    return () => {
+      document.removeEventListener('click', handleAnchorClick, true);
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, [unlockedLoanIds, router]);
 
   const sortedPlazas = useMemo(() => [...plazas].sort((a, b) => (a?.name || '').localeCompare(b?.name || '')), [plazas]);
   const filteredLocalidades = useMemo(() => localidades.filter(l => l.plazaId === selectedPlaza).sort((a, b) => (a?.name || '').localeCompare(b?.name || '', 'es', { sensitivity: 'base' })), [localidades, selectedPlaza]);
@@ -1360,27 +1449,33 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
     };
 
     const handlePlazaChange = (plazaId: string) => {
-        setSelectedPlaza(plazaId);
-        setSelectedLocalidad('');
-        setSelectedPromotora('');
-        setSelectedWeek(null);
+        guardedAction(() => {
+            setSelectedPlaza(plazaId);
+            setSelectedLocalidad('');
+            setSelectedPromotora('');
+            setSelectedWeek(null);
+        });
     };
 
     const handleLocalidadChange = (localidadId: string) => {
-        setSelectedLocalidad(localidadId);
-        setSelectedWeek(null);
-        
-        const localPromotoras = promotoras.filter(p => p.localidadId === localidadId);
-        if (localPromotoras.length === 1) {
-            setSelectedPromotora(localPromotoras[0].id);
-        } else {
-            setSelectedPromotora('');
-        }
+        guardedAction(() => {
+            setSelectedLocalidad(localidadId);
+            setSelectedWeek(null);
+            
+            const localPromotoras = promotoras.filter(p => p.localidadId === localidadId);
+            if (localPromotoras.length === 1) {
+                setSelectedPromotora(localPromotoras[0].id);
+            } else {
+                setSelectedPromotora('');
+            }
+        });
     };
 
     const handlePromotoraChange = (promotoraId: string) => {
-        setSelectedPromotora(promotoraId);
-        setSelectedWeek(null);
+        guardedAction(() => {
+            setSelectedPromotora(promotoraId);
+            setSelectedWeek(null);
+        });
     };
 
     const toggleAllLoansSelection = () => {
@@ -1455,11 +1550,13 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
                                             key={p.id}
                                             type="button"
                                             onClick={() => {
-                                                setSelectedPlaza(p.plazaId);
-                                                setSelectedLocalidad(p.localidadId);
-                                                setSelectedPromotora(p.id);
-                                                setSelectedWeek(null);
-                                                setSearchTerm('');
+                                                guardedAction(() => {
+                                                    setSelectedPlaza(p.plazaId);
+                                                    setSelectedLocalidad(p.localidadId);
+                                                    setSelectedPromotora(p.id);
+                                                    setSelectedWeek(null);
+                                                    setSearchTerm('');
+                                                });
                                             }}
                                             className="w-full flex items-center justify-between px-3 py-2 hover:bg-primary/5 active:bg-primary/10 rounded-lg text-left transition-colors"
                                         >
@@ -1648,7 +1745,7 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
                                                 ? "bg-blue-50 text-blue-700 shadow-sm border border-blue-200/50 dark:bg-blue-950/40 dark:text-blue-300 dark:border-blue-800/60" 
                                                 : "text-muted-foreground hover:bg-background/50 hover:text-foreground"
                                         )}
-                                        onClick={() => setSelectedWeek(week)}
+                                        onClick={() => guardedAction(() => setSelectedWeek(week))}
                                         disabled={!selectedPromotora}
                                     >
                                         <div className="flex items-center justify-between w-full gap-2">
@@ -1780,13 +1877,15 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
                         const termInWeeks = originalLoanPlan.termInWeeks + (hasPenalty ? 1 : 0);
                         const weeklyPayment = getWeeklyPaymentAmount(loan);
                         const isHighlighted = checkIfLoanHighlighted(loan);
+                        const isLoanUnlocked = unlockedLoanIds.has(loan.id);
                         
                         return (
                         <TableRow 
                           key={loan.id} 
                           className={cn(
                             "bg-card transition-colors", 
-                            isHighlighted && "bg-amber-50 hover:bg-amber-100/70 dark:bg-amber-950/20 dark:hover:bg-amber-900/30 border-l-4 border-l-amber-500 shadow-sm"
+                            isHighlighted && "bg-amber-50 hover:bg-amber-100/70 dark:bg-amber-950/20 dark:hover:bg-amber-900/30 border-l-4 border-l-amber-500 shadow-sm",
+                            isLoanUnlocked && "bg-amber-50/70 dark:bg-amber-950/30 border-l-4 border-l-amber-600 shadow-sm"
                           )} 
                           data-state={selectedLoanIds.has(loan.id) && "selected"}
                         >
@@ -1801,9 +1900,16 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
                               </TableCell>
                           )}
                           <TableCell className={cn("font-extrabold sticky z-10 w-[150px] py-1 px-2 bg-inherit text-[11px] leading-tight text-slate-800 uppercase truncate", isCristobal ? "left-10" : "left-0")}>
-                            <Link href={`/inicio/clientes/${loan.clientId}`} className="hover:underline">
-                              {getClientName(loan.clientId)}
-                            </Link>
+                            <div className="flex items-center gap-1.5 truncate">
+                              <Link href={`/inicio/clientes/${loan.clientId}`} className="hover:underline truncate">
+                                {getClientName(loan.clientId)}
+                              </Link>
+                              {isLoanUnlocked && (
+                                <Badge variant="outline" className="text-[9px] border-amber-500 text-amber-700 dark:text-amber-300 bg-amber-100/80 dark:bg-amber-950/60 font-black px-1 py-0 h-4 leading-none shrink-0">
+                                  Desbloqueado
+                                </Badge>
+                              )}
+                            </div>
                           </TableCell>
                           <TableCell className="py-1 px-1 text-center text-[11px] font-extrabold text-slate-700">{formatCurrency(loan.amount)}</TableCell>
                           <TableCell className="py-1 px-1 text-center text-[11px] font-extrabold text-slate-700">{formatCurrency(weeklyPayment)}</TableCell>
@@ -1824,8 +1930,8 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
                                 const isAccumulated = weekStatus.isAccumulated || false;
                                 const isLoanPaid = (loan.status === 'Paid Off' || loan.status === 'Pagado desde CV');
 
-                                // Los campos de semanas adelantadas, semanas ya acumuladas o préstamos liquidados quedan bloqueados
-                                const isFieldBlocked = isAdvance || isAccumulated || isLoanPaid;
+                                // Los campos de semanas adelantadas, semanas ya acumuladas o préstamos liquidados quedan bloqueados salvo si el préstamo está desbloqueado
+                                const isFieldBlocked = !isLoanUnlocked && (isAdvance || isAccumulated || isLoanPaid);
                                 const canRegisterPayment = !isFieldBlocked;
  
                                 let statusInfo;
@@ -1897,7 +2003,9 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
                                                 <p>Estado: {statusInfo.text}</p>
                                                 {statusInfo.paid && <p>{statusInfo.paid}</p>}
                                                 {statusInfo.pending && <p className="text-destructive">{statusInfo.pending}</p>}
-                                                {isAdvance ? (
+                                                {isLoanUnlocked ? (
+                                                    <p className="text-xs text-amber-600 dark:text-amber-400 font-bold">Desbloqueado para corrección (clic para registrar o editar abono)</p>
+                                                ) : isAdvance ? (
                                                     <p className="text-xs text-blue-600 dark:text-blue-400 font-bold">Adelanto Entrante (Bloqueado)</p>
                                                 ) : isAccumulated ? (
                                                     <p className="text-xs text-amber-600 dark:text-amber-400 font-bold">Abono Acumulado (Definitivo - Bloqueado)</p>
@@ -1926,6 +2034,18 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
                                  <DropdownMenuItem asChild>
                                     <Link href={`/inicio/clientes/${loan.clientId}`}>Ver Detalles del Cliente</Link>
                                 </DropdownMenuItem>
+                                {canUnlockLoans && (
+                                    <DropdownMenuItem 
+                                        onClick={() => handleToggleUnlockLoan(loan.id)}
+                                        className={cn(
+                                            "font-semibold cursor-pointer",
+                                            isLoanUnlocked ? "text-amber-700 dark:text-amber-300" : "text-amber-600 dark:text-amber-400"
+                                        )}
+                                    >
+                                        <Unlock className="mr-2 h-4 w-4" />
+                                        {isLoanUnlocked ? "Bloquear Préstamo" : "Desbloquear"}
+                                    </DropdownMenuItem>
+                                )}
                                 {isCristobal && (
                                     <>
                                         <DropdownMenuItem 
@@ -2469,6 +2589,56 @@ export function LoansClientPage({ initialClients, initialLoanPlans, initialPlaza
                 >
                     {isAccumulatingAll ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CheckCircle2 className="mr-2 h-4 w-4" />}
                     {selectedCutoffWeek ? `Acumular hasta ${formatDate(selectedCutoffWeek)}` : 'Confirmar y Acumular'}
+                </AlertDialogAction>
+            </AlertDialogFooter>
+        </AlertDialogContent>
+    </AlertDialog>
+
+    {/* Diálogo de advertencia de seguridad para préstamos desbloqueados */}
+    <AlertDialog open={securityWarningOpen} onOpenChange={setSecurityWarningOpen}>
+        <AlertDialogContent className="max-w-md rounded-2xl p-6 border-slate-200 dark:border-zinc-800 shadow-2xl">
+            <AlertDialogHeader className="space-y-3">
+                <div className="w-12 h-12 rounded-full bg-amber-100 dark:bg-amber-950/50 flex items-center justify-center text-amber-600 dark:text-amber-400 mx-auto sm:mx-0">
+                    <ShieldAlert className="w-6 h-6" />
+                </div>
+                <AlertDialogTitle className="text-base font-black uppercase tracking-wider text-slate-800 dark:text-zinc-100">
+                    Aviso de Seguridad
+                </AlertDialogTitle>
+                <AlertDialogDescription className="text-xs text-slate-600 dark:text-zinc-400 leading-relaxed">
+                    Se detectó que el préstamo de{' '}
+                    <strong className="text-slate-900 dark:text-zinc-100 font-extrabold uppercase">
+                        {unlockedClientNames.length > 0 ? unlockedClientNames.join(', ') : 'cliente'}
+                    </strong>{' '}
+                    se encuentra desbloqueado. Por seguridad, se bloqueará de nuevo automáticamente antes de cambiar de sección o fecha para garantizar que los datos no se cambien por equivocación.
+                </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter className="flex-row gap-2 justify-end mt-4">
+                <AlertDialogCancel 
+                    onClick={() => {
+                        setPendingNavigationAction(null);
+                        setSecurityWarningOpen(false);
+                    }}
+                    className="h-9 rounded-xl px-4 text-xs font-bold"
+                >
+                    Cancelar
+                </AlertDialogCancel>
+                <AlertDialogAction 
+                    onClick={() => {
+                        const action = pendingNavigationAction;
+                        setPendingNavigationAction(null);
+                        setSecurityWarningOpen(false);
+                        setUnlockedLoanIds(new Set());
+                        toast({
+                            title: 'Préstamo Bloqueado por Seguridad',
+                            description: 'Se ha protegido el préstamo contra modificaciones accidentales.',
+                        });
+                        if (action) {
+                            action();
+                        }
+                    }}
+                    className="h-9 rounded-xl px-4 text-xs font-black uppercase tracking-wider bg-amber-600 hover:bg-amber-700 text-white"
+                >
+                    Aceptar y Bloquear
                 </AlertDialogAction>
             </AlertDialogFooter>
         </AlertDialogContent>
