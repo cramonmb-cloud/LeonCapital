@@ -90,6 +90,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               cierreSemanal: true,
               resumen: true,
               unlockLoans: true,
+              gastos: true,
               manageUsers: true,
               manageZones: true,
               manageMigration: true,

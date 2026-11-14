@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/hooks/use-auth';
 import type { UserPermissions } from '@/lib/types';
-import { LayoutDashboard, Users, Landmark, FileWarning, Wallet, Settings, Activity, Search, History, Coins, Megaphone, UserCheck, Printer, ShieldCheck, FileSpreadsheet, Lock, BarChart3, Gift, type LucideIcon } from 'lucide-react';
+import { LayoutDashboard, Users, Landmark, FileWarning, Wallet, Settings, Activity, Search, History, Coins, Megaphone, UserCheck, Printer, ShieldCheck, FileSpreadsheet, Lock, BarChart3, Gift, ReceiptText, type LucideIcon } from 'lucide-react';
 
 import { useState, useEffect, useMemo } from 'react';
 
@@ -20,6 +20,7 @@ export const allLinks: { href: string; label: string; id: string, icon: LucideIc
   { href: '/inicio/resumen', label: 'Resumen', id: 'resumen', icon: BarChart3 },
   { href: '/inicio/aguinaldos', label: 'Aguinaldos', id: 'aguinaldos', icon: Gift },
   { href: '/inicio/precaptura', label: 'Precaptura', id: 'precaptura', icon: FileSpreadsheet },
+  { href: '/inicio/gastos', label: 'Gastos', id: 'gastos', icon: ReceiptText },
   { href: '/inicio/cierre-semanal', label: 'Cierre Semanal', id: 'cierreSemanal', icon: Lock },
   { href: '/inicio/bitacora', label: 'Bitacora', id: 'wallet', icon: Wallet },
   { href: '/inicio/control', label: 'Control', id: 'control', icon: Activity },
@@ -68,6 +69,7 @@ export function MainNav({
       resumen: 'operacion',
       aguinaldos: 'administracion',
       precaptura: 'administracion',
+      gastos: 'administracion',
       cierreSemanal: 'administracion',
       wallet: 'administracion',
       control: 'administracion',
@@ -104,6 +106,10 @@ export function MainNav({
 
     if (link.id === 'aguinaldos') {
         return appUser.permissions ? (appUser.permissions.aguinaldos ?? true) : true;
+    }
+
+    if (link.id === 'gastos') {
+        return appUser.permissions ? (appUser.permissions.gastos ?? true) : true;
     }
 
     return appUser.permissions && appUser.permissions[link.id as keyof UserPermissions];

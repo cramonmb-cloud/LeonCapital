@@ -17,11 +17,13 @@ import { db } from '@/lib/firebase';
 import { cn, getSaturdayOfWeek, getMexicoNow, parseLocalDate, getLoanAbonoSalienteForWeek } from '@/lib/utils';
 import type { Client, LoanPlan, Loan, Plaza, Localidad, Promotora, AppConfig, Precaptura, PrecapturaRow, PrecapturaGasto, Personal } from '@/lib/types';
 import { savePrecapturaAction, getGastoConceptsAction, saveGastoConceptAction } from '@/app/inicio/precaptura/actions';
+import { addGastoAction, removeGastoAction } from '@/app/inicio/gastos/actions';
+import { ImportGastosExcelDialog } from '@/components/import-gastos-excel-dialog';
 import { useAuth } from '@/hooks/use-auth';
 import { 
   Save, Loader2, Building, Calendar, 
   Printer, DollarSign, UserCheck, Plus, Trash2,
-  FolderLock, FolderOpen, RefreshCw
+  FolderLock, FolderOpen, RefreshCw, FileSpreadsheet
 } from 'lucide-react';
 import jsPDF from 'jspdf';
 import 'jspdf-autotable';
@@ -592,6 +594,13 @@ export function PrecapturaClientPage({
   const [savedDocRows, setSavedDocRows] = useState<Record<string, PrecapturaRow>>({});
   const [isSaving, setIsSaving] = useState<boolean>(false);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState<boolean>(false);
+  const hasUnsavedChangesRef = useRef<boolean>(false);
+  useEffect(() => {
+    hasUnsavedChangesRef.current = hasUnsavedChanges;
+  }, [hasUnsavedChanges]);
+
+  // Modals state
+  const [isImportModalOpen, setIsImportModalOpen] = useState<boolean>(false);
 
   // New Gasto Form state
   const [nuevoConcepto, setNuevoConcepto] = useState<string>('');
@@ -624,45 +633,51 @@ export function PrecapturaClientPage({
         const data = docSnap.data() as Precaptura;
         setIsSavedInDb(true);
         setIsClosed(!!data.isClosed);
-        setFondo(data.fondo || 0);
-        setAcumularSupervision(!!data.acumularSupervision);
-        setObservaciones(data.observaciones || '');
         setGastos(data.gastos || []);
-        const savedRows = data.rows;
-        if (savedRows && Object.keys(savedRows).length > 0) {
-          setSavedDocRows(savedRows as Record<string, PrecapturaRow>);
-          // Si el grupo no está cerrado y todas las filas tenían 8% (antiguo valor default del sistema),
-          // restablecer comicionPercent a 0 para permitir la captura manual como solicitó el usuario
-          const rowsList = Object.values(savedRows);
-          const allEight = rowsList.length > 0 && rowsList.every(r => r.comicionPercent === 8 || r.comicionPercent === undefined);
-          if (allEight && !data.isClosed) {
-            const cleanedRows: Record<string, Partial<PrecapturaRow>> = {};
-            Object.keys(savedRows).forEach(k => {
-              cleanedRows[k] = {
-                ...savedRows[k],
-                comicionPercent: 0,
-                comision: 0,
-              };
-            });
-            setRowsOverrides(cleanedRows);
+
+        if (!hasUnsavedChangesRef.current) {
+          setFondo(data.fondo || 0);
+          setAcumularSupervision(!!data.acumularSupervision);
+          setObservaciones(data.observaciones || '');
+          const savedRows = data.rows;
+          if (savedRows && Object.keys(savedRows).length > 0) {
+            setSavedDocRows(savedRows as Record<string, PrecapturaRow>);
+            // Si el grupo no está cerrado y todas las filas tenían 8% (antiguo valor default del sistema),
+            // restablecer comicionPercent a 0 para permitir la captura manual como solicitó el usuario
+            const rowsList = Object.values(savedRows);
+            const allEight = rowsList.length > 0 && rowsList.every(r => r.comicionPercent === 8 || r.comicionPercent === undefined);
+            if (allEight && !data.isClosed) {
+              const cleanedRows: Record<string, Partial<PrecapturaRow>> = {};
+              Object.keys(savedRows).forEach(k => {
+                cleanedRows[k] = {
+                  ...savedRows[k],
+                  comicionPercent: 0,
+                  comision: 0,
+                };
+              });
+              setRowsOverrides(cleanedRows);
+            } else {
+              setRowsOverrides(savedRows);
+            }
           } else {
-            setRowsOverrides(savedRows);
+            setSavedDocRows({});
+            setRowsOverrides({});
           }
-        } else {
-          setSavedDocRows({});
-          setRowsOverrides({});
+          setHasUnsavedChanges(false);
         }
       } else {
-        setIsSavedInDb(false);
-        setIsClosed(false);
-        setFondo(0);
-        setAcumularSupervision(false);
-        setObservaciones('');
-        setGastos([]);
-        setSavedDocRows({});
-        setRowsOverrides({});
+        if (!hasUnsavedChangesRef.current) {
+          setIsSavedInDb(false);
+          setIsClosed(false);
+          setFondo(0);
+          setAcumularSupervision(false);
+          setObservaciones('');
+          setGastos([]);
+          setSavedDocRows({});
+          setRowsOverrides({});
+          setHasUnsavedChanges(false);
+        }
       }
-      setHasUnsavedChanges(false);
     }, (err) => {
       console.warn('Error reading precaptura snapshot:', err);
     });
@@ -1181,7 +1196,13 @@ export function PrecapturaClientPage({
     setNuevoConcepto('');
     setNuevoImporte('');
     setNuevasObservaciones('');
-    setHasUnsavedChanges(true);
+
+    // Persistir directamente en Firestore para sincronización en tiempo real con Gastos
+    if (selectedPlaza && selectedWeek) {
+      addGastoAction(selectedPlaza, selectedWeek, newGasto, currentPlazaName, appUser?.username).catch(err => {
+        console.error('Error sincronizando gasto en Firestore:', err);
+      });
+    }
 
     saveGastoConceptAction(cleanConcept);
     if (!gastoConcepts.includes(cleanConcept)) {
@@ -1197,7 +1218,13 @@ export function PrecapturaClientPage({
   // Remove a gasto
   const handleRemoveGasto = (id: string) => {
     setGastos(prev => prev.filter(g => g.id !== id));
-    setHasUnsavedChanges(true);
+    
+    // Persistir eliminación directamente en Firestore para sincronización en tiempo real
+    if (selectedPlaza && selectedWeek) {
+      removeGastoAction(selectedPlaza, selectedWeek, id, appUser?.username).catch(err => {
+        console.error('Error eliminando gasto en Firestore:', err);
+      });
+    }
   };
 
   // Apply bulk commission %
@@ -1882,14 +1909,26 @@ export function PrecapturaClientPage({
         {/* Gastos Section (Left - 6 cols) */}
         <Card className="lg:col-span-6 border border-slate-300 dark:border-zinc-800 shadow-sm bg-white dark:bg-zinc-950">
           <CardHeader className="py-2.5 px-3 border-b flex flex-row items-center justify-between">
-            <div>
+            <div className="flex items-center gap-2">
               <CardTitle className="text-xs font-bold uppercase tracking-wider text-slate-800 dark:text-zinc-200">
                 Gastos
               </CardTitle>
             </div>
-            <span className="font-black text-xs text-slate-900 dark:text-white">
-              Total: {formatCurrency(totalGastos)}
-            </span>
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setIsImportModalOpen(true)}
+                className="h-6 px-2 text-[11px] font-bold flex items-center gap-1 border-emerald-600 text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-950/40"
+              >
+                <FileSpreadsheet className="h-3 w-3 text-emerald-600" />
+                Importar Excel
+              </Button>
+              <span className="font-black text-xs text-slate-900 dark:text-white">
+                Total: {formatCurrency(totalGastos)}
+              </span>
+            </div>
           </CardHeader>
 
           <CardContent className="p-3 space-y-3">
@@ -2263,6 +2302,23 @@ export function PrecapturaClientPage({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Modal: Importar Gastos desde Excel */}
+      <ImportGastosExcelDialog
+        open={isImportModalOpen}
+        onOpenChange={setIsImportModalOpen}
+        weekDate={selectedWeek}
+        plazas={initialPlazas}
+        targetPlazaId={selectedPlaza}
+        targetPlazaName={currentPlazaName}
+        onImportLocal={(newGastos, mode) => {
+          if (mode === 'replace') {
+            setGastos(newGastos);
+          } else {
+            setGastos(prev => [...prev, ...newGastos]);
+          }
+        }}
+      />
     </div>
   );
 }

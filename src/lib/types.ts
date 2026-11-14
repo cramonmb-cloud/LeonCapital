@@ -205,6 +205,7 @@ export type UserPermissions = {
     resumen: boolean;
     aguinaldos?: boolean;
     unlockLoans?: boolean;
+    gastos?: boolean;
     // Granular settings
     manageUsers: boolean;
     manageZones: boolean;
