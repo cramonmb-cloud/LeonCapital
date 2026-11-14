@@ -775,7 +775,7 @@ export async function syncWithSupervisorAppAction(
 }
 
 export async function saveMenuConfigAction(
-    menuConfig: Record<string, 'operacion' | 'administracion'>,
+    menuConfig: Record<string, 'operacion' | 'administracion' | 'gestion'>,
     menuOrder?: string[]
 ) {
     try {
@@ -788,10 +788,14 @@ export async function saveMenuConfigAction(
     }
 }
 
-export async function saveMenuColorsAction(operacionColor: string, administracionColor: string) {
+export async function saveMenuColorsAction(operacionColor: string, administracionColor: string, gestionColor?: string) {
     try {
         const configRef = doc(db, 'config', 'main');
-        await setDoc(configRef, { operacionColor, administracionColor }, { merge: true });
+        await setDoc(configRef, { 
+            operacionColor, 
+            administracionColor,
+            ...(gestionColor ? { gestionColor } : {})
+        }, { merge: true });
         revalidatePath('/inicio', 'layout');
         return { success: true, message: 'Colores de los menús guardados con éxito.' };
     } catch (error: any) {

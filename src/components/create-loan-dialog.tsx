@@ -44,7 +44,7 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import type { Client, Loan, LoanPlan, Promotora, Plaza, Localidad } from '@/lib/types';
-import { PlusCircle, Loader2, AlertTriangle, BadgeDollarSign, Calendar, CheckCircle2, X, Check } from 'lucide-react';
+import { PlusCircle, Loader2, AlertTriangle, BadgeDollarSign, Calendar, CheckCircle2, X, Check, User } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { createLoanAction, payOffLoanAction } from '@/app/inicio/actions';
 import { useRouter } from 'next/navigation';
@@ -54,7 +54,7 @@ import { IdScanner } from './id-scanner';
 import type { IdDataOutput } from '@/ai/flows/extract-id-data-flow';
 import { useAuth } from '@/hooks/use-auth';
 import { useRealtimeData } from '@/hooks/use-realtime-data';
-import { getCurrentLoanWeekNumber, parseEndorsement, getMexicoNow, getSaturdayOfWeek, getExtraWeekThreshold, doesLoanHavePenalty } from '@/lib/utils';
+import { getCurrentLoanWeekNumber, parseEndorsement, getMexicoNow, getSaturdayOfWeek, getExtraWeekThreshold, doesLoanHavePenalty, formatPhoneNumber } from '@/lib/utils';
 
 const stepOneSchema = z.object({
   promotoraId: z.string().min(1, 'Debes seleccionar una promotora.'),
@@ -64,7 +64,10 @@ const stepOneSchema = z.object({
 });
 
 const stepTwoSchema = z.object({
-  phone: z.string().optional(),
+  phone: z.string().optional().refine(
+    (val) => !val || val.trim() === '' || val.replace(/\D/g, '').length === 10,
+    { message: 'El teléfono debe contener 10 dígitos.' }
+  ),
   street: z.string().optional(),
   neighborhood: z.string().optional(),
   postalCode: z.string().optional(),
@@ -75,7 +78,10 @@ const stepTwoSchema = z.object({
   endorsementNeighborhood: z.string().optional(),
   endorsementPostalCode: z.string().optional(),
   endorsementCity: z.string().optional(),
-  endorsementPhone: z.string().optional(),
+  endorsementPhone: z.string().optional().refine(
+    (val) => !val || val.trim() === '' || val.replace(/\D/g, '').length === 10,
+    { message: 'El teléfono del aval debe contener 10 dígitos.' }
+  ),
   endorsementGuarantee: z.string().optional(),
 });
 
@@ -166,7 +172,8 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
   const [activeLoanDetails, setActiveLoanDetails] = useState<ActiveLoanDetails | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isPayingOff, setIsPayingOff] = useState(false);
-  const [showConfirmation, setShowConfirmation] = useState(false);
+  const [showIncompleteModal, setShowIncompleteModal] = useState(false);
+  const [missingFields, setMissingFields] = useState<string[]>([]);
   const [formValues, setFormValues] = useState<LoanFormValues | null>(null);
   
   const [selectedPlaza, setSelectedPlaza] = useState(initialSelection?.plazaId || '');
@@ -232,13 +239,16 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
   const watchLoanPlanId = form.watch('loanPlanId');
   const watchAmount = form.watch('amount');
   const watchPromotoraId = form.watch('promotoraId');
+  const watchClientName = form.watch('clientName') || '';
 
   const watchNeighborhood = form.watch('neighborhood') || '';
   const filteredClientColonies = useMemo(() => {
     if (!clientColonies.length) return [];
     const query = watchNeighborhood.trim().toUpperCase();
-    if (!query) return clientColonies;
-    const filtered = clientColonies.filter(c => c.includes(query));
+    if (!query || clientColonies.some(c => c.trim().toUpperCase() === query)) {
+      return clientColonies;
+    }
+    const filtered = clientColonies.filter(c => c.trim().toUpperCase().includes(query));
     return filtered.length > 0 ? filtered : clientColonies;
   }, [clientColonies, watchNeighborhood]);
 
@@ -246,8 +256,10 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
   const filteredEndorsementColonies = useMemo(() => {
     if (!endorsementColonies.length) return [];
     const query = watchEndorsementNeighborhood.trim().toUpperCase();
-    if (!query) return endorsementColonies;
-    const filtered = endorsementColonies.filter(c => c.includes(query));
+    if (!query || endorsementColonies.some(c => c.trim().toUpperCase() === query)) {
+      return endorsementColonies;
+    }
+    const filtered = endorsementColonies.filter(c => c.trim().toUpperCase().includes(query));
     return filtered.length > 0 ? filtered : endorsementColonies;
   }, [endorsementColonies, watchEndorsementNeighborhood]);
 
@@ -933,7 +945,7 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
                 });
                 
                 router.refresh();
-                setShowConfirmation(false);
+                setShowIncompleteModal(false);
                 setFormValues(null);
                 // NO cerramos la ventana: volvemos al paso 1 para capturar al siguiente cliente
                 setStep(1);
@@ -978,12 +990,37 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
                 title: 'Error al Crear Préstamo',
                 description: error.message || 'Hubo un error al crear el préstamo. Por favor, inténtelo de nuevo.',
             });
-            setShowConfirmation(false);
+            setShowIncompleteModal(false);
         } finally {
             setIsSubmitting(false);
         }
     };
 
+  const checkIsIncomplete = (values: LoanFormValues) => {
+    const missing: string[] = [];
+    
+    // Cliente
+    if (!values.street?.trim()) missing.push('Calle y Número');
+    if (!values.postalCode?.trim()) missing.push('C.P.');
+    if (!values.neighborhood?.trim()) missing.push('Colonia');
+    if (!values.city?.trim()) missing.push('Ciudad o Localidad');
+    if (!values.phone?.trim()) missing.push('Teléfono');
+    if (!cleanGuaranteeValue(values.guarantee)) missing.push('Garantías del cliente');
+
+    // Aval
+    if (!values.endorsement?.trim()) {
+      missing.push('Datos del aval');
+    } else {
+      if (!values.endorsementStreet?.trim()) missing.push('Calle del aval');
+      if (!values.endorsementPostalCode?.trim()) missing.push('C.P. del aval');
+      if (!values.endorsementNeighborhood?.trim()) missing.push('Colonia del aval');
+      if (!values.endorsementCity?.trim()) missing.push('Ciudad del aval');
+      if (!values.endorsementPhone?.trim()) missing.push('Teléfono del aval');
+      if (!cleanGuaranteeValue(values.endorsementGuarantee)) missing.push('Garantías del aval');
+    }
+
+    return missing;
+  };
 
   const onSubmit = async (values: LoanFormValues) => {
     if (step === 1) {
@@ -1002,9 +1039,17 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
       }
     }
 
-    // Always require confirmation before creating the credit
-    setFormValues(values);
-    setShowConfirmation(true);
+    // Comprobar si falta información por capturar
+    const missing = checkIsIncomplete(values);
+    if (missing.length > 0) {
+      setMissingFields(missing);
+      setFormValues(values);
+      setShowIncompleteModal(true);
+      return;
+    }
+
+    // Si toda la información está completa, registrar directamente sin confirmación doble
+    await proceedWithSubmission(values);
   };
 
   const handleOpenChange = (newOpen: boolean) => {
@@ -1127,38 +1172,84 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
         setActiveLoanDetails(null);
     };
 
+    const getMostCommonColony = (cp: string, colonies: string[]): string => {
+      if (!colonies || colonies.length === 0) return '';
+      if (colonies.length === 1) return colonies[0];
+
+      const cleaned = (cp || '').replace(/\D/g, '').padStart(5, '0');
+      const frequencyMap: Record<string, number> = {};
+      
+      clients.forEach(c => {
+        const cCp = (c.postalCode || '').replace(/\D/g, '').padStart(5, '0');
+        if (cCp === cleaned && c.neighborhood) {
+          const n = c.neighborhood.trim().toUpperCase();
+          frequencyMap[n] = (frequencyMap[n] || 0) + 1;
+        }
+        if (c.endorsement && typeof c.endorsement === 'object') {
+          const endorsementObj = c.endorsement as { postalCode?: string; neighborhood?: string };
+          const eCp = (endorsementObj.postalCode || '').replace(/\D/g, '').padStart(5, '0');
+          if (eCp === cleaned && endorsementObj.neighborhood) {
+            const n = endorsementObj.neighborhood.trim().toUpperCase();
+            frequencyMap[n] = (frequencyMap[n] || 0) + 1;
+          }
+        }
+      });
+
+      let best = '';
+      let maxCount = 0;
+
+      colonies.forEach(col => {
+        const count = frequencyMap[col.trim().toUpperCase()] || 0;
+        if (count > maxCount) {
+          maxCount = count;
+          best = col;
+        }
+      });
+
+      // Si hay colonias con frecuencia previa registrada en la app, usar la más común
+      if (best && maxCount > 0) {
+        return best;
+      }
+
+      // Si no hay historial o ninguna tiene registros:
+      // Priorizar CENTRO / ZONA CENTRO o la que contenga CENTRO (ej: CIUDAD GUZMAN CENTRO)
+      const centroColony = colonies.find(c => {
+        const upper = c.trim().toUpperCase();
+        return upper === 'CENTRO' || upper === 'ZONA CENTRO' || upper.endsWith(' CENTRO') || upper.startsWith('CENTRO ') || upper.includes('CENTRO');
+      });
+
+      if (centroColony) {
+        return centroColony;
+      }
+
+      return colonies[0];
+    };
+
     const applyPostalCodeData = (
       data: { colony?: string; colonies?: string[]; city?: string },
-      target: 'client' | 'endorsement'
+      target: 'client' | 'endorsement',
+      cpUsed?: string
     ) => {
       const coloniesList = (data.colonies && data.colonies.length > 0)
         ? data.colonies
         : (data.colony ? [data.colony] : []);
 
+      const bestColony = getMostCommonColony(cpUsed || '', coloniesList);
+
       if (target === 'client') {
         if (data.city) form.setValue('city', data.city.toUpperCase());
         setClientColonies(coloniesList);
-        if (coloniesList.length === 1) {
-          form.setValue('neighborhood', coloniesList[0]);
-          setShowClientColonies(false);
-        } else if (coloniesList.length > 1) {
-          setShowClientColonies(true);
-          if (!form.getValues('neighborhood')) {
-            form.setValue('neighborhood', coloniesList[0]);
-          }
+        if (bestColony) {
+          form.setValue('neighborhood', bestColony);
         }
+        setShowClientColonies(false);
       } else {
         if (data.city) form.setValue('endorsementCity', data.city.toUpperCase());
         setEndorsementColonies(coloniesList);
-        if (coloniesList.length === 1) {
-          form.setValue('endorsementNeighborhood', coloniesList[0]);
-          setShowEndorsementColonies(false);
-        } else if (coloniesList.length > 1) {
-          setShowEndorsementColonies(true);
-          if (!form.getValues('endorsementNeighborhood')) {
-            form.setValue('endorsementNeighborhood', coloniesList[0]);
-          }
+        if (bestColony) {
+          form.setValue('endorsementNeighborhood', bestColony);
         }
+        setShowEndorsementColonies(false);
       }
     };
 
@@ -1180,7 +1271,7 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
         const memColonies = Array.from(new Set(matches.map(c => (c.neighborhood || '').trim().toUpperCase()).filter(Boolean)));
         const memCity = matches.find(c => c.city)?.city || '';
         if (memColonies.length > 0 || memCity) {
-          applyPostalCodeData({ colony: memColonies[0], colonies: memColonies, city: memCity }, target);
+          applyPostalCodeData({ colony: memColonies[0], colonies: memColonies, city: memCity }, target, formattedCp);
         }
       }
 
@@ -1206,7 +1297,7 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
                 colony: coloniesList[0] || '',
                 colonies: coloniesList,
                 city: city,
-              }, target);
+              }, target, formattedCp);
               return;
             }
           }
@@ -1221,7 +1312,7 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
         if (res.ok) {
           const data = await res.json();
           if (data.success && (data.colonies?.length || data.colony || data.city)) {
-            applyPostalCodeData(data, target);
+            applyPostalCodeData(data, target, formattedCp);
             return;
           }
         }
@@ -1244,7 +1335,7 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
           });
           const directColonies = Array.from(directColoniesSet);
           if (directColonies.length > 0) {
-            applyPostalCodeData({ colony: directColonies[0], colonies: directColonies, city: directCity }, target);
+            applyPostalCodeData({ colony: directColonies[0], colonies: directColonies, city: directCity }, target, formattedCp);
           }
         }
       } catch {
@@ -1544,7 +1635,17 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
               <div className="grid grid-cols-1 md:grid-cols-2 gap-5 py-1">
                 {/* Column 1: Datos del Cliente */}
                 <div className="space-y-3 p-4 bg-zinc-50/70 dark:bg-zinc-900/40 border border-zinc-200/50 dark:border-zinc-800/80 shadow-md rounded-xl">
-                  <h3 className="text-xs font-black uppercase tracking-widest text-blue-900 dark:text-blue-300 border-b pb-1">Datos del Cliente</h3>
+                  <div className="border-b pb-2">
+                    <h3 className="text-xs font-black uppercase tracking-widest text-blue-900 dark:text-blue-300">Datos del Cliente</h3>
+                    {watchClientName && (
+                      <div className="mt-1.5 flex items-center gap-2 bg-blue-50/80 dark:bg-blue-950/40 px-3 py-2 rounded-lg border border-blue-200/70 dark:border-blue-800/50">
+                        <User className="h-4 w-4 text-blue-600 dark:text-blue-400 shrink-0" />
+                        <span className="text-sm font-black text-slate-900 dark:text-white uppercase tracking-tight">
+                          {watchClientName}
+                        </span>
+                      </div>
+                    )}
+                  </div>
                   
                   {/* 1.- CALLE Y NUMERO */}
                   <FormField
@@ -1558,7 +1659,7 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
                             placeholder="Ej: Av. Principal 123" 
                             {...field} 
                             value={field.value || ''} 
-                            onKeyDown={(e) => handleFieldEnter(e, 'neighborhood')}
+                            onKeyDown={(e) => handleFieldEnter(e, 'postalCode')}
                             className="h-9 text-xs uppercase font-bold placeholder:text-zinc-400 placeholder:normal-case placeholder:font-normal" 
                           />
                         </FormControl>
@@ -1567,8 +1668,42 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
                     )}
                   />
 
-                  {/* 2.- COLONIA y 3.- C.P. */}
+                  {/* 2.- C.P. y 3.- COLONIA */}
                   <div className="grid grid-cols-3 gap-2">
+                    <div className="col-span-1">
+                      <FormField
+                        control={form.control}
+                        name="postalCode"
+                        render={({ field }) => (
+                          <FormItem className="space-y-1">
+                            <FormLabel className="text-[9px] font-black uppercase text-muted-foreground">C.P.</FormLabel>
+                            <FormControl>
+                              <Input 
+                                placeholder="63000" 
+                                {...field} 
+                                value={field.value || ''} 
+                                onChange={(e) => {
+                                  field.onChange(e);
+                                  handlePostalCodeLookup(e.target.value, 'client');
+                                }}
+                                onBlur={(e) => {
+                                  field.onBlur();
+                                  handlePostalCodeLookup(e.target.value, 'client', true);
+                                }}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') {
+                                    handlePostalCodeLookup(e.currentTarget.value, 'client', true);
+                                  }
+                                  handleFieldEnter(e, 'neighborhood');
+                                }}
+                                className="h-9 text-xs uppercase font-bold placeholder:text-zinc-400 placeholder:normal-case placeholder:font-normal" 
+                              />
+                            </FormControl>
+                            <FormMessage className="text-[9px]" />
+                          </FormItem>
+                        )}
+                      />
+                    </div>
                     <div className="col-span-2 relative">
                       <FormField
                         control={form.control}
@@ -1586,6 +1721,11 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
                                     setShowClientColonies(true);
                                   }
                                 }}
+                                onClick={() => {
+                                  if (clientColonies.length > 1) {
+                                    setShowClientColonies(true);
+                                  }
+                                }}
                                 onChange={(e) => {
                                   field.onChange(e);
                                   if (clientColonies.length > 1) {
@@ -1596,7 +1736,7 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
                                   field.onBlur();
                                   setTimeout(() => setShowClientColonies(false), 200);
                                 }}
-                                onKeyDown={(e) => handleFieldEnter(e, 'postalCode')}
+                                onKeyDown={(e) => handleFieldEnter(e, 'city')}
                                 className="h-9 text-xs uppercase font-bold placeholder:text-zinc-400 placeholder:normal-case placeholder:font-normal" 
                               />
                             </FormControl>
@@ -1632,45 +1772,11 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
                         </Card>
                       )}
                     </div>
-                    <div className="col-span-1">
-                      <FormField
-                        control={form.control}
-                        name="postalCode"
-                        render={({ field }) => (
-                          <FormItem className="space-y-1">
-                            <FormLabel className="text-[9px] font-black uppercase text-muted-foreground">C.P.</FormLabel>
-                            <FormControl>
-                              <Input 
-                                placeholder="63000" 
-                                {...field} 
-                                value={field.value || ''} 
-                                onChange={(e) => {
-                                  field.onChange(e);
-                                  handlePostalCodeLookup(e.target.value, 'client');
-                                }}
-                                onBlur={(e) => {
-                                  field.onBlur();
-                                  handlePostalCodeLookup(e.target.value, 'client', true);
-                                }}
-                                onKeyDown={(e) => {
-                                  if (e.key === 'Enter') {
-                                    handlePostalCodeLookup(e.currentTarget.value, 'client', true);
-                                  }
-                                  handleFieldEnter(e, 'city');
-                                }}
-                                className="h-9 text-xs uppercase font-bold placeholder:text-zinc-400 placeholder:normal-case placeholder:font-normal" 
-                              />
-                            </FormControl>
-                            <FormMessage className="text-[9px]" />
-                          </FormItem>
-                        )}
-                      />
-                    </div>
                   </div>
 
                   {/* 4.- CIUDAD O LOCALIDAD y 5.- TELEFONO */}
-                  <div className="grid grid-cols-3 gap-2">
-                    <div className="col-span-2">
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
                       <FormField
                         control={form.control}
                         name="city"
@@ -1691,7 +1797,7 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
                         )}
                       />
                     </div>
-                    <div className="col-span-1">
+                    <div>
                       <FormField
                         control={form.control}
                         name="phone"
@@ -1700,11 +1806,17 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
                             <FormLabel className="text-[9px] font-black uppercase text-muted-foreground">Teléfono</FormLabel>
                             <FormControl>
                               <Input 
-                                placeholder="Ej: 311-000-000" 
+                                placeholder="311 000 0000" 
                                 {...field} 
-                                value={field.value || ''} 
+                                value={formatPhoneNumber(field.value || '')} 
+                                onChange={(e) => {
+                                  const formatted = formatPhoneNumber(e.target.value);
+                                  field.onChange(formatted);
+                                }}
+                                maxLength={12}
+                                inputMode="numeric"
                                 onKeyDown={(e) => handleFieldEnter(e, 'guarantee')}
-                                className="h-9 text-xs uppercase font-bold placeholder:text-zinc-400 placeholder:normal-case placeholder:font-normal" 
+                                className="h-9 text-xs font-bold placeholder:text-zinc-400 placeholder:normal-case placeholder:font-normal font-mono" 
                               />
                             </FormControl>
                             <FormMessage className="text-[9px]" />
@@ -1813,7 +1925,7 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
                             placeholder="Domicilio del aval" 
                             {...field} 
                             value={field.value || ''} 
-                            onKeyDown={(e) => handleFieldEnter(e, 'endorsementNeighborhood')}
+                            onKeyDown={(e) => handleFieldEnter(e, 'endorsementPostalCode')}
                             className="h-9 text-xs uppercase font-bold placeholder:text-zinc-400 placeholder:normal-case placeholder:font-normal" 
                           />
                         </FormControl>
@@ -1822,8 +1934,42 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
                     )}
                   />
 
-                  {/* 3.- COLONIA y 4.- C.P. */}
+                  {/* 3.- C.P. y 4.- COLONIA */}
                   <div className="grid grid-cols-3 gap-2">
+                    <div className="col-span-1">
+                      <FormField
+                        control={form.control}
+                        name="endorsementPostalCode"
+                        render={({ field }) => (
+                          <FormItem className="space-y-1">
+                            <FormLabel className="text-[9px] font-black uppercase text-muted-foreground">C.P.</FormLabel>
+                            <FormControl>
+                              <Input 
+                                placeholder="63000" 
+                                {...field} 
+                                value={field.value || ''} 
+                                onChange={(e) => {
+                                  field.onChange(e);
+                                  handlePostalCodeLookup(e.target.value, 'endorsement');
+                                }}
+                                onBlur={(e) => {
+                                  field.onBlur();
+                                  handlePostalCodeLookup(e.target.value, 'endorsement', true);
+                                }}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') {
+                                    handlePostalCodeLookup(e.currentTarget.value, 'endorsement', true);
+                                  }
+                                  handleFieldEnter(e, 'endorsementNeighborhood');
+                                }}
+                                className="h-9 text-xs uppercase font-bold placeholder:text-zinc-400 placeholder:normal-case placeholder:font-normal" 
+                              />
+                            </FormControl>
+                            <FormMessage className="text-[9px]" />
+                          </FormItem>
+                        )}
+                      />
+                    </div>
                     <div className="col-span-2 relative">
                       <FormField
                         control={form.control}
@@ -1841,6 +1987,11 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
                                     setShowEndorsementColonies(true);
                                   }
                                 }}
+                                onClick={() => {
+                                  if (endorsementColonies.length > 1) {
+                                    setShowEndorsementColonies(true);
+                                  }
+                                }}
                                 onChange={(e) => {
                                   field.onChange(e);
                                   if (endorsementColonies.length > 1) {
@@ -1851,7 +2002,7 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
                                   field.onBlur();
                                   setTimeout(() => setShowEndorsementColonies(false), 200);
                                 }}
-                                onKeyDown={(e) => handleFieldEnter(e, 'endorsementPostalCode')}
+                                onKeyDown={(e) => handleFieldEnter(e, 'endorsementCity')}
                                 className="h-9 text-xs uppercase font-bold placeholder:text-zinc-400 placeholder:normal-case placeholder:font-normal" 
                               />
                             </FormControl>
@@ -1887,45 +2038,11 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
                         </Card>
                       )}
                     </div>
-                    <div className="col-span-1">
-                      <FormField
-                        control={form.control}
-                        name="endorsementPostalCode"
-                        render={({ field }) => (
-                          <FormItem className="space-y-1">
-                            <FormLabel className="text-[9px] font-black uppercase text-muted-foreground">C.P.</FormLabel>
-                            <FormControl>
-                              <Input 
-                                placeholder="63000" 
-                                {...field} 
-                                value={field.value || ''} 
-                                onChange={(e) => {
-                                  field.onChange(e);
-                                  handlePostalCodeLookup(e.target.value, 'endorsement');
-                                }}
-                                onBlur={(e) => {
-                                  field.onBlur();
-                                  handlePostalCodeLookup(e.target.value, 'endorsement', true);
-                                }}
-                                onKeyDown={(e) => {
-                                  if (e.key === 'Enter') {
-                                    handlePostalCodeLookup(e.currentTarget.value, 'endorsement', true);
-                                  }
-                                  handleFieldEnter(e, 'endorsementCity');
-                                }}
-                                className="h-9 text-xs uppercase font-bold placeholder:text-zinc-400 placeholder:normal-case placeholder:font-normal" 
-                              />
-                            </FormControl>
-                            <FormMessage className="text-[9px]" />
-                          </FormItem>
-                        )}
-                      />
-                    </div>
                   </div>
 
                   {/* 5.- CIUDAD O LOCALIDAD y 6.- TELEFONO */}
-                  <div className="grid grid-cols-3 gap-2">
-                    <div className="col-span-2">
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
                       <FormField
                         control={form.control}
                         name="endorsementCity"
@@ -1946,7 +2063,7 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
                         )}
                       />
                     </div>
-                    <div className="col-span-1">
+                    <div>
                       <FormField
                         control={form.control}
                         name="endorsementPhone"
@@ -1955,11 +2072,17 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
                             <FormLabel className="text-[9px] font-black uppercase text-muted-foreground">Teléfono</FormLabel>
                             <FormControl>
                               <Input 
-                                placeholder="Ej: 311-000-00" 
+                                placeholder="311 000 0000" 
                                 {...field} 
-                                value={field.value || ''} 
+                                value={formatPhoneNumber(field.value || '')} 
+                                onChange={(e) => {
+                                  const formatted = formatPhoneNumber(e.target.value);
+                                  field.onChange(formatted);
+                                }}
+                                maxLength={12}
+                                inputMode="numeric"
                                 onKeyDown={(e) => handleFieldEnter(e, 'endorsementGuarantee')}
-                                className="h-9 text-xs uppercase font-bold placeholder:text-zinc-400 placeholder:normal-case placeholder:font-normal" 
+                                className="h-9 text-xs font-bold placeholder:text-zinc-400 placeholder:normal-case placeholder:font-normal font-mono" 
                               />
                             </FormControl>
                             <FormMessage className="text-[9px]" />
@@ -2029,74 +2152,56 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
         </Form>
       </DialogContent>
     </Dialog>
-    <AlertDialog open={showConfirmation} onOpenChange={setShowConfirmation}>
-        <AlertDialogContent className="rounded-xl max-w-lg">
-            <AlertDialogHeader>
-                <AlertDialogTitle className="font-black uppercase tracking-tight flex items-center gap-2 text-blue-950 dark:text-blue-200">
-                    <CheckCircle2 className="h-5 w-5 text-emerald-600" />
-                    <span>Confirmar Creación de Crédito</span>
+    <AlertDialog open={showIncompleteModal} onOpenChange={setShowIncompleteModal}>
+        <AlertDialogContent className="rounded-2xl max-w-sm p-6 text-center shadow-2xl border bg-white dark:bg-zinc-950 space-y-4">
+            <div className="mx-auto w-12 h-12 rounded-full bg-amber-50 dark:bg-amber-950/50 flex items-center justify-center text-amber-600 dark:text-amber-400">
+                <AlertTriangle className="h-6 w-6" />
+            </div>
+
+            <div className="space-y-1.5">
+                <AlertDialogTitle className="text-base font-black text-slate-900 dark:text-slate-100 tracking-tight text-center">
+                    Información Incompleta
                 </AlertDialogTitle>
                 <AlertDialogDescription asChild>
-                    <div className="space-y-3 pt-2 text-xs">
-                      <p className="font-medium text-muted-foreground">
-                        Por favor revisa el resumen del préstamo antes de registrarlo formalmente en el sistema:
-                      </p>
-
-                      {formValues && (
-                        <div className="bg-slate-50 dark:bg-zinc-900 p-3.5 rounded-xl border space-y-2 text-slate-800 dark:text-zinc-200">
-                          <div className="flex justify-between border-b pb-1.5">
-                            <span className="font-black uppercase text-[10px] text-muted-foreground">Cliente:</span>
-                            <span className="font-black uppercase text-xs">{formValues.clientName}</span>
-                          </div>
-                          <div className="flex justify-between border-b pb-1.5">
-                            <span className="font-black uppercase text-[10px] text-muted-foreground">Monto Solicitado:</span>
-                            <span className="font-black text-xs text-emerald-600 dark:text-emerald-400">{formatCurrency(formValues.amount)}</span>
-                          </div>
-                          <div className="flex justify-between border-b pb-1.5">
-                            <span className="font-black uppercase text-[10px] text-muted-foreground">Plan / Abono Semanal:</span>
-                            <span className="font-bold text-xs">{loanPlans.find(p => p.id === formValues.loanPlanId)?.name || '—'} ({formatCurrency(calculatedAbono)}/sem)</span>
-                          </div>
-                          <div className="flex justify-between border-b pb-1.5">
-                            <span className="font-black uppercase text-[10px] text-muted-foreground">Promotora:</span>
-                            <span className="font-bold text-xs uppercase">{currentHierarchy.promotoraName}</span>
-                          </div>
-                          {formValues.endorsement && (
-                            <div className="flex justify-between">
-                              <span className="font-black uppercase text-[10px] text-muted-foreground">Aval:</span>
-                              <span className="font-bold text-xs uppercase text-blue-600 dark:text-blue-400">{formValues.endorsement}</span>
-                            </div>
-                          )}
-                        </div>
-                      )}
+                    <div className="text-xs text-muted-foreground leading-relaxed text-center">
+                        <p>No se capturó toda la información completa del crédito.</p>
+                        {missingFields.length > 0 && (
+                          <p className="mt-1 font-semibold text-amber-700 dark:text-amber-400">
+                            Pendiente: {missingFields.slice(0, 4).join(', ')}{missingFields.length > 4 ? ` y ${missingFields.length - 4} más` : ''}.
+                          </p>
+                        )}
+                        <p className="mt-2 text-slate-700 dark:text-zinc-300 font-medium">¿Deseas continuar y registrar el crédito?</p>
                     </div>
                 </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter className="gap-2 pt-2">
-                <AlertDialogCancel 
-                  onClick={() => setShowConfirmation(false)} 
-                  className="rounded-lg font-bold"
+            </div>
+
+            <div className="grid grid-cols-2 gap-2.5 pt-1">
+                <Button 
+                  variant="outline" 
+                  onClick={() => setShowIncompleteModal(false)}
                   disabled={isSubmitting}
+                  className="rounded-xl text-xs font-bold"
                 >
-                    Revisar / Volver
-                </AlertDialogCancel>
-                <AlertDialogAction 
-                  onClick={(e) => { 
+                    Volver
+                </Button>
+                <Button 
+                  onClick={async (e) => {
                     e.preventDefault();
-                    if (formValues && !isSubmitting) proceedWithSubmission(formValues); 
+                    if (formValues && !isSubmitting) {
+                      setShowIncompleteModal(false);
+                      await proceedWithSubmission(formValues);
+                    }
                   }} 
-                  className="rounded-lg font-black uppercase bg-blue-600 hover:bg-blue-700 text-white"
                   disabled={isSubmitting}
+                  className="rounded-xl text-xs font-black bg-blue-600 hover:bg-blue-700 text-white"
                 >
                     {isSubmitting ? (
-                      <>
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        Registrando Crédito...
-                      </>
+                      <Loader2 className="h-4 w-4 animate-spin" />
                     ) : (
-                      'Sí, Confirmar y Crear Crédito'
+                      'Sí, registrar'
                     )}
-                </AlertDialogAction>
-            </AlertDialogFooter>
+                </Button>
+            </div>
         </AlertDialogContent>
     </AlertDialog>
 

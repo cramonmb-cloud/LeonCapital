@@ -252,10 +252,11 @@ export type AppConfig = {
   logoWidthLogin?: number;
   whatsappTemplate?: string; // Mantener por compatibilidad con default client
   whatsappTemplates?: Record<string, WhatsAppTemplates>; // PlazaId -> Templates
-  menuConfig?: Record<string, 'operacion' | 'administracion'>;
+  menuConfig?: Record<string, 'operacion' | 'administracion' | 'gestion'>;
   menuOrder?: string[];
   operacionColor?: string;
   administracionColor?: string;
+  gestionColor?: string;
   staffTypes?: string[];
   loginCoverUrl?: string;
   loginTitle?: string;

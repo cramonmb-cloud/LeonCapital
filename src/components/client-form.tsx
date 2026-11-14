@@ -28,13 +28,17 @@ import {
   Save
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { formatPhoneNumber } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
 import { saveClientAction } from '@/app/inicio/clientes/actions';
 import { parseEndorsement } from '@/lib/utils';
 
 const formSchema = z.object({
   name: z.string().min(3, 'El nombre debe tener al menos 3 caracteres.'),
-  phone: z.string().min(7, 'El teléfono debe tener al menos 7 dígitos.'),
+  phone: z.string().refine(
+    (val) => val.replace(/\D/g, '').length === 10,
+    { message: 'El teléfono debe contener 10 dígitos numéricos.' }
+  ),
   email: z.string().optional().or(z.literal('')),
   street: z.string().min(3, 'La calle y número son requeridos.'),
   neighborhood: z.string().min(2, 'La colonia es requerida.'),
@@ -44,7 +48,10 @@ const formSchema = z.object({
   
   // Campos estructurados del Aval
   endorsementName: z.string().optional().or(z.literal('')),
-  endorsementPhone: z.string().optional().or(z.literal('')),
+  endorsementPhone: z.string().optional().or(z.literal('')).refine(
+    (val) => !val || val.trim() === '' || val.replace(/\D/g, '').length === 10,
+    { message: 'El teléfono del aval debe contener 10 dígitos numéricos.' }
+  ),
   endorsementStreet: z.string().optional().or(z.literal('')),
   endorsementNeighborhood: z.string().optional().or(z.literal('')),
   endorsementPostalCode: z.string().optional().or(z.literal('')),
@@ -200,7 +207,11 @@ export function ClientForm({ client }: ClientFormProps) {
                         <Input 
                           placeholder="EJ. 333 123 4567" 
                           {...field} 
-                          className="h-9 text-xs uppercase font-medium" 
+                          value={formatPhoneNumber(field.value || '')}
+                          onChange={(e) => field.onChange(formatPhoneNumber(e.target.value))}
+                          maxLength={12}
+                          inputMode="numeric"
+                          className="h-9 text-xs font-medium font-mono" 
                         />
                       </FormControl>
                       <FormMessage className="text-[11px]" />
@@ -393,7 +404,11 @@ export function ClientForm({ client }: ClientFormProps) {
                         <Input 
                           placeholder="EJ: 333 987 6543" 
                           {...field} 
-                          className="h-9 text-xs uppercase font-medium" 
+                          value={formatPhoneNumber(field.value || '')}
+                          onChange={(e) => field.onChange(formatPhoneNumber(e.target.value))}
+                          maxLength={12}
+                          inputMode="numeric"
+                          className="h-9 text-xs font-medium font-mono" 
                         />
                       </FormControl>
                       <FormMessage className="text-[11px]" />

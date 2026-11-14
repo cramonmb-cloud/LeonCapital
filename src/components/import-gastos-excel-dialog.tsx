@@ -21,7 +21,7 @@ import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/hooks/use-auth';
 import type { Plaza, PrecapturaGasto } from '@/lib/types';
 import { importGastosAction } from '@/app/inicio/gastos/actions';
-import { FileSpreadsheet, Loader2, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { Loader2, AlertCircle } from 'lucide-react';
 
 interface ParsedRow {
   line: number;
@@ -241,16 +241,11 @@ export function ImportGastosExcelDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <div className="flex items-center gap-2">
-            <div className="p-2 rounded-lg bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-400">
-              <FileSpreadsheet className="h-5 w-5" />
-            </div>
-            <div>
-              <DialogTitle className="text-base font-bold">Importar Gastos desde Excel</DialogTitle>
-              <DialogDescription className="text-xs">
-                Copia las celdas de tu hoja de Excel (Importe y Concepto) y pégalas directamente en el cuadro de texto.
-              </DialogDescription>
-            </div>
+          <div>
+            <DialogTitle className="text-base font-bold">Importar Gastos desde Excel</DialogTitle>
+            <DialogDescription className="text-xs">
+              Copia las celdas de tu hoja de Excel (Importe y Concepto) y pégalas directamente en el cuadro de texto.
+            </DialogDescription>
           </div>
         </DialogHeader>
 
@@ -319,12 +314,11 @@ export function ImportGastosExcelDialog({
 
           {/* Parse live status & summary */}
           {results.length > 0 && (
-            <div className="flex flex-wrap items-center justify-between gap-2 p-3 bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-900 rounded-lg text-xs">
-              <div className="flex items-center gap-1.5 text-emerald-800 dark:text-emerald-300 font-semibold">
-                <CheckCircle2 className="h-4 w-4" />
+            <div className="flex flex-wrap items-center justify-between gap-2 p-3 bg-muted/40 border rounded-lg text-xs">
+              <div className="font-semibold">
                 <span>{results.length} gastos interpretados correctamente</span>
               </div>
-              <div className="font-black text-emerald-900 dark:text-emerald-200 text-sm">
+              <div className="font-bold text-sm font-mono">
                 Total: {formatCurrency(totalSum)}
               </div>
             </div>
@@ -428,7 +422,7 @@ export function ImportGastosExcelDialog({
             size="sm"
             onClick={handleImport}
             disabled={isSubmitting || results.length === 0}
-            className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold"
+            className="font-bold"
           >
             {isSubmitting ? (
               <>
@@ -437,7 +431,6 @@ export function ImportGastosExcelDialog({
               </>
             ) : (
               <>
-                <CheckCircle2 className="mr-2 h-4 w-4" />
                 Importar {results.length} {results.length === 1 ? 'gasto' : 'gastos'} ({formatCurrency(totalSum)})
               </>
             )}

@@ -11,15 +11,12 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { useToast } from '@/hooks/use-toast';
 import { collection, query, where, onSnapshot, limit } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-import { cn, getSaturdayOfWeek, getMexicoNow } from '@/lib/utils';
+import { getSaturdayOfWeek, getMexicoNow } from '@/lib/utils';
 import type { Plaza, AppConfig, Precaptura, PrecapturaGasto } from '@/lib/types';
 import { addGastoAction, removeGastoAction, getGastoConceptsAction, saveGastoConceptAction } from '@/app/inicio/gastos/actions';
 import { ImportGastosExcelDialog } from '@/components/import-gastos-excel-dialog';
 import { useAuth } from '@/hooks/use-auth';
-import { 
-  ReceiptText, FileSpreadsheet, Plus, Trash2, Calendar, Building, 
-  Search, Loader2, ArrowUpDown, TrendingDown, DollarSign, Layers
-} from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 
 interface GastosClientPageProps {
   initialPlazas: Plaza[];
@@ -52,7 +49,7 @@ export function GastosClientPage({
   const [selectedPlazaFilter, setSelectedPlazaFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
 
-  // Check if current week loans exist to allow next week (same logic as Debes / Precaptura)
+  // Check if current week loans exist to allow next week
   const [hasCurrentWeekLoans, setHasCurrentWeekLoans] = useState(false);
 
   useEffect(() => {
@@ -193,26 +190,6 @@ export function GastosClientPage({
 
   const countItems = filteredGastos.length;
 
-  const averageAmount = useMemo(() => {
-    return countItems > 0 ? totalAmount / countItems : 0;
-  }, [totalAmount, countItems]);
-
-  // Breakdown by plaza for the selected week
-  const plazaBreakdown = useMemo(() => {
-    const map: Record<string, { plazaName: string; total: number; count: number }> = {};
-    allGastos.forEach(g => {
-      if (!map[g.plazaId]) {
-        map[g.plazaId] = { plazaName: g.plazaName, total: 0, count: 0 };
-      }
-      map[g.plazaId].total += g.importe || 0;
-      map[g.plazaId].count += 1;
-    });
-    return Object.entries(map).map(([plazaId, data]) => ({
-      plazaId,
-      ...data,
-    }));
-  }, [allGastos]);
-
   // Quick Add Gasto form state
   const [newGastoPlazaId, setNewGastoPlazaId] = useState<string>('');
   const [newConcepto, setNewConcepto] = useState<string>('');
@@ -351,129 +328,112 @@ export function GastosClientPage({
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
 
   return (
-    <div className="flex-1 space-y-4 p-4 md:p-6 pt-4 max-w-[1600px] mx-auto animate-in fade-in duration-300">
+    <div className="flex-1 space-y-4 p-4 md:p-6 pt-4 max-w-[1600px] mx-auto">
       
-      {/* Top Header Card */}
+      {/* Top Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pb-2 border-b">
-        <div className="flex items-center gap-3">
-          <div className="p-2.5 rounded-xl bg-purple-100 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300 shadow-sm border border-purple-200 dark:border-purple-900">
-            <ReceiptText className="h-6 w-6" />
-          </div>
-          <div>
-            <h1 className="text-xl md:text-2xl font-black tracking-tight text-slate-900 dark:text-slate-100 flex items-center gap-2">
-              Gastos Operativos
-              <Badge variant="outline" className="text-[10px] font-bold uppercase tracking-wider text-purple-700 border-purple-300 bg-purple-50 dark:bg-purple-950/40">
-                Sincronizado con Precaptura
-              </Badge>
-            </h1>
-            <p className="text-xs text-muted-foreground">
-              Consulta, registro e importación de gastos semanales de todas las plazas.
-            </p>
-          </div>
+        <div>
+          <h1 className="text-xl md:text-2xl font-bold tracking-tight text-foreground">
+            Gastos
+          </h1>
+          <p className="text-xs text-muted-foreground">
+            Consulta, registro e importación de gastos semanales por plaza sincronizados con Precaptura.
+          </p>
         </div>
 
         {/* Header Action Button */}
         <div className="flex items-center gap-2">
           <Button
+            variant="outline"
             onClick={() => setIsImportModalOpen(true)}
-            className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs h-9 px-3.5 rounded-lg shadow-sm flex items-center gap-2 active:scale-95 transition-transform"
+            className="text-xs h-8 px-3 font-medium"
           >
-            <FileSpreadsheet className="h-4 w-4" />
-            <span>Importar desde Excel</span>
+            Importar desde Excel
           </Button>
         </div>
       </div>
 
       {/* Filter and Selection Bar */}
-      <Card className="border shadow-sm bg-card/60 backdrop-blur-sm">
-        <CardContent className="p-3.5">
+      <Card className="border shadow-none">
+        <CardContent className="p-3">
           <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 items-center">
             
             {/* Week Selector */}
-            <div className="sm:col-span-4 flex items-center gap-2">
-              <Calendar className="h-4 w-4 text-purple-600 shrink-0" />
-              <div className="flex-1">
-                <label className="text-[11px] font-bold text-muted-foreground uppercase block mb-0.5">
-                  Semana de Consulta
-                </label>
-                <Select value={selectedWeek} onValueChange={setSelectedWeek}>
-                  <SelectTrigger className="h-8 text-xs font-semibold bg-background">
-                    <SelectValue placeholder="Seleccionar semana" />
-                  </SelectTrigger>
-                  <SelectContent className="max-h-60">
-                    {allAvailableWeeks.map((week) => {
-                      const dateStr = week.toISOString().split('T')[0];
-                      const formatted = week.toLocaleDateString('es-MX', {
-                        day: '2-digit',
-                        month: 'short',
-                        year: 'numeric'
-                      });
-                      return (
-                        <SelectItem key={dateStr} value={dateStr} className="text-xs">
-                          {formatted} ({dateStr})
-                        </SelectItem>
-                      );
-                    })}
-                  </SelectContent>
-                </Select>
-              </div>
+            <div className="sm:col-span-4">
+              <label className="text-[11px] font-bold text-muted-foreground uppercase block mb-1">
+                Semana de Consulta
+              </label>
+              <Select value={selectedWeek} onValueChange={setSelectedWeek}>
+                <SelectTrigger className="h-8 text-xs font-semibold bg-background">
+                  <SelectValue placeholder="Seleccionar semana" />
+                </SelectTrigger>
+                <SelectContent className="max-h-60">
+                  {allAvailableWeeks.map((week) => {
+                    const dateStr = week.toISOString().split('T')[0];
+                    const formatted = week.toLocaleDateString('es-MX', {
+                      day: '2-digit',
+                      month: 'short',
+                      year: 'numeric'
+                    });
+                    return (
+                      <SelectItem key={dateStr} value={dateStr} className="text-xs">
+                        {formatted} ({dateStr})
+                      </SelectItem>
+                    );
+                  })}
+                </SelectContent>
+              </Select>
             </div>
 
             {/* Plaza Filter */}
-            <div className="sm:col-span-4 flex items-center gap-2">
-              <Building className="h-4 w-4 text-purple-600 shrink-0" />
-              <div className="flex-1">
-                <label className="text-[11px] font-bold text-muted-foreground uppercase block mb-0.5">
-                  Filtrar por Plaza
-                </label>
-                <Select value={selectedPlazaFilter} onValueChange={setSelectedPlazaFilter}>
-                  <SelectTrigger className="h-8 text-xs font-semibold bg-background">
-                    <SelectValue placeholder="Todas las plazas" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all" className="text-xs font-bold text-purple-700">
-                      TODAS LAS PLAZAS
+            <div className="sm:col-span-4">
+              <label className="text-[11px] font-bold text-muted-foreground uppercase block mb-1">
+                Filtrar por Plaza
+              </label>
+              <Select value={selectedPlazaFilter} onValueChange={setSelectedPlazaFilter}>
+                <SelectTrigger className="h-8 text-xs font-semibold bg-background">
+                  <SelectValue placeholder="Todas las plazas" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all" className="text-xs font-semibold">
+                    TODAS LAS PLAZAS
+                  </SelectItem>
+                  {initialPlazas.map(p => (
+                    <SelectItem key={p.id} value={p.id} className="text-xs">
+                      {p.name}
                     </SelectItem>
-                    {initialPlazas.map(p => (
-                      <SelectItem key={p.id} value={p.id} className="text-xs">
-                        {p.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
 
             {/* Search filter */}
-            <div className="sm:col-span-4 flex items-center gap-2">
-              <Search className="h-4 w-4 text-muted-foreground shrink-0" />
-              <div className="flex-1">
-                <label className="text-[11px] font-bold text-muted-foreground uppercase block mb-0.5">
-                  Buscar en Gastos
-                </label>
-                <Input
-                  type="text"
-                  placeholder="Buscar concepto u observaciones..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="h-8 text-xs bg-background"
-                />
-              </div>
+            <div className="sm:col-span-4">
+              <label className="text-[11px] font-bold text-muted-foreground uppercase block mb-1">
+                Buscar en Gastos
+              </label>
+              <Input
+                type="text"
+                placeholder="Buscar concepto u observaciones..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="h-8 text-xs bg-background"
+              />
             </div>
 
           </div>
         </CardContent>
       </Card>
 
-      {/* KPI Summary Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+      {/* KPI Summary Cards: Only Total de Gastos & Registros Capturados */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         {/* Total Gastos */}
-        <Card className="border-l-4 border-l-purple-600 shadow-sm bg-card">
+        <Card className="shadow-none border">
           <CardHeader className="py-2.5 px-3.5 pb-1">
-            <CardDescription className="text-[11px] font-bold uppercase tracking-wider text-purple-700 dark:text-purple-400">
+            <CardDescription className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
               Total de Gastos
             </CardDescription>
-            <CardTitle className="text-2xl font-black tracking-tight text-slate-900 dark:text-slate-50 font-mono">
+            <CardTitle className="text-2xl font-bold tracking-tight text-foreground font-mono">
               {formatCurrency(totalAmount)}
             </CardTitle>
           </CardHeader>
@@ -483,12 +443,12 @@ export function GastosClientPage({
         </Card>
 
         {/* Registros */}
-        <Card className="border-l-4 border-l-blue-600 shadow-sm bg-card">
+        <Card className="shadow-none border">
           <CardHeader className="py-2.5 px-3.5 pb-1">
-            <CardDescription className="text-[11px] font-bold uppercase tracking-wider text-blue-700 dark:text-blue-400">
+            <CardDescription className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
               Registros Capturados
             </CardDescription>
-            <CardTitle className="text-2xl font-black tracking-tight text-slate-900 dark:text-slate-50 font-mono">
+            <CardTitle className="text-2xl font-bold tracking-tight text-foreground font-mono">
               {countItems} {countItems === 1 ? 'gasto' : 'gastos'}
             </CardTitle>
           </CardHeader>
@@ -496,55 +456,13 @@ export function GastosClientPage({
             En la semana del {selectedWeek}
           </CardContent>
         </Card>
-
-        {/* Promedio */}
-        <Card className="border-l-4 border-l-amber-600 shadow-sm bg-card">
-          <CardHeader className="py-2.5 px-3.5 pb-1">
-            <CardDescription className="text-[11px] font-bold uppercase tracking-wider text-amber-700 dark:text-amber-400">
-              Promedio por Registro
-            </CardDescription>
-            <CardTitle className="text-2xl font-black tracking-tight text-slate-900 dark:text-slate-50 font-mono">
-              {formatCurrency(averageAmount)}
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="py-1 px-3.5 text-[11px] text-muted-foreground">
-            Importe medio por comprobante
-          </CardContent>
-        </Card>
-
-        {/* Plaza breakdown summary */}
-        <Card className="border-l-4 border-l-emerald-600 shadow-sm bg-card">
-          <CardHeader className="py-2.5 px-3.5 pb-1">
-            <CardDescription className="text-[11px] font-bold uppercase tracking-wider text-emerald-700 dark:text-emerald-400">
-              Distribución por Plaza
-            </CardDescription>
-            <div className="text-xs font-semibold pt-1 space-y-1">
-              {plazaBreakdown.length === 0 ? (
-                <span className="text-muted-foreground italic text-[11px]">Sin gastos esta semana</span>
-              ) : (
-                plazaBreakdown.slice(0, 2).map(pb => (
-                  <div key={pb.plazaId} className="flex items-center justify-between font-mono text-[11px]">
-                    <span className="font-bold truncate max-w-[110px]">{pb.plazaName}:</span>
-                    <span className="font-black text-slate-900 dark:text-white">{formatCurrency(pb.total)}</span>
-                  </div>
-                ))
-              )}
-            </div>
-          </CardHeader>
-          {plazaBreakdown.length > 2 && (
-            <CardContent className="py-0 px-3.5 text-[10px] text-muted-foreground">
-              +{plazaBreakdown.length - 2} plazas más
-            </CardContent>
-          )}
-        </Card>
       </div>
 
       {/* Quick Add Expense Form Card */}
-      <Card className="border shadow-sm">
-        <CardHeader className="py-2.5 px-3.5 border-b bg-muted/30">
-          <CardTitle className="text-xs font-bold uppercase tracking-wider text-slate-800 dark:text-zinc-200 flex items-center gap-2">
-            <Plus className="h-4 w-4 text-purple-600" />
-            Registrar Nuevo Gasto en esta Semana
+      <Card className="border shadow-none">
+        <CardHeader className="py-2.5 px-3.5 border-b bg-muted/20">
+          <CardTitle className="text-xs font-bold uppercase tracking-wider text-foreground">
+            Registrar Gasto
           </CardTitle>
         </CardHeader>
         <CardContent className="p-3.5">
@@ -576,13 +494,13 @@ export function GastosClientPage({
               </label>
               <input
                 list="gastos-page-conceptos-list"
-                placeholder="Ej. GASOLINA QUERETARO, PAPELERIA"
+                placeholder="EJ. GASOLINA QUERETARO, PAPELERIA"
                 value={newConcepto}
                 onChange={(e) => setNewConcepto(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') handleQuickAdd();
                 }}
-                className="flex h-8 w-full rounded-md border border-input bg-background px-3 py-1 text-xs font-semibold shadow-sm transition-colors uppercase placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-purple-600"
+                className="flex h-8 w-full rounded-md border border-input bg-background px-3 py-1 text-xs font-semibold transition-colors uppercase placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
               />
               <datalist id="gastos-page-conceptos-list">
                 {gastoConcepts.map(c => (
@@ -633,10 +551,9 @@ export function GastosClientPage({
                 type="button"
                 onClick={handleQuickAdd}
                 disabled={isAdding}
-                className="h-8 w-full bg-purple-700 hover:bg-purple-800 text-white font-bold text-xs"
-                title="Agregar Gasto"
+                className="h-8 w-full font-bold text-xs"
               >
-                {isAdding ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+                {isAdding ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Agregar'}
               </Button>
             </div>
 
@@ -645,66 +562,66 @@ export function GastosClientPage({
       </Card>
 
       {/* Gastos Table Card */}
-      <Card className="border shadow-sm">
-        <CardHeader className="py-3 px-4 border-b flex flex-row items-center justify-between">
+      <Card className="border shadow-none">
+        <CardHeader className="py-2.5 px-4 border-b flex flex-row items-center justify-between">
           <div>
-            <CardTitle className="text-sm font-bold uppercase tracking-wider text-slate-800 dark:text-zinc-200">
+            <CardTitle className="text-xs font-bold uppercase tracking-wider text-foreground">
               Gastos de la Semana {selectedWeek}
             </CardTitle>
             <CardDescription className="text-xs">
-              {filteredGastos.length} {filteredGastos.length === 1 ? 'registro mostrado' : 'registros mostrados'}
-              {selectedPlazaFilter !== 'all' ? ` (Filtrado por plaza)` : ''}
+              {filteredGastos.length} {filteredGastos.length === 1 ? 'registro' : 'registros'}
+              {selectedPlazaFilter !== 'all' ? ` (Plaza seleccionada)` : ''}
             </CardDescription>
           </div>
-          <div className="font-mono font-black text-sm text-purple-700 dark:text-purple-400 bg-purple-50 dark:bg-purple-950/40 border border-purple-200 dark:border-purple-900 px-3 py-1 rounded-lg">
+          <div className="font-mono font-bold text-xs bg-muted px-2.5 py-1 rounded border">
             Total: {formatCurrency(totalAmount)}
           </div>
         </CardHeader>
 
         <CardContent className="p-0 overflow-x-auto">
           <Table className="text-xs">
-            <TableHeader className="bg-muted/40">
+            <TableHeader className="bg-muted/30">
               <TableRow>
-                <TableHead className="py-2.5 px-3 font-bold w-[50px] text-center">#</TableHead>
-                <TableHead className="py-2.5 px-3 font-bold w-[160px]">Plaza</TableHead>
-                <TableHead className="py-2.5 px-3 font-bold">Concepto</TableHead>
-                <TableHead className="py-2.5 px-3 font-bold text-right w-[140px]">Importe</TableHead>
-                <TableHead className="py-2.5 px-3 font-bold">Observaciones</TableHead>
-                <TableHead className="py-2.5 px-3 text-center w-[60px]">Acciones</TableHead>
+                <TableHead className="py-2 px-3 font-bold w-[40px] text-center">#</TableHead>
+                <TableHead className="py-2 px-3 font-bold w-[160px]">Plaza</TableHead>
+                <TableHead className="py-2 px-3 font-bold">Concepto</TableHead>
+                <TableHead className="py-2 px-3 font-bold text-right w-[140px]">Importe</TableHead>
+                <TableHead className="py-2 px-3 font-bold">Observaciones</TableHead>
+                <TableHead className="py-2 px-3 text-center w-[70px]">Acción</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {isLoading ? (
                 <TableRow>
-                  <TableCell colSpan={6} className="h-28 text-center text-muted-foreground">
-                    <Loader2 className="h-5 w-5 animate-spin mx-auto mb-1 text-purple-600" />
-                    Cargando gastos en tiempo real...
+                  <TableCell colSpan={6} className="h-24 text-center text-muted-foreground">
+                    <Loader2 className="h-4 w-4 animate-spin mx-auto mb-1 text-muted-foreground" />
+                    Cargando gastos...
                   </TableCell>
                 </TableRow>
               ) : filteredGastos.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={6} className="h-28 text-center text-muted-foreground font-semibold">
-                    No se encontraron gastos registrados para los filtros seleccionados.
+                  <TableCell colSpan={6} className="h-24 text-center text-muted-foreground font-medium">
+                    No hay gastos registrados para la semana y filtros seleccionados.
                   </TableCell>
                 </TableRow>
               ) : (
                 filteredGastos.map((gasto, idx) => (
-                  <TableRow key={gasto.id} className="hover:bg-muted/30">
+                  <TableRow key={gasto.id} className="hover:bg-muted/20">
                     <TableCell className="py-2 px-3 text-center text-muted-foreground font-mono text-[11px]">
                       {idx + 1}
                     </TableCell>
-                    <TableCell className="py-2 px-3 font-semibold">
-                      <Badge variant="outline" className="text-[10px] font-bold uppercase tracking-wider bg-slate-50 dark:bg-zinc-800">
+                    <TableCell className="py-2 px-3 font-medium">
+                      <Badge variant="outline" className="text-[10px] font-normal uppercase tracking-wider">
                         {gasto.plazaName}
                       </Badge>
                     </TableCell>
-                    <TableCell className="py-2 px-3 font-black text-slate-800 dark:text-zinc-200">
+                    <TableCell className="py-2 px-3 font-bold text-foreground">
                       {gasto.concepto}
                     </TableCell>
-                    <TableCell className="py-2 px-3 text-right font-black font-mono text-slate-900 dark:text-white">
+                    <TableCell className="py-2 px-3 text-right font-bold font-mono text-foreground">
                       {formatCurrency(gasto.importe)}
                     </TableCell>
-                    <TableCell className="py-2 px-3 text-slate-600 dark:text-zinc-400">
+                    <TableCell className="py-2 px-3 text-muted-foreground">
                       {gasto.observaciones || '-'}
                     </TableCell>
                     <TableCell className="py-2 px-3 text-center">
@@ -712,10 +629,9 @@ export function GastosClientPage({
                         variant="ghost"
                         size="sm"
                         onClick={() => setDeleteDialogGasto(gasto)}
-                        className="h-7 w-7 p-0 text-red-500 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/40 rounded-full"
-                        title="Eliminar Gasto"
+                        className="h-6 px-2 text-[11px] text-muted-foreground hover:text-foreground"
                       >
-                        <Trash2 className="h-3.5 w-3.5" />
+                        Eliminar
                       </Button>
                     </TableCell>
                   </TableRow>
@@ -730,20 +646,19 @@ export function GastosClientPage({
       <Dialog open={!!deleteDialogGasto} onOpenChange={(open) => !open && setDeleteDialogGasto(null)}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle className="text-base font-bold text-destructive flex items-center gap-2">
-              <Trash2 className="h-5 w-5" />
-              ¿Eliminar este gasto?
+            <DialogTitle className="text-base font-bold">
+              Eliminar gasto
             </DialogTitle>
             <DialogDescription className="text-xs pt-1">
-              Esta acción eliminará el gasto de forma permanente y se actualizará automáticamente tanto aquí como en la Precaptura de la plaza seleccionada.
+              Esta acción eliminará el gasto de forma permanente tanto aquí como en Precaptura.
             </DialogDescription>
           </DialogHeader>
 
           {deleteDialogGasto && (
-            <div className="p-3 bg-muted/40 rounded-lg space-y-1 text-xs border">
+            <div className="p-3 bg-muted/30 rounded-lg space-y-1 text-xs border">
               <div>
                 <span className="font-bold text-muted-foreground">Plaza:</span>{' '}
-                <span className="font-semibold">{deleteDialogGasto.plazaName}</span>
+                <span>{deleteDialogGasto.plazaName}</span>
               </div>
               <div>
                 <span className="font-bold text-muted-foreground">Concepto:</span>{' '}
@@ -751,7 +666,7 @@ export function GastosClientPage({
               </div>
               <div>
                 <span className="font-bold text-muted-foreground">Importe:</span>{' '}
-                <span className="font-mono font-black text-destructive">{formatCurrency(deleteDialogGasto.importe)}</span>
+                <span className="font-mono font-bold">{formatCurrency(deleteDialogGasto.importe)}</span>
               </div>
               {deleteDialogGasto.observaciones && (
                 <div>
@@ -774,13 +689,13 @@ export function GastosClientPage({
             </Button>
             <Button
               type="button"
-              variant="destructive"
+              variant="default"
               size="sm"
               onClick={confirmDeleteGasto}
               disabled={isDeleting}
             >
               {isDeleting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-              Confirmar Eliminación
+              Confirmar
             </Button>
           </DialogFooter>
         </DialogContent>

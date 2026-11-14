@@ -1920,9 +1920,8 @@ export function PrecapturaClientPage({
                 variant="outline"
                 size="sm"
                 onClick={() => setIsImportModalOpen(true)}
-                className="h-6 px-2 text-[11px] font-bold flex items-center gap-1 border-emerald-600 text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-950/40"
+                className="h-6 px-2 text-[11px] font-medium"
               >
-                <FileSpreadsheet className="h-3 w-3 text-emerald-600" />
                 Importar Excel
               </Button>
               <span className="font-black text-xs text-slate-900 dark:text-white">

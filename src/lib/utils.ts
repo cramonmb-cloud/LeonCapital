@@ -578,3 +578,15 @@ export function calculatePromotoraWeeklyDebeAndAbonosSalientes(
     totalAbonosEntrantes
   };
 }
+
+/**
+ * Formatea un número telefónico a solo 10 dígitos con formato "000 000 0000".
+ * Elimina cualquier carácter no numérico y trunca a 10 dígitos.
+ */
+export function formatPhoneNumber(value: string | undefined | null): string {
+  if (!value) return '';
+  const digits = value.replace(/\D/g, '').slice(0, 10);
+  if (digits.length <= 3) return digits;
+  if (digits.length <= 6) return `${digits.slice(0, 3)} ${digits.slice(3)}`;
+  return `${digits.slice(0, 3)} ${digits.slice(3, 6)} ${digits.slice(6)}`;
+}

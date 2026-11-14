@@ -6,7 +6,7 @@ import { UserNav } from '@/components/user-nav';
 import { MobileNavBar } from '@/components/mobile-nav-bar';
 import { FloatingAviso } from '@/components/floating-aviso';
 import { Button } from '@/components/ui/button';
-import { Bell, Menu, Search } from 'lucide-react';
+import { Bell, Menu, Search, Settings2, ShieldCheck, Briefcase } from 'lucide-react';
 import Link from 'next/link';
 import { useAuth } from '@/hooks/use-auth';
 import { useRouter, usePathname } from 'next/navigation';
@@ -32,34 +32,49 @@ export default function DashboardLayout({
   const [logoHeightHeader, setLogoHeightHeader] = useState<number | undefined>(undefined);
   const [logoWidthHeader, setLogoWidthHeader] = useState<number | undefined>(undefined);
   const [appName, setAppName] = useState<string>('CrediControl');
-  const [menuConfig, setMenuConfig] = useState<Record<string, 'operacion' | 'administracion'> | undefined>(undefined);
+  const [menuConfig, setMenuConfig] = useState<Record<string, 'operacion' | 'administracion' | 'gestion'> | undefined>(undefined);
   const [menuOrder, setMenuOrder] = useState<string[] | undefined>(undefined);
-  const [activeTab, setActiveTab] = useState<'operacion' | 'administracion'>('operacion');
+  const [activeTab, setActiveTab] = useState<'operacion' | 'administracion' | 'gestion'>('operacion');
   const [operacionColor, setOperacionColor] = useState<string>('#3b82f6');
   const [administracionColor, setAdministracionColor] = useState<string>('#8b5cf6');
+  const [gestionColor, setGestionColor] = useState<string>('#10b981');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const router = useRouter();
   const pathname = usePathname();
 
+  const currentTabColor = 
+    activeTab === 'operacion' 
+      ? operacionColor 
+      : activeTab === 'administracion' 
+        ? administracionColor 
+        : gestionColor;
+
   const mergedMenuConfig = useMemo(() => {
-    const defaultMenuConfig: Record<string, 'operacion' | 'administracion'> = {
+    const defaultMenuConfig: Record<string, 'operacion' | 'administracion' | 'gestion'> = {
+      // Operación
       dashboard: 'operacion',
       clients: 'operacion',
+      avales: 'operacion',
       consultarCliente: 'operacion',
       loans: 'operacion',
       overduePortfolio: 'operacion',
       carteraVencida: 'operacion',
       debes: 'operacion',
       resumen: 'operacion',
-      precaptura: 'administracion',
-      cierreSemanal: 'administracion',
-      wallet: 'administracion',
-      control: 'administracion',
+
+      // Administración
       settings: 'administracion',
-      avisos: 'administracion',
+      control: 'administracion',
+      wallet: 'administracion',
       personal: 'administracion',
-      avales: 'administracion',
-      imprenta: 'administracion',
+      avisos: 'administracion',
+
+      // Gestión
+      imprenta: 'gestion',
+      aguinaldos: 'gestion',
+      precaptura: 'gestion',
+      gastos: 'gestion',
+      cierreSemanal: 'gestion',
     };
     return { ...defaultMenuConfig, ...menuConfig };
   }, [menuConfig]);
@@ -121,6 +136,9 @@ export default function DashboardLayout({
       }
       if (config?.administracionColor) {
         setAdministracionColor(config.administracionColor);
+      }
+      if (config?.gestionColor) {
+        setGestionColor(config.gestionColor);
       }
       if (config?.logoFormat) {
         setLogoFormat(config.logoFormat as 'square' | 'horizontal');
@@ -202,7 +220,7 @@ export default function DashboardLayout({
       <header 
         className="sticky top-0 z-50 flex flex-col liquid-glass-header transition-all duration-500"
         style={{
-          borderBottomColor: `${activeTab === 'operacion' ? operacionColor : administracionColor}28`,
+          borderBottomColor: `${currentTabColor}28`,
         }}
       >
           {/* Fila Superior */}
@@ -231,6 +249,7 @@ export default function DashboardLayout({
                             setActiveTab={setActiveTab}
                             operacionColor={operacionColor}
                             administracionColor={administracionColor}
+                            gestionColor={gestionColor}
                           />
                         </nav>
                       </SheetContent>
@@ -252,62 +271,75 @@ export default function DashboardLayout({
                   </Link>
               </div>
 
-              {/* Centro: Selector de Pestañas (Solo Escritorio) - Apple Liquid Glass */}
-              <div className="hidden md:flex absolute left-1/2 -translate-x-1/2 top-1/2 -translate-y-1/2">
-                  <div className="inline-flex items-center liquid-glass-track p-1 rounded-full h-9 relative w-[240px]">
-                      {/* Sliding Pill Background with Apple Liquid Glass reflections */}
-                      <div 
-                        className="absolute top-1 bottom-1 rounded-full transition-all duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] liquid-glass-pill overflow-hidden"
-                        style={{
-                          left: activeTab === 'operacion' ? '4px' : 'calc(50% + 2px)',
-                          width: 'calc(50% - 6px)',
-                          backgroundColor: activeTab === 'operacion' ? operacionColor : administracionColor,
-                          boxShadow: `0 4px 14px -1px ${activeTab === 'operacion' ? operacionColor : administracionColor}60, inset 0 1px 1.5px 0 rgba(255, 255, 255, 0.75), inset 0 -1px 1px 0 rgba(0, 0, 0, 0.2)`
-                        }}
-                      >
-                          {/* Liquid specular light sheen */}
-                          <div className="absolute inset-0 bg-gradient-to-b from-white/40 via-white/10 to-transparent pointer-events-none rounded-full" />
-                      </div>
+              {/* Centro: Selector de Pestañas (Solo Escritorio) - Diseño Cápsula Segmentada con Espacio Cómodo */}
+              <div className="hidden md:flex absolute left-1/2 -translate-x-1/2 top-1/2 -translate-y-1/2 z-30">
+                  <div className="inline-flex items-center gap-1.5 bg-white dark:bg-zinc-900 border border-slate-200/90 dark:border-zinc-800 p-1.5 rounded-full shadow-[0_2px_12px_rgba(0,0,0,0.04)] relative">
                       <button
                         onClick={() => setActiveTab('operacion')}
                         className={cn(
-                          "w-1/2 py-1.5 rounded-full text-xs font-black tracking-wide transition-all duration-300 active:scale-95 relative z-10 text-center",
+                          "flex items-center gap-2 px-5 py-1.5 rounded-full text-xs tracking-tight transition-all duration-300 relative select-none whitespace-nowrap active:scale-95",
                           activeTab === 'operacion'
-                            ? "text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.4)]"
-                            : "text-muted-foreground/80 hover:text-foreground"
+                            ? "text-white shadow-md font-bold"
+                            : "text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-100 hover:bg-slate-50 dark:hover:bg-zinc-800/40 font-medium"
                         )}
+                        style={activeTab === 'operacion' ? { 
+                          backgroundColor: currentTabColor,
+                          boxShadow: `0 4px 12px ${currentTabColor}55`
+                        } : undefined}
                       >
-                        Operación
+                        <Settings2 className="h-4 w-4 shrink-0" />
+                        <span>Operación</span>
+                      </button>
+                      <button
+                        onClick={() => setActiveTab('gestion')}
+                        className={cn(
+                          "flex items-center gap-2 px-5 py-1.5 rounded-full text-xs tracking-tight transition-all duration-300 relative select-none whitespace-nowrap active:scale-95",
+                          activeTab === 'gestion'
+                            ? "text-white shadow-md font-bold"
+                            : "text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-100 hover:bg-slate-50 dark:hover:bg-zinc-800/40 font-medium"
+                        )}
+                        style={activeTab === 'gestion' ? { 
+                          backgroundColor: currentTabColor,
+                          boxShadow: `0 4px 12px ${currentTabColor}55`
+                        } : undefined}
+                      >
+                        <Briefcase className="h-4 w-4 shrink-0" />
+                        <span>Gestión</span>
                       </button>
                       <button
                         onClick={() => setActiveTab('administracion')}
                         className={cn(
-                          "w-1/2 py-1.5 rounded-full text-xs font-black tracking-wide transition-all duration-300 active:scale-95 relative z-10 text-center",
+                          "flex items-center gap-2 px-5 py-1.5 rounded-full text-xs tracking-tight transition-all duration-300 relative select-none whitespace-nowrap active:scale-95",
                           activeTab === 'administracion'
-                            ? "text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.4)]"
-                            : "text-muted-foreground/80 hover:text-foreground"
+                            ? "text-white shadow-md font-bold"
+                            : "text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-100 hover:bg-slate-50 dark:hover:bg-zinc-800/40 font-medium"
                         )}
+                        style={activeTab === 'administracion' ? { 
+                          backgroundColor: currentTabColor,
+                          boxShadow: `0 4px 12px ${currentTabColor}55`
+                        } : undefined}
                       >
-                        Administración
+                        <ShieldCheck className="h-4 w-4 shrink-0" />
+                        <span>Administración</span>
                       </button>
                   </div>
               </div>
 
               {/* Derecha: Acciones y Perfil */}
-              <div className="flex items-center gap-3">
-                  <div className="hidden sm:flex items-center gap-1">
-                     <Button variant="ghost" size="icon" className="rounded-full h-9 w-9 text-muted-foreground hover:bg-muted/50 transition-colors [&_svg]:size-[18px]" asChild>
-                        <Link href="/inicio/consultar-cliente">
+              <div className="flex items-center gap-2">
+                  <div className="hidden sm:flex items-center gap-1.5">
+                     <Button variant="ghost" size="icon" className="rounded-full h-9 w-9 text-slate-700 dark:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors [&_svg]:size-[18px]" asChild>
+                        <Link href="/inicio/consultar-cliente" title="Buscar">
                             <Search />
                         </Link>
                      </Button>
-                     <Button variant="ghost" size="icon" className="rounded-full h-9 w-9 text-muted-foreground hover:bg-muted/50 transition-colors [&_svg]:size-[18px] relative">
+                     <div className="h-4 w-[1px] bg-slate-200 dark:bg-zinc-800 mx-0.5" />
+                     <Button variant="ghost" size="icon" className="rounded-full h-9 w-9 text-slate-700 dark:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors [&_svg]:size-[18px] relative" title="Notificaciones">
                         <Bell />
-                        <span className="absolute top-2.5 right-2.5 w-1.5 h-1.5 bg-primary rounded-full animate-pulse" />
                         <span className="sr-only">Notificaciones</span>
                      </Button>
                   </div>
-                  <div className="h-5 w-[1px] bg-border/40 hidden sm:block" />
+                  <div className="h-4 w-[1px] bg-slate-200 dark:bg-zinc-800 hidden sm:block mx-0.5" />
                   <UserNav />
               </div>
           </div>
@@ -321,6 +353,7 @@ export default function DashboardLayout({
                 setActiveTab={setActiveTab}
                 operacionColor={operacionColor}
                 administracionColor={administracionColor}
+                gestionColor={gestionColor}
               />
           </div>
       </header>

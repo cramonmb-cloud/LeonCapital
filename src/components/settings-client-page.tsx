@@ -169,25 +169,37 @@ export function SettingsClientPage({ initialConfig, mode = 'system' }: SettingsC
         }
     }, [selectedPlazaId, initialConfig, whatsappForm]);
 
-    const [menuConfigState, setMenuConfigState] = useState<Record<string, 'operacion' | 'administracion'>>({});
+    const [menuConfigState, setMenuConfigState] = useState<Record<string, 'operacion' | 'administracion' | 'gestion'>>({});
     const [operacionColorState, setOperacionColorState] = useState<string>('#3b82f6');
     const [administracionColorState, setAdministracionColorState] = useState<string>('#8b5cf6');
+    const [gestionColorState, setGestionColorState] = useState<string>('#10b981');
 
     useEffect(() => {
-        const defaultMenuConfig: Record<string, 'operacion' | 'administracion'> = {
+        const defaultMenuConfig: Record<string, 'operacion' | 'administracion' | 'gestion'> = {
+            // Operación
             dashboard: 'operacion',
             clients: 'operacion',
+            avales: 'operacion',
             consultarCliente: 'operacion',
             loans: 'operacion',
             overduePortfolio: 'operacion',
             carteraVencida: 'operacion',
             debes: 'operacion',
-            wallet: 'administracion',
-            control: 'administracion',
+            resumen: 'operacion',
+
+            // Administración
             settings: 'administracion',
-            avisos: 'administracion',
+            control: 'administracion',
+            wallet: 'administracion',
             personal: 'administracion',
-            imprenta: 'administracion',
+            avisos: 'administracion',
+
+            // Gestión
+            imprenta: 'gestion',
+            aguinaldos: 'gestion',
+            precaptura: 'gestion',
+            gastos: 'gestion',
+            cierreSemanal: 'gestion',
         };
         setMenuConfigState({ ...defaultMenuConfig, ...initialConfig?.menuConfig });
         if (initialConfig?.operacionColor) {
@@ -195,6 +207,9 @@ export function SettingsClientPage({ initialConfig, mode = 'system' }: SettingsC
         }
         if (initialConfig?.administracionColor) {
             setAdministracionColorState(initialConfig.administracionColor);
+        }
+        if (initialConfig?.gestionColor) {
+            setGestionColorState(initialConfig.gestionColor);
         }
     }, [initialConfig]);
 
@@ -370,7 +385,7 @@ export function SettingsClientPage({ initialConfig, mode = 'system' }: SettingsC
     };
 
     const [menuOrderState, setMenuOrderState] = useState<string[]>([]);
-    const [activeMenuSettingsTab, setActiveMenuSettingsTab] = useState<'operacion' | 'administracion'>('operacion');
+    const [activeMenuSettingsTab, setActiveMenuSettingsTab] = useState<'operacion' | 'administracion' | 'gestion'>('operacion');
 
     useEffect(() => {
         const defaultOrder = allLinks.map(l => l.id);
@@ -480,7 +495,7 @@ export function SettingsClientPage({ initialConfig, mode = 'system' }: SettingsC
     const onSaveMenuColors = async () => {
         setIsSaving(true);
         try {
-            const result = await saveMenuColorsAction(operacionColorState, administracionColorState);
+            const result = await saveMenuColorsAction(operacionColorState, administracionColorState, gestionColorState);
             if (result.success) {
                 toast({ title: 'Colores Actualizados', description: 'Los colores de los menús han sido guardados.' });
                 router.refresh();
@@ -1126,6 +1141,41 @@ export function SettingsClientPage({ initialConfig, mode = 'system' }: SettingsC
                                         </div>
                                     </div>
 
+                                    {/* Color Gestión */}
+                                    <div className="space-y-3">
+                                        <label className="text-sm font-bold block">Color para Gestión</label>
+                                        <div className="flex items-center gap-3">
+                                            <input 
+                                                type="color" 
+                                                value={gestionColorState} 
+                                                onChange={(e) => setGestionColorState(e.target.value)}
+                                                className="h-10 w-10 cursor-pointer rounded-lg border border-border"
+                                            />
+                                            <Input 
+                                                type="text" 
+                                                value={gestionColorState} 
+                                                onChange={(e) => setGestionColorState(e.target.value)}
+                                                placeholder="#10b981"
+                                                className="font-mono"
+                                            />
+                                        </div>
+                                        <div className="flex flex-wrap gap-2 pt-1">
+                                            {['#10b981', '#059669', '#0d9488', '#0284c7', '#f59e0b', '#84cc16'].map((c) => (
+                                                <button
+                                                    key={c}
+                                                    type="button"
+                                                    onClick={() => setGestionColorState(c)}
+                                                    className="h-6 w-6 rounded-full border border-border transition-transform hover:scale-110 active:scale-95 relative"
+                                                    style={{ backgroundColor: c }}
+                                                >
+                                                    {gestionColorState === c && (
+                                                        <span className="absolute inset-0 m-auto h-2 w-2 rounded-full bg-white shadow-sm" />
+                                                    )}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+
                                     {/* Color Administración */}
                                     <div className="space-y-3">
                                         <label className="text-sm font-bold block">Color para Administración</label>
@@ -1207,13 +1257,13 @@ export function SettingsClientPage({ initialConfig, mode = 'system' }: SettingsC
                                     <Route className="h-5 w-5" /> Distribución de Menú
                                 </CardTitle>
                                 <CardDescription>
-                                    Organiza las secciones del sistema en los menús de Operación y Administración.
+                                    Organiza las secciones del sistema en los menús de Operación, Administración y Gestión.
                                 </CardDescription>
                             </CardHeader>
                             <CardContent className="space-y-6">
                                 <div className="space-y-4">
                                     {/* Tab Selector */}
-                                    <div className="flex bg-muted/65 p-0.5 rounded-full border border-border/40 justify-between relative h-9 items-center max-w-[280px]">
+                                    <div className="flex bg-muted/65 p-0.5 rounded-full border border-border/40 justify-between relative h-9 items-center max-w-[360px]">
                                         <button
                                             type="button"
                                             onClick={() => setActiveMenuSettingsTab('operacion')}
@@ -1225,6 +1275,18 @@ export function SettingsClientPage({ initialConfig, mode = 'system' }: SettingsC
                                             )}
                                         >
                                             Operación
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => setActiveMenuSettingsTab('gestion')}
+                                            className={cn(
+                                                "flex-1 py-1 rounded-full text-xs font-bold text-center transition-all duration-300 relative z-10 active:scale-95",
+                                                activeMenuSettingsTab === 'gestion'
+                                                    ? "bg-background text-foreground shadow-sm ring-1 ring-border/50 font-black"
+                                                    : "text-muted-foreground hover:text-foreground"
+                                            )}
+                                        >
+                                            Gestión
                                         </button>
                                         <button
                                             type="button"
@@ -1258,7 +1320,7 @@ export function SettingsClientPage({ initialConfig, mode = 'system' }: SettingsC
                                                             <div className="w-[180px]">
                                                                 <Select
                                                                     value={value}
-                                                                    onValueChange={(val: 'operacion' | 'administracion') => {
+                                                                    onValueChange={(val: 'operacion' | 'administracion' | 'gestion') => {
                                                                         setMenuConfigState(prev => ({
                                                                             ...prev,
                                                                             [link.id]: val
@@ -1270,6 +1332,7 @@ export function SettingsClientPage({ initialConfig, mode = 'system' }: SettingsC
                                                                     </SelectTrigger>
                                                                     <SelectContent>
                                                                         <SelectItem value="operacion">Operación</SelectItem>
+                                                                        <SelectItem value="gestion">Gestión</SelectItem>
                                                                         <SelectItem value="administracion">Administración</SelectItem>
                                                                     </SelectContent>
                                                                 </Select>

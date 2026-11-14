@@ -5,41 +5,47 @@ import Link from 'next/link';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/hooks/use-auth';
 import type { UserPermissions } from '@/lib/types';
-import { LayoutDashboard, Users, Landmark, FileWarning, Wallet, Settings, Activity, Search, History, Coins, Megaphone, UserCheck, Printer, ShieldCheck, FileSpreadsheet, Lock, BarChart3, Gift, ReceiptText, type LucideIcon } from 'lucide-react';
+import { LayoutGrid, Users, Landmark, FileWarning, Wallet, Settings, Activity, Search, History, Coins, Megaphone, UserCheck, Printer, ShieldCheck, FileSpreadsheet, Lock, BarChart3, Gift, ReceiptText, Settings2, Briefcase, type LucideIcon } from 'lucide-react';
 
 import { useState, useEffect, useMemo } from 'react';
 
 export const allLinks: { href: string; label: string; id: string, icon: LucideIcon }[] = [
-  { href: '/inicio', label: 'Inicio', id: 'dashboard', icon: LayoutDashboard },
+  // Operación
+  { href: '/inicio', label: 'Inicio', id: 'dashboard', icon: LayoutGrid },
   { href: '/inicio/clientes', label: 'Clientes', id: 'clients', icon: Users },
+  { href: '/inicio/avales', label: 'Avales', id: 'avales', icon: ShieldCheck },
   { href: '/inicio/consultar-cliente', label: 'Consultar', id: 'consultarCliente', icon: Search },
   { href: '/inicio/prestamos', label: 'Préstamos', id: 'loans', icon: Landmark },
   { href: '/inicio/pendientes', label: 'Pendientes', id: 'overduePortfolio', icon: FileWarning },
   { href: '/inicio/cartera-vencida', label: 'Vencida', id: 'carteraVencida', icon: History },
   { href: '/inicio/debes', label: 'Debes', id: 'debes', icon: Coins },
   { href: '/inicio/resumen', label: 'Resumen', id: 'resumen', icon: BarChart3 },
+
+  // Administración
+  { href: '/inicio/ajustes', label: 'Ajustes', id: 'settings', icon: Settings },
+  { href: '/inicio/control', label: 'Control', id: 'control', icon: Activity },
+  { href: '/inicio/bitacora', label: 'Bitacora', id: 'wallet', icon: Wallet },
+  { href: '/inicio/personal', label: 'Personal', id: 'personal', icon: UserCheck },
+  { href: '/inicio/avisos', label: 'Avisos', id: 'avisos', icon: Megaphone },
+
+  // Gestión
+  { href: '/inicio/imprenta', label: 'Imprenta', id: 'imprenta', icon: Printer },
   { href: '/inicio/aguinaldos', label: 'Aguinaldos', id: 'aguinaldos', icon: Gift },
   { href: '/inicio/precaptura', label: 'Precaptura', id: 'precaptura', icon: FileSpreadsheet },
   { href: '/inicio/gastos', label: 'Gastos', id: 'gastos', icon: ReceiptText },
   { href: '/inicio/cierre-semanal', label: 'Cierre Semanal', id: 'cierreSemanal', icon: Lock },
-  { href: '/inicio/bitacora', label: 'Bitacora', id: 'wallet', icon: Wallet },
-  { href: '/inicio/control', label: 'Control', id: 'control', icon: Activity },
-  { href: '/inicio/personal', label: 'Personal', id: 'personal', icon: UserCheck },
-  { href: '/inicio/avales', label: 'Avales', id: 'avales', icon: ShieldCheck },
-  { href: '/inicio/ajustes', label: 'Ajustes', id: 'settings', icon: Settings },
-  { href: '/inicio/avisos', label: 'Avisos', id: 'avisos', icon: Megaphone },
-  { href: '/inicio/imprenta', label: 'Imprenta', id: 'imprenta', icon: Printer },
 ];
 
 interface MainNavProps {
     isMobile?: boolean;
     onLinkClick?: () => void;
-    menuConfig?: Record<string, 'operacion' | 'administracion'>;
+    menuConfig?: Record<string, 'operacion' | 'administracion' | 'gestion'>;
     menuOrder?: string[];
-    activeTab: 'operacion' | 'administracion';
-    setActiveTab: (tab: 'operacion' | 'administracion') => void;
+    activeTab: 'operacion' | 'administracion' | 'gestion';
+    setActiveTab: (tab: 'operacion' | 'administracion' | 'gestion') => void;
     operacionColor?: string;
     administracionColor?: string;
+    gestionColor?: string;
 }
 
 export function MainNav({ 
@@ -50,34 +56,45 @@ export function MainNav({
   activeTab, 
   setActiveTab,
   operacionColor = '#3b82f6',
-  administracionColor = '#8b5cf6' 
+  administracionColor = '#8b5cf6',
+  gestionColor = '#10b981'
 }: MainNavProps) {
   const pathname = usePathname();
   const { appUser } = useAuth();
 
-  const currentTabColor = activeTab === 'operacion' ? operacionColor : administracionColor;
+  const currentTabColor = 
+    activeTab === 'operacion' 
+      ? operacionColor 
+      : activeTab === 'administracion' 
+        ? administracionColor 
+        : gestionColor;
 
   const mergedMenuConfig = useMemo(() => {
-    const defaultMenuConfig: Record<string, 'operacion' | 'administracion'> = {
+    const defaultMenuConfig: Record<string, 'operacion' | 'administracion' | 'gestion'> = {
+      // Operación
       dashboard: 'operacion',
       clients: 'operacion',
+      avales: 'operacion',
       consultarCliente: 'operacion',
       loans: 'operacion',
       overduePortfolio: 'operacion',
       carteraVencida: 'operacion',
       debes: 'operacion',
       resumen: 'operacion',
-      aguinaldos: 'administracion',
-      precaptura: 'administracion',
-      gastos: 'administracion',
-      cierreSemanal: 'administracion',
-      wallet: 'administracion',
-      control: 'administracion',
+
+      // Administración
       settings: 'administracion',
-      avisos: 'administracion',
+      control: 'administracion',
+      wallet: 'administracion',
       personal: 'administracion',
-      avales: 'administracion',
-      imprenta: 'administracion',
+      avisos: 'administracion',
+
+      // Gestión
+      imprenta: 'gestion',
+      aguinaldos: 'gestion',
+      precaptura: 'gestion',
+      gastos: 'gestion',
+      cierreSemanal: 'gestion',
     };
     return { ...defaultMenuConfig, ...menuConfig };
   }, [menuConfig]);
@@ -135,55 +152,57 @@ export function MainNav({
     });
   }, [orderedAllowedLinks, mergedMenuConfig, activeTab]);
 
-  const getIconClass = (id: string, isActive: boolean, sizeClass = "h-5 w-5") => {
+  const getIconClass = (id: string, isActive: boolean, sizeClass = "h-4 w-4") => {
     return cn(
         sizeClass,
-        "transition-all duration-300 transform",
-        isActive ? "scale-110" : "group-hover:scale-110 opacity-70 group-hover:opacity-100",
-        id === 'overduePortfolio' && (isActive ? 'text-orange-500 drop-shadow-[0_0_8px_rgba(249,115,22,0.4)]' : 'group-hover:text-orange-500'),
-        id === 'carteraVencida' && (isActive ? 'text-red-600 drop-shadow-[0_0_8px_rgba(220,38,38,0.4)]' : 'group-hover:text-red-600'),
-        id === 'control' && (isActive ? 'text-blue-600 drop-shadow-[0_0_8px_rgba(37,99,235,0.4)]' : 'group-hover:text-blue-600')
+        "transition-transform duration-200 shrink-0",
+        isActive ? "scale-105" : "text-slate-500 dark:text-zinc-400 group-hover:text-slate-800 dark:group-hover:text-zinc-200 group-hover:scale-110"
     );
   };
 
   if (isMobile) {
     return (
         <div className="flex flex-col gap-4">
-            {/* Mobile Tab Selector - Apple Liquid Glass */}
-            <div className="flex liquid-glass-track p-1 rounded-2xl mx-4 justify-between relative h-11 items-center">
-              {/* Mobile Sliding Pill Background with specular sheen */}
-              <div 
-                className="absolute top-1 bottom-1 rounded-xl transition-all duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] liquid-glass-pill overflow-hidden"
-                style={{
-                  left: activeTab === 'operacion' ? '4px' : 'calc(50% + 2px)',
-                  width: 'calc(50% - 6px)',
-                  backgroundColor: currentTabColor,
-                  boxShadow: `0 4px 14px -1px ${currentTabColor}60, inset 0 1px 1.5px 0 rgba(255, 255, 255, 0.8), inset 0 -1px 1px 0 rgba(0, 0, 0, 0.2)`
-                }}
-              >
-                <div className="absolute inset-0 bg-gradient-to-b from-white/40 via-white/10 to-transparent pointer-events-none rounded-xl" />
-              </div>
+            {/* Mobile Tab Selector */}
+            <div className="flex bg-slate-100 dark:bg-zinc-800 p-1.5 rounded-2xl mx-3 justify-between relative h-11 items-center gap-1.5">
               <button
                 onClick={() => setActiveTab('operacion')}
                 className={cn(
-                  "flex-1 py-2.5 rounded-xl text-xs font-black tracking-wide text-center transition-all relative z-10 active:scale-95",
+                  "flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-[11px] font-semibold tracking-tight text-center transition-all duration-200 select-none active:scale-95",
                   activeTab === 'operacion'
-                    ? "text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.4)]"
-                    : "text-muted-foreground/80 hover:text-foreground"
+                    ? "text-white shadow-md font-bold"
+                    : "text-slate-600 dark:text-zinc-400 hover:text-foreground"
                 )}
+                style={activeTab === 'operacion' ? { backgroundColor: currentTabColor } : undefined}
               >
-                Operación
+                <Settings2 className="h-3.5 w-3.5" />
+                <span>Operación</span>
+              </button>
+              <button
+                onClick={() => setActiveTab('gestion')}
+                className={cn(
+                  "flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-[11px] font-semibold tracking-tight text-center transition-all duration-200 select-none active:scale-95",
+                  activeTab === 'gestion'
+                    ? "text-white shadow-md font-bold"
+                    : "text-slate-600 dark:text-zinc-400 hover:text-foreground"
+                )}
+                style={activeTab === 'gestion' ? { backgroundColor: currentTabColor } : undefined}
+              >
+                <Briefcase className="h-3.5 w-3.5" />
+                <span>Gestión</span>
               </button>
               <button
                 onClick={() => setActiveTab('administracion')}
                 className={cn(
-                  "flex-1 py-2.5 rounded-xl text-xs font-black tracking-wide text-center transition-all relative z-10 active:scale-95",
+                  "flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-[11px] font-semibold tracking-tight text-center transition-all duration-200 select-none active:scale-95",
                   activeTab === 'administracion'
-                    ? "text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.4)]"
-                    : "text-muted-foreground/80 hover:text-foreground"
+                    ? "text-white shadow-md font-bold"
+                    : "text-slate-600 dark:text-zinc-400 hover:text-foreground"
                 )}
+                style={activeTab === 'administracion' ? { backgroundColor: currentTabColor } : undefined}
               >
-                Administración
+                <ShieldCheck className="h-3.5 w-3.5" />
+                <span>Admin</span>
               </button>
             </div>
 
@@ -248,16 +267,12 @@ export function MainNav({
     );
   }
 
-  // Desktop Sub-Menu: Apple Liquid Glass Floating Capsule Dock
+  // Desktop Sub-Menu: Segmented Unified Capsule Bar (matching exact design)
   return (
         <div 
-          className="flex items-center liquid-glass-dock p-1.5 rounded-full transition-all duration-500 my-0.5 relative z-20"
-          style={{
-            borderColor: `${currentTabColor}35`,
-            boxShadow: `0 8px 24px -4px rgba(0, 0, 0, 0.06), 0 0 20px -6px ${currentTabColor}25, inset 0 1px 1.5px 0 rgba(255, 255, 255, 0.95)`
-          }}
+          className="inline-flex items-stretch bg-white dark:bg-zinc-900 border border-slate-200/90 dark:border-zinc-800 rounded-2xl shadow-[0_4px_20px_-2px_rgba(0,0,0,0.05),0_1px_3px_rgba(0,0,0,0.02)] overflow-hidden relative max-w-full my-0.5 select-none"
         >
-            <div key={activeTab} className="flex items-center gap-1.5 h-full animate-in fade-in slide-in-from-bottom-2 duration-300">
+            <div key={activeTab} className="flex items-stretch h-full animate-in fade-in zoom-in-98 duration-200">
                 {filteredLinks.length > 0 ? (
                   filteredLinks.map((link) => {
                     const isActive = pathname === link.href || (link.href !== '/inicio' && link.href !== '/dashboard' && pathname.startsWith(link.href));
@@ -266,31 +281,30 @@ export function MainNav({
                             key={link.href}
                             href={link.href}
                             className={cn(
-                                'group flex items-center gap-2 rounded-full px-4 py-1.5 text-xs font-bold transition-all duration-300 relative overflow-hidden h-full active:scale-95',
+                                'group relative flex items-center gap-2 px-4 md:px-5 py-2.5 text-xs transition-all duration-200 border-r border-slate-200/80 dark:border-zinc-800 last:border-r-0 whitespace-nowrap active:scale-[0.98]',
                                 isActive 
-                                    ? 'liquid-glass-sub-active text-slate-900 dark:text-white font-black shadow-sm' 
-                                    : 'text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white hover:bg-white/40 dark:hover:bg-white/10'
+                                    ? 'font-semibold' 
+                                    : 'text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-100 hover:bg-slate-50/80 dark:hover:bg-zinc-800/40 font-medium'
                             )}
+                            style={isActive ? {
+                                backgroundColor: `${currentTabColor}10`,
+                                color: currentTabColor,
+                            } : undefined}
                         >
                             <link.icon 
                               className={getIconClass(link.id, isActive, "h-4 w-4")} 
-                              style={isActive && link.id !== 'overduePortfolio' && link.id !== 'carteraVencida' && link.id !== 'control' ? { 
+                              style={isActive ? { 
                                 color: currentTabColor,
-                                filter: `drop-shadow(0 2px 6px ${currentTabColor}70)`
                               } : undefined}
                             />
-                            <span className={cn(
-                                "transition-all duration-300 tracking-tight",
-                                isActive ? "opacity-100 font-black" : "opacity-85 group-hover:opacity-100"
-                            )}>
+                            <span className="tracking-tight">
                                 {link.label}
                             </span>
                             {isActive && (
                                 <span 
-                                  className="absolute bottom-0.5 left-1/2 -translate-x-1/2 w-4 h-1 rounded-full animate-pulse" 
+                                  className="absolute bottom-0 left-0 right-0 h-[3px] rounded-t-sm" 
                                   style={{ 
                                     backgroundColor: currentTabColor,
-                                    boxShadow: `0 0 10px 1px ${currentTabColor}`
                                   }}
                                 />
                             )}
@@ -298,7 +312,7 @@ export function MainNav({
                     );
                   })
                 ) : (
-                  <span className="text-xs text-muted-foreground px-6 py-2">No hay secciones en este menú.</span>
+                  <span className="text-xs text-muted-foreground px-6 py-2.5">No hay secciones en este menú.</span>
                 )}
             </div>
         </div>
