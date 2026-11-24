@@ -12,7 +12,7 @@ import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/hooks/use-auth';
 import { db } from '@/lib/firebase';
 import { collection, getDocs } from 'firebase/firestore';
-import { getLoans } from '@/lib/firestore-data';
+import { getLoans, getAppConfig } from '@/lib/firestore-data';
 import { 
   Gift, Calendar, Building, Search, Download, 
   Printer, Eye, DollarSign, TrendingUp, Sparkles,
@@ -142,15 +142,22 @@ export function AguinaldosClientPage({
   const [clients] = useState<Client[]>(initialClients);
   const [loanPlans] = useState<LoanPlan[]>(initialLoanPlans);
   const [settlements, setSettlements] = useState<PromotoraSettlement[]>(initialSettlements);
+  const [config, setConfig] = useState<AppConfig | null>(initialConfig || null);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
+
+  // Business name from AppConfig (Ajustes -> Nombre del Negocio)
+  const businessName = useMemo(() => {
+    return (config?.appName?.trim() || initialConfig?.appName?.trim() || 'LEÓN CAPITAL').toUpperCase();
+  }, [config?.appName, initialConfig?.appName]);
 
   // Manual refresh handler
   const handleRefresh = async () => {
     setIsRefreshing(true);
     try {
-      const [newLoans, settlementsSnap] = await Promise.all([
+      const [newLoans, settlementsSnap, newConfig] = await Promise.all([
         getLoans().catch(() => initialLoans),
         getDocs(collection(db, 'promotoraSettlements')).catch(() => null),
+        getAppConfig().catch(() => initialConfig || null),
       ]);
       const newSettlements = settlementsSnap
         ? settlementsSnap.docs.map(d => ({ id: d.id, ...d.data() } as PromotoraSettlement))
@@ -158,6 +165,7 @@ export function AguinaldosClientPage({
 
       setLoans(newLoans);
       setSettlements(newSettlements);
+      if (newConfig) setConfig(newConfig);
       toast({
         title: "Datos actualizados",
         description: "Se han recargado los últimos préstamos y cierres con éxito.",
@@ -683,7 +691,7 @@ export function AguinaldosClientPage({
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(14);
       doc.setTextColor(15, 23, 42);
-      doc.text('LEÓN CAPITAL', marginX, 32);
+      doc.text(businessName, marginX, 32);
 
       doc.setFontSize(11);
       doc.setTextColor(30, 41, 59);
@@ -824,7 +832,7 @@ export function AguinaldosClientPage({
         doc.setFont('helvetica', 'normal');
         doc.setFontSize(6.5);
         doc.setTextColor(148, 163, 184);
-        doc.text('DOCUMENTO OFICIAL PARA USO INTERNO — CREDICONTROL', pageWidth / 2, pageHeight - 12, { align: 'center' });
+        doc.text(`DOCUMENTO OFICIAL PARA USO INTERNO — ${businessName}`, pageWidth / 2, pageHeight - 12, { align: 'center' });
         doc.text(`Página ${i} de ${totalPages}`, pageWidth - marginX, pageHeight - 12, { align: 'right' });
       }
 
@@ -860,7 +868,7 @@ export function AguinaldosClientPage({
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(14);
       doc.setTextColor(15, 23, 42);
-      doc.text('LEÓN CAPITAL', marginX, 36);
+      doc.text(businessName, marginX, 36);
 
       doc.setFontSize(11);
       doc.setTextColor(180, 83, 9);
@@ -955,7 +963,7 @@ export function AguinaldosClientPage({
         doc.setFont('helvetica', 'normal');
         doc.setFontSize(6.5);
         doc.setTextColor(148, 163, 184);
-        doc.text('DOCUMENTO OFICIAL PARA USO INTERNO — CREDICONTROL', pageWidth / 2, pageHeight - 12, { align: 'center' });
+        doc.text(`DOCUMENTO OFICIAL PARA USO INTERNO — ${businessName}`, pageWidth / 2, pageHeight - 12, { align: 'center' });
         doc.text(`Página ${i} de ${totalPages}`, pageWidth - marginX, pageHeight - 12, { align: 'right' });
       }
 
