@@ -38,11 +38,20 @@ export async function deleteGroupSettlementsAction(promotoraId: string) {
     try {
         const q = query(collection(db, 'promotoraSettlements'), where('promotoraId', '==', promotoraId));
         const snap = await getDocs(q);
-        const batch = writeBatch(db);
-        snap.docs.forEach(doc => {
-            batch.delete(doc.ref);
-        });
-        await batch.commit();
+        if (snap.empty) {
+            return { success: true, message: 'No hay liquidaciones por restablecer.' };
+        }
+
+        const CHUNK_SIZE = 400;
+        for (let i = 0; i < snap.docs.length; i += CHUNK_SIZE) {
+            const chunk = snap.docs.slice(i, i + CHUNK_SIZE);
+            const batch = writeBatch(db);
+            chunk.forEach(doc => {
+                batch.delete(doc.ref);
+            });
+            await batch.commit();
+        }
+
         revalidatePath('/inicio/debes');
         return { success: true, message: 'Todo el historial del grupo fue restablecido correctamente.' };
     } catch (err: any) {

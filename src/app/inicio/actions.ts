@@ -37,6 +37,11 @@ export type CreateLoanInput = {
     loanPlanId: string;
     amount: number;
     client: Omit<Client, 'id' | 'avatarUrl'> & { id?: string };
+    authorization?: {
+        code: string;
+        userId?: string;
+        userName?: string;
+    };
 };
 
 export async function createLoanAction(input: CreateLoanInput) {
@@ -142,6 +147,40 @@ export async function createLoanAction(input: CreateLoanInput) {
         
         const docRef = await addDoc(collection(db, 'loans'), newLoan);
 
+        // Si se utilizó un código de autorización (ej. límite de aval superado), registrarlo en la bitácora
+        if (input.authorization?.code) {
+            let endorsementName = 'N/A';
+            if (input.client.endorsement) {
+                const match = input.client.endorsement.match(/(.*) \((.*)\)/);
+                endorsementName = match ? match[1].trim() : input.client.endorsement.trim();
+            }
+
+            const plan = await getLoanPlan(input.loanPlanId);
+            const planName = plan ? plan.name : 'Préstamo';
+            const formattedAmount = new Intl.NumberFormat('es-MX', {
+                style: 'currency',
+                currency: 'MXN'
+            }).format(input.amount);
+            
+            const authUserName = (input.authorization.userName || '').trim() || 'Usuario';
+            const clientName = input.client.name.trim().toUpperCase();
+
+            const auditDescription = `AUTORIZACIÓN CON CÓDIGO [${input.authorization.code}] — Crédito de ${formattedAmount} (${planName}) autorizado para el cliente ${clientName} con aval ${endorsementName.toUpperCase()} (Límite superado) por el usuario ${authUserName.toUpperCase()}.`;
+
+            const auditTx = {
+                type: 'debit' as const,
+                amount: Number(input.amount) || 0,
+                date: new Date(),
+                description: auditDescription,
+                loanId: docRef.id,
+                clientId: clientId,
+                userId: input.authorization.userId || null,
+            };
+
+            await addDoc(collection(db, 'walletTransactions'), cleanFirestoreData(auditTx));
+            revalidatePath('/inicio/bitacora');
+        }
+
         revalidatePath('/inicio/prestamos');
         revalidatePath('/inicio/clientes');
         if (clientId) {
@@ -175,7 +214,10 @@ export async function updateLoanAction(loanId: string, data: { loanPlanId: strin
     }
 }
 
-export async function deleteLoanAction(loanId: string) {
+export async function deleteLoanAction(
+    loanId: string,
+    authorizedBy?: { code?: string; userId?: string; userName?: string }
+) {
     try {
         await runTransaction(db, async (transaction) => {
             const loanRef = doc(db, 'loans', loanId);
@@ -191,6 +233,19 @@ export async function deleteLoanAction(loanId: string) {
             if (totalPaid > 0) {
                 const walletRef = doc(db, 'wallet', 'main');
                 transaction.update(walletRef, { balance: increment(-totalPaid) });
+            }
+
+            if (authorizedBy?.code) {
+                const auditTxRef = doc(collection(db, 'walletTransactions'));
+                transaction.set(auditTxRef, cleanFirestoreData({
+                    type: 'debit',
+                    amount: loan.amount || 0,
+                    date: new Date(),
+                    description: `ELIMINACIÓN DE CRÉDITO CON CÓDIGO [${authorizedBy.code}] — Préstamo (${loanId}) eliminado por ${authorizedBy.userName || 'Usuario'}.`,
+                    loanId: loanId,
+                    clientId: loan.clientId,
+                    userId: authorizedBy.userId || null,
+                }));
             }
 
             transaction.delete(loanRef);

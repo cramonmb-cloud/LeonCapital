@@ -17,9 +17,9 @@ import {
   Gift, Calendar, Building, Search, Download, 
   Printer, Eye, DollarSign, TrendingUp, Sparkles,
   RotateCcw, ArrowUpDown, Filter, Landmark, Users,
-  RefreshCw, CheckCircle2, AlertTriangle
+  RefreshCw, CheckCircle2, AlertTriangle, Award, Wallet
 } from 'lucide-react';
-import { cn, parseLocalDate, getMexicoNow } from '@/lib/utils';
+import { cn, parseLocalDate, getMexicoNow, getSaturdayOfWeek } from '@/lib/utils';
 import type { Client, LoanPlan, Loan, Plaza, Localidad, Promotora, AppConfig, PromotoraSettlement } from '@/lib/types';
 import jsPDF from 'jspdf';
 import 'jspdf-autotable';
@@ -75,7 +75,50 @@ interface PromotoraAguinaldoRow {
   falla: number;
   recuperado: number;
   totalGeneral: number;
+  bonoRatePerThousand: number;
+  isCustomBonoRate: boolean;
+  bono: number;
+  totalDispersar: number;
   loans: Loan[];
+}
+
+/**
+ * Calcula el rango de las últimas 7 semanas cerradas (7 sábados operativos).
+ * Toma el último sábado cerrado (ej. 14/11/2026 si la semana activa 21/11/2026 no ha cerrado)
+ * y retrocede exactamente 42 días (6 intervalos de 7 días entre 7 sábados = 03/10/2026 a 14/11/2026).
+ */
+export function getLastClosed7WeeksRange(settlementsList: PromotoraSettlement[] = []): { start: string; end: string } {
+  let latestSatStr = '';
+  if (settlementsList && settlementsList.length > 0) {
+    const sortedDates = settlementsList
+      .map(s => typeof s.weekDate === 'string' ? s.weekDate.slice(0, 10) : '')
+      .filter(d => d.length === 10)
+      .sort((a, b) => b.localeCompare(a));
+    if (sortedDates.length > 0) {
+      latestSatStr = sortedDates[0];
+    }
+  }
+
+  if (!latestSatStr) {
+    const currentSat = getSaturdayOfWeek(getMexicoNow());
+    const lastClosedSat = new Date(currentSat.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const y = lastClosedSat.getFullYear();
+    const m = String(lastClosedSat.getMonth() + 1).padStart(2, '0');
+    const d = String(lastClosedSat.getDate()).padStart(2, '0');
+    latestSatStr = `${y}-${m}-${d}`;
+  }
+
+  const [ey, em, ed] = latestSatStr.split('-').map(Number);
+  const endSatDate = new Date(ey, em - 1, ed, 12, 0, 0, 0);
+  const startSatDate = new Date(endSatDate.getTime() - 42 * 24 * 60 * 60 * 1000);
+  const sy = startSatDate.getFullYear();
+  const sm = String(startSatDate.getMonth() + 1).padStart(2, '0');
+  const sd = String(startSatDate.getDate()).padStart(2, '0');
+
+  return {
+    start: `${sy}-${sm}-${sd}`,
+    end: latestSatStr,
+  };
 }
 
 export function AguinaldosClientPage({
@@ -130,20 +173,21 @@ export function AguinaldosClientPage({
     }
   };
 
-  // Initialize dates: Year start to today
+  // Initialize dates: Default to 7 Weeks (Bonos) ending on last closed Saturday
   const today = getMexicoNow();
-  const todayStr = today.toISOString().split('T')[0];
   const currentYear = today.getFullYear();
-  const defaultStartStr = `${currentYear}-01-01`;
+  const initial7Weeks = useMemo(() => getLastClosed7WeeksRange(initialSettlements), [initialSettlements]);
 
-  const [startDate, setStartDate] = useState<string>(defaultStartStr);
-  const [endDate, setEndDate] = useState<string>(todayStr);
+  const [startDate, setStartDate] = useState<string>(() => getLastClosed7WeeksRange(initialSettlements).start);
+  const [endDate, setEndDate] = useState<string>(() => getLastClosed7WeeksRange(initialSettlements).end);
   const [globalRatePerThousand, setGlobalRatePerThousand] = useState<number>(1.0);
   const [customRates, setCustomRates] = useState<Record<string, number>>({});
+  const [globalBonoRatePerThousand, setGlobalBonoRatePerThousand] = useState<number>(3.0);
+  const [customBonoRates, setCustomBonoRates] = useState<Record<string, number>>({});
   const [selectedPlaza, setSelectedPlaza] = useState<string>('ALL');
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [onlyWithSales, setOnlyWithSales] = useState<boolean>(false);
-  const [sortBy, setSortBy] = useState<'promotora' | 'plaza' | 'venta' | 'aguinaldo' | 'prestamos' | 'falla' | 'recuperado' | 'totalGeneral'>('venta');
+  const [sortBy, setSortBy] = useState<'promotora' | 'plaza' | 'venta' | 'aguinaldo' | 'prestamos' | 'falla' | 'recuperado' | 'totalGeneral' | 'bono' | 'totalDispersar'>('venta');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
 
   // Detail Modal
@@ -185,8 +229,15 @@ export function AguinaldosClientPage({
   };
 
   // Quick date presets
-  const applyPreset = (preset: 'year' | '6m' | '12m' | 'month') => {
+  const applyPreset = (preset: '7weeks' | 'year' | '6m' | '12m' | 'month') => {
     const now = getMexicoNow();
+    if (preset === '7weeks') {
+      const range = getLastClosed7WeeksRange(settlements);
+      setStartDate(range.start);
+      setEndDate(range.end);
+      return;
+    }
+
     const end = now.toISOString().split('T')[0];
     let start = `${now.getFullYear()}-01-01`;
 
@@ -317,6 +368,11 @@ export function AguinaldosClientPage({
       const recuperado = stats.loanRecuperado + stats.settlementRecuperado;
       const totalGeneral = totalVenta - falla + recuperado;
 
+      const isCustomBonoRate = customBonoRates[promotora.id] !== undefined;
+      const bonoRatePerThousand = isCustomBonoRate ? customBonoRates[promotora.id] : globalBonoRatePerThousand;
+      const bono = totalGeneral > 0 ? Math.round((totalGeneral / 1000) * bonoRatePerThousand) : 0;
+      const totalDispersar = aguinaldo + bono;
+
       result[i] = {
         promotoraId: promotora.id,
         promotoraName: promotora.name,
@@ -332,12 +388,16 @@ export function AguinaldosClientPage({
         falla,
         recuperado,
         totalGeneral,
+        bonoRatePerThousand,
+        isCustomBonoRate,
+        bono,
+        totalDispersar,
         loans: stats.loans,
       };
     }
 
     return result;
-  }, [promotoras, loans, settlements, startDate, endDate, globalRatePerThousand, customRates, locMap, plazaMap, planMap]);
+  }, [promotoras, loans, settlements, startDate, endDate, globalRatePerThousand, customRates, globalBonoRatePerThousand, customBonoRates, locMap, plazaMap, planMap]);
 
   // Lazy detail computation: Only runs when the modal is opened for a specific promotora
   const { detailFallaPayments, detailRecoveredPayments } = useMemo(() => {
@@ -443,6 +503,10 @@ export function AguinaldosClientPage({
         cmp = a.recuperado - b.recuperado;
       } else if (sortBy === 'totalGeneral') {
         cmp = a.totalGeneral - b.totalGeneral;
+      } else if (sortBy === 'bono') {
+        cmp = a.bono - b.bono;
+      } else if (sortBy === 'totalDispersar') {
+        cmp = a.totalDispersar - b.totalDispersar;
       }
       return sortOrder === 'asc' ? cmp : -cmp;
     });
@@ -457,6 +521,8 @@ export function AguinaldosClientPage({
     let falla = 0;
     let recuperado = 0;
     let totalGeneral = 0;
+    let bono = 0;
+    let totalDispersar = 0;
 
     filteredRows.forEach(r => {
       venta += r.totalVenta;
@@ -465,10 +531,13 @@ export function AguinaldosClientPage({
       falla += r.falla;
       recuperado += r.recuperado;
       totalGeneral += r.totalGeneral;
+      bono += r.bono;
+      totalDispersar += r.totalDispersar;
       if (r.totalVenta > 0) promotorasConVenta++;
     });
 
     const promedioAguinaldo = promotorasConVenta > 0 ? Math.round(aguinaldo / promotorasConVenta) : 0;
+    const promedioBono = promotorasConVenta > 0 ? Math.round(bono / promotorasConVenta) : 0;
 
     return {
       venta,
@@ -477,9 +546,12 @@ export function AguinaldosClientPage({
       promotorasConVenta,
       totalPromotoras: filteredRows.length,
       promedioAguinaldo,
+      promedioBono,
       falla,
       recuperado,
       totalGeneral,
+      bono,
+      totalDispersar,
     };
   }, [filteredRows]);
 
@@ -500,6 +572,23 @@ export function AguinaldosClientPage({
     });
   };
 
+  const handleCustomBonoRateChange = (promotoraId: string, value: string) => {
+    const num = parseFloat(value);
+    if (isNaN(num) || num < 0) return;
+    setCustomBonoRates(prev => ({
+      ...prev,
+      [promotoraId]: num,
+    }));
+  };
+
+  const handleResetCustomBonoRate = (promotoraId: string) => {
+    setCustomBonoRates(prev => {
+      const copy = { ...prev };
+      delete copy[promotoraId];
+      return copy;
+    });
+  };
+
   // Export to CSV
   const handleExportCSV = () => {
     if (filteredRows.length === 0) {
@@ -514,11 +603,14 @@ export function AguinaldosClientPage({
       'Localidad',
       'Préstamos Colocados',
       'Venta Total Colocada ($)',
-      'Valor x Cada $1,000 ($)',
+      'Tasa Aguinaldo x $1,000 ($)',
       'Aguinaldo Calculado ($)',
       'Falla ($)',
       'Recuperados ($)',
-      'Total General ($)'
+      'Total General ($)',
+      'Tasa Bono x $1,000 ($)',
+      'Bono Calculado ($)',
+      'Gran Total Dispersión ($)'
     ];
 
     const dataLines = filteredRows.map((r, idx) => [
@@ -532,7 +624,10 @@ export function AguinaldosClientPage({
       r.aguinaldo,
       r.falla,
       r.recuperado,
-      r.totalGeneral
+      r.totalGeneral,
+      `$${r.bonoRatePerThousand.toFixed(2)}`,
+      r.bono,
+      r.totalDispersar
     ].join(','));
 
     // Totals line
@@ -543,11 +638,14 @@ export function AguinaldosClientPage({
       '""',
       totals.prestamos,
       totals.venta,
-      `"$${globalRatePerThousand.toFixed(2)} base x $1,000"`,
+      `"$${globalRatePerThousand.toFixed(2)} base"`,
       totals.aguinaldo,
       totals.falla,
       totals.recuperado,
-      totals.totalGeneral
+      totals.totalGeneral,
+      `"$${globalBonoRatePerThousand.toFixed(2)} base"`,
+      totals.bono,
+      totals.totalDispersar
     ].join(',');
 
     const csvContent = '\uFEFF' + [headers.join(','), ...dataLines, totalsLine].join('\n');
@@ -555,12 +653,12 @@ export function AguinaldosClientPage({
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.setAttribute('href', url);
-    link.setAttribute('download', `Reporte_Aguinaldos_${startDate}_al_${endDate}.csv`);
+    link.setAttribute('download', `Reporte_Aguinaldos_y_Bonos_${startDate}_al_${endDate}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
 
-    toast({ title: 'Excel Exportado', description: 'El reporte de aguinaldos se descargó en CSV exitosamente.' });
+    toast({ title: 'Excel Exportado', description: 'El reporte de aguinaldos y bonos se descargó en CSV exitosamente.' });
   };
 
   // Export to PDF
@@ -589,22 +687,23 @@ export function AguinaldosClientPage({
 
       doc.setFontSize(11);
       doc.setTextColor(30, 41, 59);
-      doc.text('REPORTE DE AGUINALDOS A PROMOTORAS', marginX, 48);
+      doc.text('REPORTE DE AGUINALDOS Y BONOS A PROMOTORAS', marginX, 48);
 
       doc.setFont('helvetica', 'normal');
-      doc.setFontSize(8);
+      doc.setFontSize(7.5);
       doc.setTextColor(100, 116, 139);
-      doc.text(`Período de colocación: ${startDate} al ${endDate} | Tasa base: $${globalRatePerThousand.toFixed(2)} por cada $1,000 | Plaza: ${selectedPlaza === 'ALL' ? 'Consolidado General' : (plazaMap.get(selectedPlaza)?.name || selectedPlaza)}`, marginX, 60);
+      doc.text(`Período: ${startDate} al ${endDate} | Aguinaldo base: $${globalRatePerThousand.toFixed(2)}/mil | Bono base: $${globalBonoRatePerThousand.toFixed(2)}/mil | Plaza: ${selectedPlaza === 'ALL' ? 'Consolidado General' : (plazaMap.get(selectedPlaza)?.name || selectedPlaza)}`, marginX, 60);
 
       // Top right meta
       const nowFormatted = new Date().toLocaleString('es-MX', { timeZone: 'America/Mexico_City' });
       doc.setFontSize(7.5);
       doc.text(`Generado: ${nowFormatted}`, pageWidth - marginX, 32, { align: 'right' });
       doc.text(`Grupos analizados: ${filteredRows.length} (${totals.promotorasConVenta} con venta)`, pageWidth - marginX, 44, { align: 'right' });
+      doc.text(`Total a Dispersar: ${formatCurrency(totals.totalDispersar)}`, pageWidth - marginX, 56, { align: 'right' });
 
-      // Table data
+      // Table data (13 columns)
       const tableHeaders = [
-        ['#', 'Plaza', 'Grupo / Promotora', 'Localidad', 'Prést.', 'Venta Colocada', '$ x Mil', 'Aguinaldo', 'Falla (-)', 'Recuperados (+)', 'Total General']
+        ['#', 'Plaza', 'Grupo / Promotora', 'Localidad', 'Prést.', 'Venta Colocada', '$ Aguinaldo', 'Aguinaldo', 'Falla (-)', 'Recuperados (+)', 'Total Gral.', '$ Bono', 'Bono Calc.']
       ];
 
       const tableData = filteredRows.map((r, i) => [
@@ -614,11 +713,13 @@ export function AguinaldosClientPage({
         r.localidadName,
         r.loansCount.toString(),
         formatCurrency(r.totalVenta),
-        `$${r.ratePerThousand.toFixed(2)}${r.isCustomRate ? ' *' : ''}`,
+        `$${r.ratePerThousand.toFixed(2)}${r.isCustomRate ? '*' : ''}`,
         formatCurrency(r.aguinaldo),
         r.falla > 0 ? `-${formatCurrency(r.falla)}` : '$0.00',
         r.recuperado > 0 ? `+${formatCurrency(r.recuperado)}` : '$0.00',
-        formatCurrency(r.totalGeneral)
+        formatCurrency(r.totalGeneral),
+        `$${r.bonoRatePerThousand.toFixed(2)}${r.isCustomBonoRate ? '*' : ''}`,
+        formatCurrency(r.bono)
       ]);
 
       // Totals row
@@ -633,7 +734,9 @@ export function AguinaldosClientPage({
         formatCurrency(totals.aguinaldo),
         `-${formatCurrency(totals.falla)}`,
         `+${formatCurrency(totals.recuperado)}`,
-        formatCurrency(totals.totalGeneral)
+        formatCurrency(totals.totalGeneral),
+        `$${globalBonoRatePerThousand.toFixed(2)} base`,
+        formatCurrency(totals.bono)
       ]);
 
       doc.autoTable({
@@ -643,8 +746,8 @@ export function AguinaldosClientPage({
         theme: 'plain',
         margin: { left: marginX, right: marginX, bottom: 45 },
         styles: {
-          fontSize: 7,
-          cellPadding: 3.5,
+          fontSize: 6.8,
+          cellPadding: 3,
           textColor: [15, 23, 42],
           font: 'helvetica'
         },
@@ -653,20 +756,22 @@ export function AguinaldosClientPage({
           textColor: [255, 255, 255],
           fontStyle: 'bold',
           halign: 'left',
-          fontSize: 7.5
+          fontSize: 7
         },
         columnStyles: {
-          0: { cellWidth: 20, halign: 'center' },
-          1: { cellWidth: 65 },
-          2: { cellWidth: 125, fontStyle: 'bold' },
-          3: { cellWidth: 85 },
-          4: { cellWidth: 35, halign: 'center' },
-          5: { cellWidth: 72, halign: 'right', fontStyle: 'bold' },
-          6: { cellWidth: 46, halign: 'center' },
-          7: { cellWidth: 70, halign: 'right', fontStyle: 'bold' },
-          8: { cellWidth: 65, halign: 'right', textColor: [190, 18, 60] },
-          9: { cellWidth: 65, halign: 'right' },
-          10: { cellWidth: 80, halign: 'right', fontStyle: 'bold' }
+          0: { cellWidth: 18, halign: 'center' },
+          1: { cellWidth: 54 },
+          2: { cellWidth: 104, fontStyle: 'bold' },
+          3: { cellWidth: 70 },
+          4: { cellWidth: 26, halign: 'center' },
+          5: { cellWidth: 62, halign: 'right', fontStyle: 'bold' },
+          6: { cellWidth: 42, halign: 'center' },
+          7: { cellWidth: 58, halign: 'right', fontStyle: 'bold' },
+          8: { cellWidth: 52, halign: 'right', textColor: [190, 18, 60] },
+          9: { cellWidth: 52, halign: 'right' },
+          10: { cellWidth: 62, halign: 'right', fontStyle: 'bold' },
+          11: { cellWidth: 42, halign: 'center' },
+          12: { cellWidth: 62, halign: 'right', fontStyle: 'bold', textColor: [180, 83, 9] }
         },
         alternateRowStyles: {
           fillColor: [248, 250, 252]
@@ -726,10 +831,173 @@ export function AguinaldosClientPage({
       const blob = doc.output('blob');
       const blobUrl = URL.createObjectURL(blob);
       window.open(blobUrl, '_blank');
-      toast({ title: 'PDF Generado', description: 'El reporte de aguinaldos se abrió listo para imprimir.' });
+      toast({ title: 'PDF Generado', description: 'El reporte de aguinaldos y bonos se abrió listo para imprimir.' });
     } catch (err: any) {
       console.error('Error generating PDF:', err);
       toast({ title: 'Error', description: 'No se pudo generar el reporte PDF.', variant: 'destructive' });
+    }
+  };
+
+  // Export dedicated Bonos PDF (Plaza, Localidad, Grupo, Total General Colocado y Bono Calculado)
+  const handleExportBonosPDF = () => {
+    if (filteredRows.length === 0) {
+      toast({ title: 'Sin datos', description: 'No hay filas para imprimir.', variant: 'destructive' });
+      return;
+    }
+
+    try {
+      const doc = new jsPDF({
+        orientation: 'portrait',
+        unit: 'pt',
+        format: 'letter'
+      }) as jsPDFWithAutoTable;
+
+      const pageWidth = doc.internal.pageSize.getWidth();
+      const pageHeight = doc.internal.pageSize.getHeight();
+      const marginX = 32;
+
+      // Header
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(14);
+      doc.setTextColor(15, 23, 42);
+      doc.text('LEÓN CAPITAL', marginX, 36);
+
+      doc.setFontSize(11);
+      doc.setTextColor(180, 83, 9);
+      doc.text('REPORTE EXCLUSIVO DE BONOS A PROMOTORAS', marginX, 52);
+
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(8);
+      doc.setTextColor(100, 116, 139);
+      doc.text(
+        `Período: ${startDate} al ${endDate} | Tasa base: $${globalBonoRatePerThousand.toFixed(2)} por cada $1,000 | Plaza: ${selectedPlaza === 'ALL' ? 'Consolidado General' : (plazaMap.get(selectedPlaza)?.name || selectedPlaza)}`,
+        marginX,
+        64
+      );
+
+      // Top right meta
+      const nowFormatted = new Date().toLocaleString('es-MX', { timeZone: 'America/Mexico_City' });
+      doc.setFontSize(7.5);
+      doc.setTextColor(100, 116, 139);
+      doc.text(`Generado: ${nowFormatted}`, pageWidth - marginX, 36, { align: 'right' });
+      doc.text(`Grupos analizados: ${filteredRows.length}`, pageWidth - marginX, 48, { align: 'right' });
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(180, 83, 9);
+      doc.text(`Total Bonos: ${formatCurrency(totals.bono)}`, pageWidth - marginX, 60, { align: 'right' });
+
+      // Table data (6 columns: #, Plaza, Localidad, Grupo, Total General Colocado, Bono Calculado)
+      const tableHeaders = [
+        ['#', 'Plaza', 'Localidad', 'Grupo / Promotora', 'Total General Colocado', 'Bono Calculado']
+      ];
+
+      const tableData = filteredRows.map((r, i) => [
+        (i + 1).toString(),
+        r.plazaName,
+        r.localidadName,
+        r.promotoraName,
+        formatCurrency(r.totalGeneral),
+        formatCurrency(r.bono)
+      ]);
+
+      // Totals row
+      tableData.push([
+        '',
+        'TOTALES',
+        '',
+        `${totals.promotorasConVenta} grupos con venta`,
+        formatCurrency(totals.totalGeneral),
+        formatCurrency(totals.bono)
+      ]);
+
+      doc.autoTable({
+        startY: 76,
+        head: tableHeaders,
+        body: tableData,
+        theme: 'plain',
+        margin: { left: marginX, right: marginX, bottom: 45 },
+        styles: {
+          fontSize: 8,
+          cellPadding: 4.5,
+          textColor: [15, 23, 42],
+          font: 'helvetica'
+        },
+        headStyles: {
+          fillColor: [30, 41, 59],
+          textColor: [255, 255, 255],
+          fontStyle: 'bold',
+          halign: 'left',
+          fontSize: 8
+        },
+        columnStyles: {
+          0: { cellWidth: 24, halign: 'center' },
+          1: { cellWidth: 80 },
+          2: { cellWidth: 95 },
+          3: { cellWidth: 155, fontStyle: 'bold' },
+          4: { cellWidth: 98, halign: 'right', fontStyle: 'bold' },
+          5: { cellWidth: 96, halign: 'right', fontStyle: 'bold', textColor: [180, 83, 9] }
+        },
+        alternateRowStyles: {
+          fillColor: [248, 250, 252]
+        },
+        didParseCell: (data) => {
+          if (data.row.index === tableData.length - 1) {
+            data.cell.styles.fontStyle = 'bold';
+            data.cell.styles.fillColor = [254, 243, 199];
+            data.cell.styles.textColor = [120, 53, 15];
+          }
+        }
+      });
+
+      // Signatures
+      const finalY = (doc as any).lastAutoTable?.finalY;
+      if (finalY && finalY + 50 <= pageHeight - 35) {
+        const sigY = finalY + 32;
+        const sigWidth = 140;
+        const availableWidth = pageWidth - (marginX * 2);
+        const sigGap = (availableWidth - (3 * sigWidth)) / 2;
+
+        const signatures = [
+          { title: 'ELABORÓ / SUPERVISIÓN', desc: 'Firma y Fecha' },
+          { title: 'REVISÓ / AUDITORÍA', desc: 'Verificación de Bonos' },
+          { title: 'AUTORIZÓ / DIRECCIÓN', desc: 'Aprobación de Pago' }
+        ];
+
+        signatures.forEach((sig, idx) => {
+          const sx = marginX + idx * (sigWidth + sigGap);
+          doc.setDrawColor(100, 116, 139);
+          doc.setLineWidth(0.75);
+          doc.line(sx, sigY, sx + sigWidth, sigY);
+
+          doc.setFont('helvetica', 'bold');
+          doc.setFontSize(6.5);
+          doc.setTextColor(30, 41, 59);
+          doc.text(sig.title, sx + (sigWidth / 2), sigY + 8.5, { align: 'center' });
+
+          doc.setFont('helvetica', 'normal');
+          doc.setFontSize(5.5);
+          doc.setTextColor(100, 116, 139);
+          doc.text(sig.desc, sx + (sigWidth / 2), sigY + 16, { align: 'center' });
+        });
+      }
+
+      // Page numbers
+      const totalPages = doc.getNumberOfPages();
+      for (let i = 1; i <= totalPages; i++) {
+        doc.setPage(i);
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(6.5);
+        doc.setTextColor(148, 163, 184);
+        doc.text('DOCUMENTO OFICIAL PARA USO INTERNO — CREDICONTROL', pageWidth / 2, pageHeight - 12, { align: 'center' });
+        doc.text(`Página ${i} de ${totalPages}`, pageWidth - marginX, pageHeight - 12, { align: 'right' });
+      }
+
+      const blob = doc.output('blob');
+      const blobUrl = URL.createObjectURL(blob);
+      window.open(blobUrl, '_blank');
+      toast({ title: 'PDF de Bonos Generado', description: 'El reporte exclusivo de bonos se abrió listo para imprimir.' });
+    } catch (err: any) {
+      console.error('Error generating Bonos PDF:', err);
+      toast({ title: 'Error', description: 'No se pudo generar el reporte PDF de bonos.', variant: 'destructive' });
     }
   };
 
@@ -745,7 +1013,7 @@ export function AguinaldosClientPage({
               </h1>
             </div>
 
-            {/* Actions: Refresh, Export PDF, Export CSV */}
+            {/* Actions: Refresh, Export CSV, Export PDF Completo, Export PDF Solo Bonos */}
             <div className="flex items-center gap-2 flex-wrap">
               <Button
                 onClick={handleRefresh}
@@ -770,23 +1038,34 @@ export function AguinaldosClientPage({
               </Button>
 
               <Button
+                onClick={handleExportBonosPDF}
+                size="sm"
+                className="h-9 text-xs bg-amber-600 hover:bg-amber-700 text-white font-semibold shadow-sm transition-colors border-0"
+                title="Exportar reporte exclusivo de bonos en PDF"
+              >
+                <Award className="w-3.5 h-3.5 mr-1.5" />
+                Imprimir Solo Bonos (PDF)
+              </Button>
+
+              <Button
                 onClick={handleExportPDF}
                 size="sm"
                 className="h-9 text-xs bg-indigo-900 hover:bg-indigo-800 text-white font-semibold shadow-sm transition-colors border-0"
+                title="Exportar reporte completo de aguinaldos y bonos en PDF"
               >
                 <Printer className="w-3.5 h-3.5 mr-1.5" />
-                Imprimir Reporte (PDF)
+                Imprimir Completo (PDF)
               </Button>
             </div>
           </div>
 
           {/* Filter Bar */}
           <div className="mt-4 pt-4 border-t border-slate-200 dark:border-zinc-800 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-3 items-end">
-            {/* Global Rate Per Thousand Input */}
+            {/* Global Rate Per Thousand Input for Aguinaldos */}
             <div className="lg:col-span-3 space-y-1">
               <label className="text-[11px] font-bold text-slate-700 dark:text-zinc-300 uppercase tracking-wider flex items-center gap-1">
-                <DollarSign className="w-3.5 h-3.5 text-indigo-600" />
-                $ x Cada $1,000 Colocados
+                <Gift className="w-3.5 h-3.5 text-indigo-600" />
+                $ x Cada $1,000 (Aguinaldo)
               </label>
               <div className="flex items-center gap-2">
                 <div className="relative flex-1">
@@ -817,6 +1096,50 @@ export function AguinaldosClientPage({
                         globalRatePerThousand === val
                           ? "bg-indigo-900 text-white border-indigo-900"
                           : "bg-slate-50 dark:bg-zinc-800 text-slate-600 dark:text-zinc-300 border-slate-200 hover:bg-slate-100"
+                      )}
+                    >
+                      ${val}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* Global Rate Per Thousand Input for Bonos */}
+            <div className="lg:col-span-3 space-y-1">
+              <label className="text-[11px] font-bold text-amber-800 dark:text-amber-300 uppercase tracking-wider flex items-center gap-1">
+                <Award className="w-3.5 h-3.5 text-amber-600" />
+                $ x Cada $1,000 (Bono)
+              </label>
+              <div className="flex items-center gap-2">
+                <div className="relative flex-1">
+                  <span className="absolute left-2.5 top-2.5 text-xs font-bold text-amber-600 dark:text-amber-400">
+                    $
+                  </span>
+                  <Input
+                    type="number"
+                    step="0.5"
+                    min="0"
+                    value={globalBonoRatePerThousand}
+                    onChange={e => setGlobalBonoRatePerThousand(Math.max(0, parseFloat(e.target.value) || 0))}
+                    className="h-9 pl-6 pr-14 text-xs font-bold text-amber-950 dark:text-amber-200 border-amber-300 dark:border-amber-800 bg-amber-50/50 dark:bg-amber-950/20"
+                  />
+                  <span className="absolute right-2 top-2.5 text-[10px] font-semibold text-slate-400">
+                    / $1,000
+                  </span>
+                </div>
+                {/* Quick pills 1, 3, 6 */}
+                <div className="flex items-center gap-1">
+                  {[1.0, 3.0, 6.0].map(val => (
+                    <button
+                      key={val}
+                      type="button"
+                      onClick={() => setGlobalBonoRatePerThousand(val)}
+                      className={cn(
+                        "text-[10px] font-bold px-2 py-1 rounded border transition-all",
+                        globalBonoRatePerThousand === val
+                          ? "bg-amber-600 text-white border-amber-600"
+                          : "bg-amber-50/50 dark:bg-zinc-800 text-amber-800 dark:text-zinc-300 border-amber-200 hover:bg-amber-100"
                       )}
                     >
                       ${val}
@@ -874,23 +1197,6 @@ export function AguinaldosClientPage({
                 </SelectContent>
               </Select>
             </div>
-
-            {/* Search Input */}
-            <div className="lg:col-span-3 space-y-1">
-              <label className="text-[11px] font-bold text-slate-700 dark:text-zinc-300 uppercase tracking-wider">
-                Buscar Grupo
-              </label>
-              <div className="relative">
-                <Search className="w-3.5 h-3.5 absolute left-2.5 top-3 text-slate-400" />
-                <Input
-                  type="text"
-                  placeholder="Filtrar por grupo o localidad..."
-                  value={searchTerm}
-                  onChange={e => setSearchTerm(e.target.value)}
-                  className="h-9 pl-8 text-xs border-slate-300 dark:border-zinc-700"
-                />
-              </div>
-            </div>
           </div>
 
           {/* Quick Presets & Filters */}
@@ -899,6 +1205,21 @@ export function AguinaldosClientPage({
               <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mr-1">
                 Períodos Rápidos:
               </span>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => applyPreset('7weeks')}
+                className={cn(
+                  "h-7 text-[11px] px-2.5 font-bold transition-all",
+                  startDate === initial7Weeks.start && endDate === initial7Weeks.end
+                    ? "bg-amber-100 text-amber-900 border-amber-300 dark:bg-amber-950/60 dark:text-amber-200 dark:border-amber-800 shadow-xs"
+                    : "bg-amber-50/60 text-amber-800 border-amber-200 hover:bg-amber-100 dark:bg-zinc-900 dark:text-zinc-300"
+                )}
+                title="7 semanas cerradas (03/10/2026 al 14/11/2026)"
+              >
+                ⭐ 7 Semanas (Bonos: {initial7Weeks.start.slice(5)} al {initial7Weeks.end.slice(5)})
+              </Button>
               <Button
                 type="button"
                 variant="outline"
@@ -937,12 +1258,23 @@ export function AguinaldosClientPage({
               </Button>
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
+              <div className="relative w-44 sm:w-56">
+                <Search className="w-3.5 h-3.5 absolute left-2.5 top-2 text-slate-400" />
+                <Input
+                  type="text"
+                  placeholder="Buscar grupo o localidad..."
+                  value={searchTerm}
+                  onChange={e => setSearchTerm(e.target.value)}
+                  className="h-7 pl-8 text-xs border-slate-300 dark:border-zinc-700"
+                />
+              </div>
+
               <button
                 type="button"
                 onClick={() => setOnlyWithSales(!onlyWithSales)}
                 className={cn(
-                  "text-xs font-semibold px-2.5 py-1 rounded-md border transition-all flex items-center gap-1.5",
+                  "text-xs font-semibold px-2.5 py-1 rounded-md border transition-all flex items-center gap-1.5 h-7",
                   onlyWithSales
                     ? "bg-indigo-50 border-indigo-300 text-indigo-900 dark:bg-indigo-950/40 dark:border-indigo-800 dark:text-indigo-300"
                     : "border-slate-300 text-slate-600 hover:bg-slate-50 dark:border-zinc-700 dark:text-zinc-400"
@@ -956,6 +1288,84 @@ export function AguinaldosClientPage({
         </CardContent>
       </Card>
 
+      {/* Executive KPI Summary Cards */}
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+        <Card className="border border-slate-200 dark:border-zinc-800 shadow-sm bg-white dark:bg-zinc-950">
+          <CardContent className="p-3.5">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Venta Colocada</span>
+              <TrendingUp className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+            </div>
+            <div className="mt-1.5 text-base sm:text-lg font-black text-slate-900 dark:text-zinc-100 tabular-nums">
+              {formatCurrency(totals.venta)}
+            </div>
+            <div className="text-[11px] text-slate-500 mt-0.5">
+              {totals.prestamos} préstamos ({totals.promotorasConVenta} grupos)
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="border border-slate-200 dark:border-zinc-800 shadow-sm bg-white dark:bg-zinc-950">
+          <CardContent className="p-3.5">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] font-bold text-indigo-700 dark:text-indigo-300 uppercase tracking-wider">Aguinaldos Calc.</span>
+              <Gift className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+            </div>
+            <div className="mt-1.5 text-base sm:text-lg font-black text-indigo-900 dark:text-indigo-200 tabular-nums">
+              {formatCurrency(totals.aguinaldo)}
+            </div>
+            <div className="text-[11px] text-indigo-600/80 dark:text-indigo-400/80 mt-0.5">
+              Base: ${globalRatePerThousand.toFixed(2)} / $1,000 colocado
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="border border-slate-200 dark:border-zinc-800 shadow-sm bg-white dark:bg-zinc-950">
+          <CardContent className="p-3.5">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Total General Bonos</span>
+              <Landmark className="w-4 h-4 text-slate-600 dark:text-slate-400" />
+            </div>
+            <div className="mt-1.5 text-base sm:text-lg font-black text-slate-900 dark:text-zinc-100 tabular-nums">
+              {formatCurrency(totals.totalGeneral)}
+            </div>
+            <div className="text-[11px] text-slate-500 mt-0.5 truncate" title="Venta - Falla + Recuperados">
+              Venta - Falla + Recup.
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="border border-amber-200 dark:border-amber-900/60 shadow-sm bg-amber-50/30 dark:bg-amber-950/20">
+          <CardContent className="p-3.5">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] font-bold text-amber-800 dark:text-amber-300 uppercase tracking-wider">Bonos Calculados</span>
+              <Award className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+            </div>
+            <div className="mt-1.5 text-base sm:text-lg font-black text-amber-950 dark:text-amber-200 tabular-nums">
+              {formatCurrency(totals.bono)}
+            </div>
+            <div className="text-[11px] text-amber-700/80 dark:text-amber-400/80 mt-0.5">
+              Base: ${globalBonoRatePerThousand.toFixed(2)} / $1,000 Total Gral.
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="border border-emerald-200 dark:border-emerald-900/60 shadow-sm bg-emerald-50/40 dark:bg-emerald-950/20 col-span-2 lg:col-span-1">
+          <CardContent className="p-3.5">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] font-bold text-emerald-800 dark:text-emerald-300 uppercase tracking-wider">Total a Dispersar</span>
+              <DollarSign className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+            </div>
+            <div className="mt-1.5 text-base sm:text-lg font-black text-emerald-950 dark:text-emerald-200 tabular-nums">
+              {formatCurrency(totals.totalDispersar)}
+            </div>
+            <div className="text-[11px] text-emerald-700/80 dark:text-emerald-400/80 mt-0.5">
+              Aguinaldos + Bonos
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
       {/* Main Table */}
       <Card className="border border-slate-200 dark:border-zinc-800 shadow-sm overflow-hidden bg-white dark:bg-zinc-950">
         <div className="overflow-x-auto">
@@ -966,8 +1376,8 @@ export function AguinaldosClientPage({
                 <TableHead colSpan={8} className="py-1.5 px-3 text-left font-black text-[11px] uppercase tracking-wider text-slate-800 dark:text-zinc-200 border-r-2 border-slate-300 dark:border-zinc-700 bg-indigo-50/40 dark:bg-indigo-950/20">
                   Venta y Aguinaldos
                 </TableHead>
-                <TableHead colSpan={3} className="py-1.5 px-3 text-left font-black text-[11px] uppercase tracking-wider text-slate-800 dark:text-zinc-200 border-r-2 border-slate-300 dark:border-zinc-700 bg-slate-100/70 dark:bg-zinc-800/60">
-                  Calculo para bonos
+                <TableHead colSpan={5} className="py-1.5 px-3 text-left font-black text-[11px] uppercase tracking-wider text-amber-900 dark:text-amber-200 border-r-2 border-slate-300 dark:border-zinc-700 bg-amber-50/60 dark:bg-amber-950/30">
+                  Cálculo para Bonos
                 </TableHead>
                 <TableHead className="py-1.5 px-2 text-center font-bold text-[10px] uppercase text-slate-400 hover:bg-transparent">
                   Acción
@@ -1046,7 +1456,7 @@ export function AguinaldosClientPage({
                   </div>
                 </TableHead>
 
-                {/* Right block: Falla, Recuperados, Total General */}
+                {/* Right block: Cálculo para bonos (5 columns) */}
                 <TableHead 
                   onClick={() => {
                     if (sortBy === 'falla') setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
@@ -1076,12 +1486,28 @@ export function AguinaldosClientPage({
                     if (sortBy === 'totalGeneral') setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
                     else { setSortBy('totalGeneral'); setSortOrder('desc'); }
                   }}
-                  className="py-2.5 px-2 text-right text-[11px] font-black text-slate-900 dark:text-white cursor-pointer select-none border-r-2 border-slate-300 dark:border-zinc-700 bg-slate-100/60 dark:bg-zinc-800/40"
+                  className="py-2.5 px-2 text-right text-[11px] font-black text-slate-900 dark:text-white cursor-pointer select-none bg-slate-100/60 dark:bg-zinc-800/40"
                   title="Total General = Venta Colocada - Falla + Recuperados"
                 >
                   <div className="flex items-center justify-end gap-1">
                     Total General (=)
                     <ArrowUpDown className="w-3 h-3 text-slate-400" />
+                  </div>
+                </TableHead>
+                <TableHead className="py-2.5 px-2 text-center text-[11px] font-bold text-amber-900 dark:text-amber-200 bg-amber-50/40 dark:bg-amber-950/20">
+                  $ x Mil (Bono)
+                </TableHead>
+                <TableHead 
+                  onClick={() => {
+                    if (sortBy === 'bono') setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
+                    else { setSortBy('bono'); setSortOrder('desc'); }
+                  }}
+                  className="py-2.5 px-2 text-right text-[11px] font-black text-amber-900 dark:text-amber-200 cursor-pointer select-none border-r-2 border-slate-300 dark:border-zinc-700 bg-amber-50/60 dark:bg-amber-950/30"
+                  title="Bono = (Total General / 1,000) * Tasa Bono"
+                >
+                  <div className="flex items-center justify-end gap-1">
+                    Bono Calculado
+                    <ArrowUpDown className="w-3 h-3 text-amber-500" />
                   </div>
                 </TableHead>
 
@@ -1093,7 +1519,7 @@ export function AguinaldosClientPage({
             <TableBody>
               {filteredRows.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={12} className="py-8 text-center text-slate-500">
+                  <TableCell colSpan={14} className="py-8 text-center text-slate-500">
                     No se encontraron grupos con los filtros seleccionados.
                   </TableCell>
                 </TableRow>
@@ -1179,10 +1605,46 @@ export function AguinaldosClientPage({
                     </TableCell>
 
                     <TableCell className={cn(
-                      "py-2 px-2 text-right font-black tabular-nums border-r-2 border-slate-300 dark:border-zinc-700 bg-slate-100/40 dark:bg-zinc-900/40",
+                      "py-2 px-2 text-right font-black tabular-nums bg-slate-100/40 dark:bg-zinc-900/40",
                       row.totalGeneral >= 0 ? "text-slate-900 dark:text-zinc-100" : "text-rose-600 dark:text-rose-400"
                     )}>
                       {formatCurrency(row.totalGeneral)}
+                    </TableCell>
+
+                    {/* Bono Rate per Thousand editable */}
+                    <TableCell className="py-2 px-2 text-center bg-amber-50/20 dark:bg-amber-950/10">
+                      <div className="flex items-center justify-center gap-1">
+                        <span className="text-[11px] font-bold text-amber-700/60 dark:text-amber-400/60">$</span>
+                        <Input
+                          type="number"
+                          step="0.5"
+                          min="0"
+                          value={row.bonoRatePerThousand}
+                          onChange={e => handleCustomBonoRateChange(row.promotoraId, e.target.value)}
+                          className={cn(
+                            "h-6 w-14 text-center font-bold text-xs p-1",
+                            row.isCustomBonoRate
+                              ? "border-amber-500 bg-amber-100/70 text-amber-950 dark:bg-amber-950/60 dark:text-amber-200 dark:border-amber-600 ring-1 ring-amber-400"
+                              : "border-slate-200 text-slate-700 dark:border-zinc-700 dark:text-zinc-300"
+                          )}
+                        />
+                        {row.isCustomBonoRate && (
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            onClick={() => handleResetCustomBonoRate(row.promotoraId)}
+                            title="Restablecer a la tasa global de bonos"
+                            className="h-5 w-5 text-amber-600 hover:text-amber-800 hover:bg-amber-100 p-0"
+                          >
+                            <RotateCcw className="w-2.5 h-2.5" />
+                          </Button>
+                        )}
+                      </div>
+                    </TableCell>
+
+                    {/* Bono Calculado */}
+                    <TableCell className="py-2 px-2 text-right font-black tabular-nums border-r-2 border-slate-300 dark:border-zinc-700 bg-amber-50/40 dark:bg-amber-950/20 text-amber-900 dark:text-amber-200">
+                      {row.bono > 0 ? formatCurrency(row.bono) : '$0.00'}
                     </TableCell>
 
                     <TableCell className="py-2 px-2 text-center">
@@ -1240,8 +1702,14 @@ export function AguinaldosClientPage({
                   <TableCell className="py-2 px-2 text-right tabular-nums font-black text-slate-900 dark:text-white">
                     +{formatCurrency(totals.recuperado)}
                   </TableCell>
-                  <TableCell className="py-2 px-2 text-right tabular-nums font-black text-slate-900 dark:text-white border-r-2 border-slate-400 dark:border-zinc-600 bg-slate-300/40 dark:bg-zinc-700/40">
+                  <TableCell className="py-2 px-2 text-right tabular-nums font-black text-slate-900 dark:text-white bg-slate-300/40 dark:bg-zinc-700/40">
                     {formatCurrency(totals.totalGeneral)}
+                  </TableCell>
+                  <TableCell className="py-2 px-2 text-center text-amber-900 dark:text-amber-200 font-semibold text-[11px] bg-amber-100/30 dark:bg-amber-950/20">
+                    ${globalBonoRatePerThousand.toFixed(2)} base
+                  </TableCell>
+                  <TableCell className="py-2 px-2 text-right tabular-nums font-black text-amber-950 dark:text-amber-100 border-r-2 border-slate-400 dark:border-zinc-600 bg-amber-200/50 dark:bg-amber-900/40">
+                    {formatCurrency(totals.bono)}
                   </TableCell>
                   <TableCell className="py-2 px-2 text-center">
                     —
@@ -1261,22 +1729,27 @@ export function AguinaldosClientPage({
               <div>
                 <DialogTitle className="text-base font-black text-slate-900 dark:text-zinc-100 flex items-center gap-2">
                   <Gift className="w-4 h-4 text-indigo-700" />
-                  Auditoría de Colocación: {detailRow?.promotoraName}
+                  Auditoría de Colocación y Bonos: {detailRow?.promotoraName}
                 </DialogTitle>
                 <DialogDescription className="text-xs text-slate-500 mt-0.5">
                   Localidad: {detailRow?.localidadName} | Plaza: {detailRow?.plazaName} | Período: {startDate} al {endDate}
                 </DialogDescription>
               </div>
-              <Badge variant="outline" className="border-slate-300 dark:border-zinc-700 text-slate-900 dark:text-zinc-100 font-bold text-xs px-2 py-1">
-                Aguinaldo: {detailRow && formatCurrency(detailRow.aguinaldo)} (${detailRow?.ratePerThousand.toFixed(2)} x cada $1,000)
-              </Badge>
+              <div className="flex items-center gap-2 flex-wrap">
+                <Badge variant="outline" className="border-indigo-300 dark:border-indigo-700 text-indigo-900 dark:text-indigo-200 bg-indigo-50 dark:bg-indigo-950/40 font-bold text-xs px-2 py-1">
+                  Aguinaldo: {detailRow && formatCurrency(detailRow.aguinaldo)} (${detailRow?.ratePerThousand.toFixed(2)} x mil)
+                </Badge>
+                <Badge variant="outline" className="border-amber-300 dark:border-amber-700 text-amber-900 dark:text-amber-200 bg-amber-50 dark:bg-amber-950/40 font-bold text-xs px-2 py-1">
+                  Bono: {detailRow && formatCurrency(detailRow.bono)} (${detailRow?.bonoRatePerThousand.toFixed(2)} x mil)
+                </Badge>
+              </div>
             </div>
           </DialogHeader>
 
           {/* Quick Metrics */}
           {detailRow && (
             <div className="space-y-2 my-2">
-              <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-center text-xs">
+              <div className="grid grid-cols-2 sm:grid-cols-6 gap-2 text-center text-xs">
                 <div className="p-2.5 bg-slate-50 dark:bg-zinc-900 rounded border">
                   <span className="text-slate-500 text-[10px] uppercase font-bold block">Venta Colocada</span>
                   <span className="font-black text-sm text-slate-900 dark:text-zinc-100">{formatCurrency(detailRow.totalVenta)}</span>
@@ -1297,10 +1770,15 @@ export function AguinaldosClientPage({
                   <span className="font-black text-sm text-slate-900 dark:text-zinc-100">+{formatCurrency(detailRow.recuperado)}</span>
                   <span className="text-[10px] text-slate-400 block">Cobranza recuperada</span>
                 </div>
-                <div className="p-2.5 bg-indigo-50/50 dark:bg-indigo-950/20 rounded border border-indigo-200 dark:border-indigo-900 col-span-2 sm:col-span-1">
-                  <span className="text-indigo-900 dark:text-indigo-300 text-[10px] uppercase font-bold block">Total General (=)</span>
+                <div className="p-2.5 bg-indigo-50/50 dark:bg-indigo-950/20 rounded border border-indigo-200 dark:border-indigo-900">
+                  <span className="text-indigo-900 dark:text-indigo-300 text-[10px] uppercase font-bold block">Total Gral. (=)</span>
                   <span className="font-black text-sm text-indigo-950 dark:text-white">{formatCurrency(detailRow.totalGeneral)}</span>
-                  <span className="text-[10px] text-indigo-600 dark:text-indigo-400 block font-semibold">Venta - Falla + Recup.</span>
+                  <span className="text-[10px] text-indigo-600 dark:text-indigo-400 block font-semibold">Venta - Falla + Recup</span>
+                </div>
+                <div className="p-2.5 bg-amber-50/50 dark:bg-amber-950/20 rounded border border-amber-300 dark:border-amber-800">
+                  <span className="text-amber-800 dark:text-amber-300 text-[10px] uppercase font-bold block">Bono Calculado</span>
+                  <span className="font-black text-sm text-amber-950 dark:text-amber-200">{formatCurrency(detailRow.bono)}</span>
+                  <span className="text-[10px] text-amber-600 dark:text-amber-400 block font-semibold">${detailRow.bonoRatePerThousand.toFixed(2)} x $1,000</span>
                 </div>
               </div>
             </div>

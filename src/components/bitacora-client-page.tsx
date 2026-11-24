@@ -31,6 +31,8 @@ import {
   Banknote,
   Receipt,
   Layers,
+  KeyRound,
+  ShieldAlert,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -47,12 +49,29 @@ interface BitacoraClientPageProps {
   users: AppUser[];
 }
 
-type CategoryFilter = 'all' | 'abonos' | 'prestamos' | 'ajustes';
+type CategoryFilter = 'all' | 'abonos' | 'prestamos' | 'ajustes' | 'autorizaciones';
 type DateFilter = 'all' | 'today' | 'this_week' | 'this_month';
 
 // Clasificador inteligente de transacciones para entender de inmediato el movimiento
 function classifyTransaction(tx: WalletTransaction) {
   const desc = (tx.description || '').toLowerCase();
+
+  // 1. Autorizaciones con código especial
+  if (
+    desc.includes('autorización') ||
+    desc.includes('autorizacion') ||
+    desc.includes('código') ||
+    desc.includes('codigo')
+  ) {
+    return {
+      typeLabel: 'Autorización Especial',
+      category: 'autorizaciones' as CategoryFilter,
+      badgeClass:
+        'bg-purple-500/10 text-purple-700 dark:text-purple-400 border-purple-500/30',
+      icon: KeyRound,
+      iconClass: 'text-purple-600 dark:text-purple-400',
+    };
+  }
 
   if (
     desc.includes('reversión') ||
@@ -217,11 +236,13 @@ export function BitacoraClientPage({
     });
   }, [transactions, categoryFilter, dateFilter, searchTerm, clientMap, userMap]);
 
-  // Totales financieros del conjunto filtrado
+  // Totales financieros del conjunto filtrado (no distorsionar con registros de auditoría de códigos)
   const { totalIncome, totalExpense } = useMemo(() => {
     let income = 0;
     let expense = 0;
     filteredTransactions.forEach((tx) => {
+      const cat = classifyTransaction(tx).category;
+      if (cat === 'autorizaciones') return;
       const amt = Number(tx.amount) || 0;
       if (tx.type === 'credit') {
         income += amt;
@@ -237,13 +258,15 @@ export function BitacoraClientPage({
     let abonos = 0;
     let prestamos = 0;
     let ajustes = 0;
+    let autorizaciones = 0;
     transactions.forEach((tx) => {
       const cat = classifyTransaction(tx).category;
       if (cat === 'abonos') abonos++;
       else if (cat === 'prestamos') prestamos++;
       else if (cat === 'ajustes') ajustes++;
+      else if (cat === 'autorizaciones') autorizaciones++;
     });
-    return { all: transactions.length, abonos, prestamos, ajustes };
+    return { all: transactions.length, abonos, prestamos, ajustes, autorizaciones };
   }, [transactions]);
 
   // Paginación
@@ -532,6 +555,19 @@ export function BitacoraClientPage({
             <RotateCcw className="h-3 w-3 text-amber-600" />
             Ajustes ({categoryCounts.ajustes})
           </button>
+          <button
+            type="button"
+            onClick={() => setCategoryFilter('autorizaciones')}
+            className={cn(
+              'px-2 py-1 rounded-md transition-all shrink-0 flex items-center gap-1',
+              categoryFilter === 'autorizaciones'
+                ? 'bg-background text-purple-700 dark:text-purple-400 shadow-xs font-black'
+                : 'text-muted-foreground hover:text-foreground'
+            )}
+          >
+            <KeyRound className="h-3 w-3 text-purple-600 dark:text-purple-400" />
+            Autorizaciones ({categoryCounts.autorizaciones})
+          </button>
         </div>
 
         {/* Derecha: Selector de Fecha + Buscador Compacto */}
@@ -614,7 +650,9 @@ export function BitacoraClientPage({
               {paginatedTransactions.map((tx) => {
                 const info = classifyTransaction(tx);
                 const clientName = tx.clientId ? clientMap.get(tx.clientId) : null;
-                const userName = tx.userId ? userMap.get(tx.userId) || 'Usuario' : 'Sistema';
+                const userName = tx.userId
+                  ? userMap.get(tx.userId) || 'Usuario'
+                  : (tx.description?.match(/por\s+(?:el\s+usuario\s+)?([A-Za-z0-9_.-]+)\.?$/i)?.[1] || 'Sistema');
 
                 const parsedDate = parseLocalDate(tx.date);
                 const dateStr = parsedDate.toLocaleDateString('es-MX', {
@@ -660,9 +698,14 @@ export function BitacoraClientPage({
                             >
                               {clientName || 'Cliente Registrado'}
                             </Link>
+                            {info.category === 'autorizaciones' && (
+                              <span className="text-[9px] px-1.5 py-0.2 rounded-full bg-purple-500/10 text-purple-700 dark:text-purple-300 font-black border border-purple-500/20 uppercase shrink-0">
+                                Con Clave
+                              </span>
+                            )}
                           </div>
                         ) : null}
-                        <p className="text-[11px] text-muted-foreground line-clamp-1">
+                        <p className="text-[11px] text-muted-foreground line-clamp-2">
                           {tx.description}
                         </p>
                       </div>
@@ -688,17 +731,28 @@ export function BitacoraClientPage({
 
                     {/* 5. Monto e Impacto Financiero */}
                     <TableCell className="py-1.5 px-3 text-right">
-                      <span
-                        className={cn(
-                          'font-mono font-black text-xs sm:text-sm',
-                          isCredit
-                            ? 'text-emerald-600 dark:text-emerald-400'
-                            : 'text-rose-600 dark:text-rose-400'
-                        )}
-                      >
-                        {isCredit ? '+' : '-'}
-                        {formatCurrency(tx.amount)}
-                      </span>
+                      {info.category === 'autorizaciones' ? (
+                        <div className="flex flex-col items-end">
+                          <span className="font-mono font-black text-xs sm:text-sm text-purple-700 dark:text-purple-400">
+                            {formatCurrency(tx.amount)}
+                          </span>
+                          <span className="text-[9px] uppercase font-bold text-muted-foreground tracking-tighter">
+                            Autorizado
+                          </span>
+                        </div>
+                      ) : (
+                        <span
+                          className={cn(
+                            'font-mono font-black text-xs sm:text-sm',
+                            isCredit
+                              ? 'text-emerald-600 dark:text-emerald-400'
+                              : 'text-rose-600 dark:text-rose-400'
+                          )}
+                        >
+                          {isCredit ? '+' : '-'}
+                          {formatCurrency(tx.amount)}
+                        </span>
+                      )}
                     </TableCell>
                   </TableRow>
                 );

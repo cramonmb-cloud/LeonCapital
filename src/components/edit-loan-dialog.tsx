@@ -226,7 +226,10 @@ export function EditLoanDialog({
 
     setIsDeleting(true);
     try {
-        const result = await deleteLoanAction(loan.id);
+        const result = await deleteLoanAction(
+          loan.id,
+          deleteAuthCode ? { code: deleteAuthCode, userId: appUser?.id, userName: appUser?.username } : undefined
+        );
         if (result.success) {
             toast({ title: 'Préstamo Eliminado', description: result.message });
             onOpenChange(false);

@@ -73,16 +73,19 @@ export function computePromotoraWeekMetrics({
       const pCollectionDate = p.date ? parseLocalDate(p.date) : (p.registeredWeekDate ? parseLocalDate(p.registeredWeekDate) : null);
       const regTime = pCollectionDate ? getSaturdayOfWeek(pCollectionDate).getTime() : 0;
 
-      if (p.isAdvance || p.paymentType === 'adelanto_entrante' || (regTime < weekTime && (p.weekNumber && p.weekNumber === targetWeekNumber))) {
+      // El abono debe haberse recaudado físicamente en la semana operativa evaluada
+      if (regTime !== weekTime) {
+        return false;
+      }
+
+      if (p.isAdvance || p.paymentType === 'adelanto_entrante') {
         return false;
       }
 
       if (p.weekNumber && p.weekNumber > 0) {
         return p.weekNumber === targetWeekNumber;
       }
-      const paymentDate = parseLocalDate(p.date);
-      const paymentSaturday = getSaturdayOfWeek(paymentDate);
-      return paymentSaturday.getTime() === weekTime;
+      return true;
     });
 
     // Regla de Negocio CrediControl:
@@ -197,7 +200,7 @@ export function computePromotoraWeekMetrics({
   let supervision = 0;
   let efectivo = Math.max(0, debeEntregar - falla);
   let total = efectivo + recuperado;
-  let diferencia = efectivo - debeEntregar;
+  let diferencia = total - debeEntregar;
   let deuda = Math.max(0, debeEntregar - efectivo);
 
   // Apply precaptura row overrides if present
@@ -218,9 +221,9 @@ export function computePromotoraWeekMetrics({
     if (precapturaRow.adelantosSalientes !== undefined) adelSal = Number(precapturaRow.adelantosSalientes);
     if (precapturaRow.semanaExtra !== undefined) semExt = Number(precapturaRow.semanaExtra);
 
-    efectivo = debeEntregar - falla;
+    efectivo = Math.max(0, debeEntregar - falla);
     total = precapturaRow.totalEntregar !== undefined ? Number(precapturaRow.totalEntregar) : (efectivo + recuperado);
-    diferencia = precapturaRow.diferencia !== undefined ? Number(precapturaRow.diferencia) : (efectivo - debeEntregar);
+    diferencia = precapturaRow.diferencia !== undefined ? Number(precapturaRow.diferencia) : (total - debeEntregar);
     deuda = Math.max(0, debeEntregar - efectivo);
   } else if (savedSettlement) {
     if (savedSettlement.venta !== undefined && (Number(savedSettlement.venta) > 0 || realVenta === 0)) {
@@ -232,17 +235,45 @@ export function computePromotoraWeekMetrics({
     else comicion = Math.round(venta * (comicionPercent / 100));
     if (savedSettlement.supervision !== undefined && Number(savedSettlement.supervision) > 0) supervision = Number(savedSettlement.supervision);
     else supervision = Math.round(venta * (supervisionPercent / 100));
-    if (savedSettlement.adelEnt !== undefined && savedSettlement.isClosed) adelEnt = Number(savedSettlement.adelEnt);
-    if (savedSettlement.isClosed && savedSettlement.adelSal !== undefined) {
-      adelSal = Number(savedSettlement.adelSal);
+    
+    if (savedSettlement.adelEnt !== undefined) adelEnt = Number(savedSettlement.adelEnt);
+    if (savedSettlement.adelSal !== undefined) adelSal = Number(savedSettlement.adelSal);
+    else adelSal = realAdelSal;
+
+    // Respetar debeEntregar guardado si existe, o preservar prevDebt + abonoSemanal
+    if (savedSettlement.debeEntregar !== undefined && savedSettlement.isClosed) {
+      debeEntregar = Number(savedSettlement.debeEntregar);
     } else {
-      adelSal = realAdelSal;
-      debeEntregar = Math.max(0, abonoSemanal - adelSal);
-      efectivo = debeEntregar - falla;
+      debeEntregar = prevDebt + abonoSemanal;
+    }
+
+    if (savedSettlement.falla !== undefined) falla = Number(savedSettlement.falla);
+    if (savedSettlement.recuperado !== undefined) recuperado = Number(savedSettlement.recuperado);
+
+    if (savedSettlement.efectivo !== undefined && savedSettlement.isClosed) {
+      efectivo = Number(savedSettlement.efectivo);
+    } else {
+      efectivo = Math.max(0, debeEntregar - falla);
+    }
+
+    if (savedSettlement.total !== undefined && savedSettlement.isClosed) {
+      total = Number(savedSettlement.total);
+    } else {
       total = efectivo + recuperado;
-      diferencia = efectivo - debeEntregar;
+    }
+
+    if (savedSettlement.diferencia !== undefined && savedSettlement.isClosed) {
+      diferencia = Number(savedSettlement.diferencia);
+    } else {
+      diferencia = total - debeEntregar;
+    }
+
+    if (savedSettlement.deuda !== undefined && savedSettlement.isClosed) {
+      deuda = Number(savedSettlement.deuda);
+    } else {
       deuda = Math.max(0, debeEntregar - efectivo);
     }
+
     if (savedSettlement.semExt !== undefined) semExt = Number(savedSettlement.semExt);
   }
 

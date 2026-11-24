@@ -193,6 +193,7 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
   const [showAuthCodeModal, setShowAuthCodeModal] = useState(false);
   const [authCodeInput, setAuthCodeInput] = useState('');
   const [authCodeError, setAuthCodeError] = useState(false);
+  const [pendingAuthCode, setPendingAuthCode] = useState<string | null>(null);
 
   const [clientColonies, setClientColonies] = useState<string[]>([]);
   const [showClientColonies, setShowClientColonies] = useState(false);
@@ -495,6 +496,7 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
       setShowAuthCodeModal(false);
       setAuthCodeInput('');
       setAuthCodeError(false);
+      setPendingAuthCode(null);
       setSelectedClient(null);
       setActiveLoanDetails(null);
       form.reset({
@@ -523,6 +525,7 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
       setShowAuthCodeModal(false);
       setAuthCodeInput('');
       setAuthCodeError(false);
+      setPendingAuthCode(null);
       setSelectedClient(null);
       setActiveLoanDetails(null);
     }
@@ -856,8 +859,9 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
     }
   };
   
-    const proceedWithSubmission = async (values: LoanFormValues) => {
+    const proceedWithSubmission = async (values: LoanFormValues, authCodeUsed?: string | null) => {
         setIsSubmitting(true);
+        const effectiveAuthCode = authCodeUsed !== undefined ? authCodeUsed : pendingAuthCode;
         try {
             const cleanedGuarantee = cleanGuaranteeValue(values.guarantee);
             const cleanedEndorsementGuarantee = cleanGuaranteeValue(values.endorsementGuarantee);
@@ -903,14 +907,22 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
                 clientData.id = selectedClient.id;
             }
 
+            const authorizationData = effectiveAuthCode ? {
+                code: effectiveAuthCode,
+                userId: appUser?.id || '',
+                userName: appUser?.username || 'Usuario',
+            } : undefined;
+
             const result = await createLoanAction({
                 promotoraId: values.promotoraId,
                 loanPlanId: values.loanPlanId,
                 amount: values.amount,
                 client: clientData,
+                authorization: authorizationData,
             });
 
             if (result.success) {
+                setPendingAuthCode(null);
                 const plan = loanPlans.find(p => p.id === values.loanPlanId);
                 const weeklyPayment = plan ? (Number(values.amount) / 1000) * plan.weeklyPaymentRate : 0;
                 const ratePerThousand = plan ? plan.weeklyPaymentRate : 0;
@@ -1114,13 +1126,21 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
 
   const handleConfirmAuthorization = () => {
     const correctCode = realtimeData?.config?.guarantorAuthCode;
-    if (authCodeInput.trim() === correctCode) {
+    const enteredCode = authCodeInput.trim();
+    if (enteredCode === correctCode) {
       setShowAuthCodeModal(false);
       setShowGuarantorLimitAlert(false);
       setAuthCodeInput('');
       setAuthCodeError(false);
+      setPendingAuthCode(enteredCode);
       if (formValues) {
-        proceedWithSubmission(formValues);
+        const missing = checkIsIncomplete(formValues);
+        if (missing.length > 0) {
+          setMissingFields(missing);
+          setShowIncompleteModal(true);
+          return;
+        }
+        proceedWithSubmission(formValues, enteredCode);
       }
     } else {
       setAuthCodeError(true);
@@ -2189,7 +2209,7 @@ export function CreateLoanDialog({ clients, loanPlans, loans, plazas, localidade
                     e.preventDefault();
                     if (formValues && !isSubmitting) {
                       setShowIncompleteModal(false);
-                      await proceedWithSubmission(formValues);
+                      await proceedWithSubmission(formValues, pendingAuthCode);
                     }
                   }} 
                   disabled={isSubmitting}

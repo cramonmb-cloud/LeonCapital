@@ -289,7 +289,7 @@ export function DebesClientPage({
         const recuperado = local.recuperado !== undefined ? local.recuperado : computed.recuperado;
         const efectivo = local.efectivo !== undefined ? local.efectivo : Math.max(0, debeEntregar - falla);
         const total = efectivo + recuperado;
-        const diferencia = efectivo - debeEntregar;
+        const diferencia = total - debeEntregar;
         const deuda = local.deuda !== undefined ? local.deuda : Math.max(0, debeEntregar - efectivo);
         const venta = local.venta !== undefined ? local.venta : computed.venta;
         const comicionPercent = local.comicionPercent !== undefined ? local.comicionPercent : (computed.comicionPercent ?? 0);
@@ -330,9 +330,6 @@ export function DebesClientPage({
         l.promotoraId === pId && 
         parseLocalDate(l.startDate) >= new Date('2026-03-01T00:00:00')
       );
-      if (promotora.name.toLowerCase().includes('alicia')) {
-        console.log("ALICIA pLoans (after 2026-03-01):", pLoans.map(l => ({ id: l.id, status: l.status, startDate: l.startDate, amount: l.amount })));
-      }
       
       if (pLoans.length === 0) {
         return {
@@ -440,18 +437,19 @@ export function DebesClientPage({
             const pCollectionDate = p.date ? parseLocalDate(p.date) : (p.registeredWeekDate ? parseLocalDate(p.registeredWeekDate) : null);
             const regTime = pCollectionDate ? getSaturdayOfWeek(pCollectionDate).getTime() : 0;
 
-            // Si es un abono que ingresó como adelanto cubriendo esta semana (Abono Saliente),
-            // no es cobranza física recaudada en la semana en curso
-            if (p.isAdvance || p.paymentType === 'adelanto_entrante' || (regTime < weekTime && (p.weekNumber && p.weekNumber === targetWeekNumber))) {
+            // El abono debe haberse recaudado físicamente en la semana operativa evaluada
+            if (regTime !== weekTime) {
+              return false;
+            }
+
+            if (p.isAdvance || p.paymentType === 'adelanto_entrante') {
               return false;
             }
 
             if (p.weekNumber && p.weekNumber > 0) {
               return p.weekNumber === targetWeekNumber;
             }
-            const paymentDate = parseLocalDate(p.date);
-            const paymentSaturday = getSaturdayOfWeek(paymentDate);
-            return paymentSaturday.getTime() === weekTime;
+            return true;
           });
           // Regla de Negocio CrediControl:
           // Solo se registra Falla si se capturó MANUALMENTE un abono parcial o en $0.
@@ -593,7 +591,7 @@ export function DebesClientPage({
         }
 
         const total = efectivo + recuperado;
-        const diferencia = efectivo - debeEntregar;
+        const diferencia = total - debeEntregar;
         const defaultDeudaCalc = Math.max(0, debeEntregar - efectivo);
         const deuda = local.deuda !== undefined ? local.deuda : (saved?.deuda !== undefined ? saved.deuda : defaultDeudaCalc);
 
@@ -711,47 +709,48 @@ export function DebesClientPage({
   }, [rows]);
 
   const handleCellChange = (pId: string, field: keyof PromotoraSettlement, value: number, debeEntregar: number) => {
+    const safeValue = isNaN(value) ? 0 : Math.max(0, value);
     setOverrides(prev => {
       const currentOverrides = prev[pId] || {};
       const updatedOverrides: Partial<PromotoraSettlement> = {
         ...currentOverrides,
-        [field]: value,
+        [field]: safeValue,
       };
 
       if (field === 'falla') {
-        updatedOverrides.efectivo = Math.max(0, debeEntregar - value);
+        updatedOverrides.efectivo = Math.max(0, debeEntregar - safeValue);
       } else if (field === 'efectivo') {
-        updatedOverrides.falla = Math.max(0, debeEntregar - value);
+        updatedOverrides.falla = Math.max(0, debeEntregar - safeValue);
       } else if (field === 'debeEntregar') {
         const currentFalla = updatedOverrides.falla !== undefined ? updatedOverrides.falla : (rows.find(r => r.promotoraId === pId)?.falla || 0);
-        updatedOverrides.efectivo = Math.max(0, value - currentFalla);
+        updatedOverrides.efectivo = Math.max(0, safeValue - currentFalla);
       }
 
       if (field === 'comicionPercent') {
         const rowData = rows.find(r => r.promotoraId === pId);
         const venta = rowData ? rowData.venta : 0;
-        updatedOverrides.comicion = Math.round(venta * (value / 100));
+        updatedOverrides.comicion = Math.round(venta * (safeValue / 100));
       }
       
       if (field === 'comicion') {
         const rowData = rows.find(r => r.promotoraId === pId);
         const venta = rowData ? rowData.venta : 0;
         if (venta > 0) {
-          updatedOverrides.comicionPercent = Number(((value / venta) * 100).toFixed(1));
+          updatedOverrides.comicionPercent = Number(((safeValue / venta) * 100).toFixed(1));
         }
       }
 
       if (field === 'supervisionPercent') {
         const rowData = rows.find(r => r.promotoraId === pId);
         const venta = rowData ? rowData.venta : 0;
-        updatedOverrides.supervision = Math.round(venta * (value / 100));
+        updatedOverrides.supervision = Math.round(venta * (safeValue / 100));
       }
 
       if (field === 'supervision') {
         const rowData = rows.find(r => r.promotoraId === pId);
         const venta = rowData ? rowData.venta : 0;
         if (venta > 0) {
-          updatedOverrides.supervisionPercent = Number(((value / venta) * 100).toFixed(1));
+          updatedOverrides.supervisionPercent = Number(((safeValue / venta) * 100).toFixed(1));
         }
       }
 
@@ -784,6 +783,7 @@ export function DebesClientPage({
         abonoSemanal: row.abonoSemanal,
         adelEnt: row.adelEnt,
         adelSal: row.adelSal,
+        semExt: row.semExt || 0,
       };
 
       const result = await saveSettlementAction(settlementData);
