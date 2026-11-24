@@ -870,7 +870,7 @@ export function AguinaldosClientPage({
       doc.setFontSize(8);
       doc.setTextColor(100, 116, 139);
       doc.text(
-        `Período: ${startDate} al ${endDate} | Tasa base: $${globalBonoRatePerThousand.toFixed(2)} por cada $1,000 | Plaza: ${selectedPlaza === 'ALL' ? 'Consolidado General' : (plazaMap.get(selectedPlaza)?.name || selectedPlaza)}`,
+        `Período: ${startDate} al ${endDate} | Plaza: ${selectedPlaza === 'ALL' ? 'Consolidado General' : (plazaMap.get(selectedPlaza)?.name || selectedPlaza)}`,
         marginX,
         64
       );
@@ -947,38 +947,6 @@ export function AguinaldosClientPage({
           }
         }
       });
-
-      // Signatures
-      const finalY = (doc as any).lastAutoTable?.finalY;
-      if (finalY && finalY + 50 <= pageHeight - 35) {
-        const sigY = finalY + 32;
-        const sigWidth = 140;
-        const availableWidth = pageWidth - (marginX * 2);
-        const sigGap = (availableWidth - (3 * sigWidth)) / 2;
-
-        const signatures = [
-          { title: 'ELABORÓ / SUPERVISIÓN', desc: 'Firma y Fecha' },
-          { title: 'REVISÓ / AUDITORÍA', desc: 'Verificación de Bonos' },
-          { title: 'AUTORIZÓ / DIRECCIÓN', desc: 'Aprobación de Pago' }
-        ];
-
-        signatures.forEach((sig, idx) => {
-          const sx = marginX + idx * (sigWidth + sigGap);
-          doc.setDrawColor(100, 116, 139);
-          doc.setLineWidth(0.75);
-          doc.line(sx, sigY, sx + sigWidth, sigY);
-
-          doc.setFont('helvetica', 'bold');
-          doc.setFontSize(6.5);
-          doc.setTextColor(30, 41, 59);
-          doc.text(sig.title, sx + (sigWidth / 2), sigY + 8.5, { align: 'center' });
-
-          doc.setFont('helvetica', 'normal');
-          doc.setFontSize(5.5);
-          doc.setTextColor(100, 116, 139);
-          doc.text(sig.desc, sx + (sigWidth / 2), sigY + 16, { align: 'center' });
-        });
-      }
 
       // Page numbers
       const totalPages = doc.getNumberOfPages();
